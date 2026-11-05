@@ -59,6 +59,7 @@ button{padding:7px 12px;border:1px solid var(--line);border-radius:6px;backgroun
 button.danger{color:var(--bad)}button:disabled{opacity:.45;cursor:default}
 a{color:var(--run);text-decoration:none;cursor:pointer}
 .card.mini{padding:6px 10px}code{font:12px Consolas,ui-monospace,monospace;background:var(--bar);padding:0 4px;border-radius:3px}
+.cmd{display:flex;align-items:center;gap:10px;background:var(--code);border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin:8px 0;cursor:pointer}.cmd:hover{border-color:var(--run)}.cmd code{background:none;padding:0;flex:1;word-break:break-all}
 .tag{font-size:11px;padding:1px 6px;border-radius:4px;background:var(--bar);color:var(--mute);white-space:nowrap}
 @media (max-width:900px){.grid2{grid-template-columns:1fr}}
 @media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:auto 1fr}#side{max-height:34vh;border-right:0;border-bottom:1px solid var(--line)}.pad{padding:12px 16px}#bar{padding:10px 16px;flex-wrap:wrap}}
@@ -218,6 +219,50 @@ async function pollLog() {
 }
 async function post(what, body) { const r = await fetch(`/api/lane/${encodeURIComponent(route.id)}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); return r.json(); }
 
+// First-run onboarding panel: shown only while there are no plans and no lanes yet.
+// /api/doctor is cached for 30 s (the poll runs every 2.5 s) and concurrent calls share one request.
+let doctorCache = null, doctorAt = 0, doctorPromise = null;
+async function fetchDoctor() {
+  if (doctorCache && Date.now() - doctorAt < 30000) return doctorCache;
+  if (!doctorPromise) doctorPromise = (async () => {
+    try { doctorCache = await (await fetch('/api/doctor')).json(); } catch {}
+    doctorAt = Date.now(); doctorPromise = null;
+  })();
+  await doctorPromise;
+  return doctorCache;
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch {}
+  try { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch { return false; }
+}
+async function renderOnboard() {
+  const d = await fetchDoctor();
+  const rows = Array.isArray(d?.checks) ? d.checks : [];
+  const chip = (s) => `<span class="badge ${s === 'ok' ? 'h-done' : s === 'warn' ? 'h-needs-review' : 'h-failed'}">${esc(s)}</span>`;
+  const mark = (s) => `<span class="ic" style="color:${s === 'ok' ? 'var(--ok)' : s === 'warn' ? 'var(--warn)' : 'var(--bad)'}">${s === 'ok' ? '&#10003;' : s === 'warn' ? '!' : '&#10007;'}</span>`;
+  const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0"><span class="row" style="justify-content:flex-start;gap:8px"><b>${esc(c.name)}</b>${chip(c.status)}</span>${c.detail ? `<div class="small">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(c.fix)}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
+  const harnesses = [['kiro', 'Kiro'], ['cursor', 'Cursor'], ['claude', 'Claude Code'], ['codex', 'Codex'], ['vscode', 'VS Code']];
+  $('view').innerHTML = `<section id="onboard"><div class="pad">
+    <h2 class="title">Set up CodeArts lanes</h2>
+    <p class="goal">One-time setup: CodeArts credentials, a git repo, a trusted folder and your harness (Kiro, Cursor, Claude Code, Codex or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
+    <div class="box"><h4>Environment (doctor)</h4>${doctorRows}</div>
+    <div class="box"><h4>Fix everything in one go</h4>
+      <div class="cmd" id="onboard-cmd" title="click to copy"><code>ca onboard --yes</code><button id="onboard-copy">Copy</button></div>
+      <div class="small">Run it in the repo you want to use. Without --yes it asks before each fix.</div></div>
+    <div class="grid2">
+      <div class="box"><h4>Or set up one harness</h4><ul class="plain">${harnesses.map(([h, n]) => `<li><span style="min-width:0"><code>ca setup ${h} .</code></span><span class="small">${n}</span></li>`).join('')}</ul></div>
+      <div class="box"><h4>Your first lane</h4><ul class="plain">
+        <li><span class="ic" style="color:var(--run)">1</span><span style="min-width:0"><code>ca init . my-task --goal "one sentence outcome"</code><div class="small">writes tasks/my-task.md</div></span></li>
+        <li><span class="ic" style="color:var(--run)">2</span><span style="min-width:0">edit the brief: numbered steps and CHECK lines</span></li>
+        <li><span class="ic" style="color:var(--run)">3</span><span style="min-width:0"><code>ca lane . my-task --detach</code><div class="small">starts the builder in the background</div></span></li>
+        <li><span class="ic" style="color:var(--run)">4</span><span style="min-width:0"><code>ca wait &lt;lane&gt;</code><div class="small">blocks until it ends and prints CA_RESULT</div></span></li>
+      </ul></div>
+    </div></div></section>`;
+  const copy = async () => { $('onboard-copy').textContent = (await copyText('ca onboard --yes')) ? 'Copied' : 'Copy failed'; setTimeout(() => { const b = $('onboard-copy'); if (b) b.textContent = 'Copy'; }, 1500); };
+  $('onboard-cmd').onclick = copy;
+  $('onboard-copy').onclick = (e) => { e.stopPropagation(); copy(); };
+}
+
 function go(h) { location.hash = h; }
 function parseRoute() { const [k, ...r] = location.hash.slice(1).split('/'); return { kind: k, id: decodeURIComponent(r.join('/')) }; }
 async function refresh(full) {
@@ -231,7 +276,7 @@ async function refresh(full) {
   else if (route.kind === 'lane') {
     try { const d = await (await fetch(`/api/lane/${encodeURIComponent(route.id)}/detail`)).json(); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
     catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-  } else if (!plans.length && !lanes.length) $('view').innerHTML = '<div class="empty">No plans or lanes yet. Start one with <code>ca lane &lt;repo&gt; &lt;task&gt;</code>.</div>';
+  }   else if (!plans.length && !lanes.length) await renderOnboard();
 }
 window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; refresh(true); };
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
