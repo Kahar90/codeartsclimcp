@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>office sprites preview</title>
+<style>
+  body { margin: 0; background: #10141c; color: #dfe6f2; font-family: system-ui, "Segoe UI", sans-serif; }
+  header { padding: 20px 24px 4px; }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; letter-spacing: 0.04em; }
+  .hint { font-size: 12px; color: #8b96ab; }
+  .bar { display: flex; align-items: center; gap: 10px; padding: 10px 24px 16px; }
+  .bar label { font-size: 13px; color: #aeb9cf; }
+  input[type="range"] { width: 280px; accent-color: #7fb2ff; }
+  #hueval { font-size: 13px; color: #aeb9cf; font-variant-numeric: tabular-nums; min-width: 32px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; padding: 0 24px 32px; }
+  .cell { background: radial-gradient(circle at 50% 84%, rgba(127, 178, 255, 0.13), rgba(16, 20, 28, 0) 68%), #151a24; border: 1px solid #232b3a; border-radius: 12px; padding: 12px 8px 10px; text-align: center; }
+  .cell svg { display: block; margin: 0 auto; }
+  .label { margin-top: 8px; font-size: 12px; color: #c6cfdf; }
+  .label .working { color: #7fd0a2; }
+  .label .idle { color: #93a0b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>office sprites</h1>
+  <div class="hint">every role in both states, drawn live by office-sprites.js</div>
+</header>
+<div class="bar">
+  <label for="hue">hue</label>
+  <input id="hue" type="range" min="0" max="360" value="210">
+  <span id="hueval">210</span>
+</div>
+<main class="grid" id="grid"></main>
+<script src="office-sprites.js"></script>
+<script>
+  var grid = document.getElementById('grid');
+  var hue = document.getElementById('hue');
+  var hueval = document.getElementById('hueval');
+  function render() {
+    var h = Number(hue.value);
+    hueval.textContent = h;
+    var html = '';
+    for (var i = 0; i < OfficeSprites.roles.length; i++) {
+      var role = OfficeSprites.roles[i];
+      for (var s = 0; s < 2; s++) {
+        var state = s === 0 ? 'working' : 'idle';
+        html += '<section class="cell">' + OfficeSprites.draw(role, { state: state, hue: h })
+          + '<div class="label">' + role + ' <span class="' + state + '">' + state + '</span></div></section>';
+      }
+    }
+    grid.innerHTML = html;
+  }
+  hue.addEventListener('input', render);
+  render();
+</script>
+</body>
+</html>
