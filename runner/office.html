@@ -212,6 +212,7 @@ const healthText = (h) => String(h || "").split("(")[0].trim() || "planned";
 const isWorking = (n) => n.kind === "lane" && healthKey(n.health) === "run";
 const roleOf = (n) => n.kind === "lead" ? "lead" : (n.health === "planned" || n.phase === "planned") ? "idle" : n.phase === "review" ? "reviewer" : n.phase === "fix" ? "fixer" : "builder";
 const tokStr = (t) => { const n = t ? (t.input || 0) + (t.output || 0) + (t.reasoning || 0) : 0; return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "K tok" : n + " tok"; };
+const durStr = (sec) => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; if (h) return `${h}h ${m}m`; if (m) return s ? `${m}m ${s}s` : `${m}m`; return `${s}s`; };
 const commitsOf = (l) => parseInt(String(l.commits || "0").split("/")[0], 10) || 0;
 const shortModel = (m) => String(m || "").replace(/^huaweicloud-maas\//, "codearts/");
 function hash(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 9973; return h; }
@@ -926,14 +927,15 @@ function isComplete() {
 function countUp(sec) {
   const els = [...sec.querySelectorAll("[data-count]")];
   if (!els.length || animState.reducedMotion) return;
-  for (const el of els) el.textContent = "0";
+  const fmtOf = (el) => el.dataset.fmt === "dur" ? durStr : String;
+  for (const el of els) el.textContent = fmtOf(el)(0);
   const gen = ++countGen;
   const t0 = performance.now();
   const step = (t) => {
     if (gen !== countGen) return;
     const p = Math.min(1, (t - t0) / 1200);
     const e = 1 - Math.pow(1 - p, 3);
-    for (const el of els) el.textContent = String(Math.round((parseInt(el.getAttribute("data-count"), 10) || 0) * e));
+    for (const el of els) el.textContent = fmtOf(el)(Math.round((parseInt(el.getAttribute("data-count"), 10) || 0) * e));
     if (p < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -950,7 +952,7 @@ function renderComplete() {
   if (sig === completeSig && !sec.hidden) return;
   completeSig = sig;
   sec.innerHTML = `<h2><span class="okball">\u2713</span>All tasks complete</h2>
-    <p class="csum"><b class="num" data-count="${ls.length}">${ls.length}</b> lane${ls.length === 1 ? "" : "s"} delivered <b class="num" data-count="${commits}">${commits}</b> commit${commits === 1 ? "" : "s"} in <b class="num" data-count="${secs}">${secs}</b> s of lane time.</p>
+    <p class="csum"><b class="num" data-count="${ls.length}">${ls.length}</b> lane${ls.length === 1 ? "" : "s"} delivered <b class="num" data-count="${commits}">${commits}</b> commit${commits === 1 ? "" : "s"} in <b class="num" data-count="${secs}" data-fmt="dur">${durStr(secs)}</b> of lane time.</p>
     <table><thead><tr><th>Lane</th><th>Steps</th><th>Commits</th><th>Tokens</th><th>Verdict</th></tr></thead><tbody>
     ${ls.map((l, i) => `<tr style="animation-delay:${80 + i * 40}ms"><td>${esc(l.task || l.id)}</td><td>${(l.progress && l.progress.done) || 0} / ${(l.progress && l.progress.total) || 0}</td><td>${commitsOf(l)}</td><td>${tokStr(l.tokens)}</td><td>${esc(l.verdict || "")}</td></tr>`).join("")}
     </tbody></table>`;
