@@ -82,6 +82,10 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .phalo{fill:#2dd4a0;opacity:.16}
 .phead{fill:#d7ffe9;opacity:.95}
 .ptrail{fill:#2dd4a0;opacity:.5}
+.fx .ripple{fill:none;stroke:#7de8c0;stroke-width:2.5;transform-box:fill-box;transform-origin:center}
+.burst line{stroke:#8fe6b8;stroke-width:2.5;stroke-linecap:round}
+@keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-5px)}30%{transform:translateX(5px)}45%{transform:translateX(-5px)}60%{transform:translateX(5px)}75%{transform:translateX(-4px)}90%{transform:translateX(4px)}}
+.lift.shake,.char.shake{animation:shake .3s linear}
 .platetxt{fill:#c6cad8;font-size:12px;font-variant:small-caps;letter-spacing:.05em}
 .card{position:absolute;width:300px;max-width:calc(100% - 12px);max-height:calc(100% - 12px);overflow:auto;background:#1d1d24;border:1px solid #3d3d49;border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:12px;z-index:6}
 .card.tail-left::before,.card.tail-right::before{content:"";position:absolute;top:22px;width:12px;height:12px;background:#1d1d24;border-left:1px solid #3d3d49;border-bottom:1px solid #3d3d49}
@@ -104,6 +108,8 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .stepic svg{width:100%;height:100%;display:block;opacity:0}
 .s-done .stepic{border-color:#4cc27e;color:#4cc27e}
 .s-done .stepic svg{opacity:1}
+.s-done .stepic .ck{stroke:#4cc27e;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:15;animation:ckdraw .45s var(--ease-out)}
+@keyframes ckdraw{from{stroke-dashoffset:15}to{stroke-dashoffset:0}}
 .s-current .stepic{border-color:#33333f;border-top-color:#2dd4a0;animation:spin 1s linear infinite}
 .s-pending .stepic{border-color:#4a4a58}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -397,6 +403,7 @@ function updateNode(n, g) {
   if (g.__hk !== hk) {
     g.__hk = hk;
     for (const k of ["run", "warn", "bad", "done", "plan", "lead"]) g.classList.toggle("h-" + k, k === hk);
+    crossfadeGlow(g, hk);
   }
   if (g.__task !== n.task) { g.__task = n.task; g.setAttribute("aria-label", n.task); }
   const name = plateName(n.task);
@@ -565,8 +572,24 @@ function updateChar(n, el) {
   positionChar(n, el);
 }
 
+function crossfadeGlow(g, hk) {
+  const incoming = g.__glowSide === "a" ? g.querySelector(".glowgrp.gb") : g.querySelector(".glowgrp.ga");
+  const outgoing = g.__glowSide === "a" ? g.querySelector(".glowgrp.ga") : g.querySelector(".glowgrp.gb");
+  incoming.querySelector(".glow").setAttribute("class", "glow g-" + hk);
+  incoming.style.opacity = "1";
+  outgoing.style.opacity = "0";
+  g.__glowSide = g.__glowSide === "a" ? "b" : "a";
+}
+
 function crossfadeSprite(el, svg) {
-  el.querySelector(".cfloat").innerHTML = svg;
+  const cf = el.querySelector(".cfloat");
+  const old = cf.firstElementChild;
+  if (!old || animState.reducedMotion) { cf.innerHTML = svg; return; }
+  cf.insertAdjacentHTML("beforeend", svg);
+  const nu = cf.lastElementChild;
+  const oa = old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: EASE_OUT, fill: "forwards" });
+  const na = nu.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: EASE_OUT, fill: "forwards" });
+  oa.onfinish = () => { old.remove(); na.cancel(); };
 }
 
 function sceneToClient(x, y) {
@@ -891,14 +914,92 @@ function renderComplete() {
   sec.hidden = false;
 }
 
+function logEffect(name) {
+  animState.effects.push(name);
+  if (animState.effects.length > 20) animState.effects.shift();
+  animState.lastEffect = name;
+}
+
+function spawnRipple(n) {
+  const g = nodeEls.get(n.id);
+  if (!g) return;
+  const e = document.createElementNS(NS, "ellipse");
+  e.setAttribute("class", "ripple");
+  e.setAttribute("rx", layout.RX);
+  e.setAttribute("ry", layout.RY);
+  g.querySelector(".fx").appendChild(e);
+  const a = animState.reducedMotion
+    ? e.animate([{ opacity: 0.6 }, { opacity: 0 }], { duration: 150, easing: EASE_OUT, fill: "forwards" })
+    : e.animate([{ transform: "scale(1)", opacity: 0.75 }, { transform: "scale(1.6)", opacity: 0 }], { duration: 1000, easing: EASE_OUT });
+  a.onfinish = () => e.remove();
+}
+
+function spawnBurst(n) {
+  const g = nodeEls.get(n.id);
+  if (!g || animState.reducedMotion) return;
+  const grp = document.createElementNS(NS, "g");
+  grp.setAttribute("class", "burst");
+  const sq = layout.RY / layout.RX;
+  for (let i = 0; i < 8; i++) {
+    const ang = (i * Math.PI) / 4;
+    const c = Math.cos(ang), s = Math.sin(ang);
+    const r1 = layout.RX * 0.5, r2 = layout.RX * 0.95;
+    const ln = document.createElementNS(NS, "line");
+    ln.setAttribute("x1", (c * r1).toFixed(1)); ln.setAttribute("y1", (s * r1 * sq).toFixed(1));
+    ln.setAttribute("x2", (c * r2).toFixed(1)); ln.setAttribute("y2", (s * r2 * sq).toFixed(1));
+    const len = Math.hypot(c * (r2 - r1), s * (r2 - r1) * sq);
+    ln.style.strokeDasharray = len.toFixed(1);
+    grp.appendChild(ln);
+    ln.animate([{ strokeDashoffset: len.toFixed(1) }, { strokeDashoffset: 0 }], { duration: 240, delay: i * 25, easing: EASE_OUT, fill: "backwards" });
+  }
+  g.querySelector(".fx").appendChild(grp);
+  const ga = grp.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 650, delay: 300, easing: EASE_IN, fill: "forwards" });
+  ga.onfinish = () => grp.remove();
+}
+
+function shakeNode(n) {
+  if (animState.reducedMotion) return;
+  const g = nodeEls.get(n.id);
+  const targets = [];
+  if (g) targets.push(g.querySelector(".lift"));
+  const el = charEls.get(n.id);
+  if (el) targets.push(el);
+  for (const t of targets) {
+    if (!t) continue;
+    t.classList.remove("shake");
+    try { t.getBBox ? t.getBBox() : t.offsetWidth; } catch (e) {}
+    t.classList.add("shake");
+    t.addEventListener("animationend", function h(e) {
+      if (e.target !== t || e.animationName !== "shake") return;
+      t.classList.remove("shake");
+      t.removeEventListener("animationend", h);
+    });
+  }
+}
+
+function flashGlow(n) {
+  const g = nodeEls.get(n.id);
+  if (!g || animState.reducedMotion) return;
+  const grp = g.querySelector(g.__glowSide === "a" ? ".glowgrp.ga" : ".glowgrp.gb");
+  if (grp) grp.animate([{ opacity: 1 }, { opacity: 0.12 }, { opacity: 1 }, { opacity: 0.25 }, { opacity: 1 }], { duration: 480, easing: EASE_OUT });
+}
+
 function diffEffects() {
   for (const n of nodes) {
+    const hk = n.kind === "lead" ? "lead" : healthKey(n.health);
+    const result = n.lane ? String(n.lane.result || "") : "";
+    const prev = prevById.get(n.id);
+    if (prevInit && prev && n.kind === "lane") {
+      if (n.steps.done > prev.stepsDone) { logEffect("step-done:" + n.id); spawnRipple(n); }
+      const doneNow = result === "done" || hk === "done";
+      if (doneNow && !prev.doneFired) { logEffect("lane-done:" + n.id); spawnBurst(n); }
+      else if (hk === "bad" && prev.hk !== "bad") { logEffect("lane-failed:" + n.id); shakeNode(n); flashGlow(n); }
+      else if (hk === "warn" && prev.hk === "run" && /stopped|killed/i.test(String(n.health || ""))) { logEffect("lane-stopped:" + n.id); shakeNode(n); flashGlow(n); }
+    }
     prevById.set(n.id, {
-      health: n.kind === "lead" ? "lead" : String(n.health || "planned"),
-      hk: n.kind === "lead" ? "lead" : healthKey(n.health),
+      hk,
       stepsDone: n.steps.done,
-      working: isWorking(n),
-      result: n.lane ? String(n.lane.result || "") : "",
+      doneFired: prev ? (prev.doneFired || result === "done" || hk === "done") : (result === "done" || hk === "done"),
     });
   }
   for (const id of [...prevById.keys()]) if (!nodes.some((n) => n.id === id)) prevById.delete(id);
@@ -976,6 +1077,36 @@ async function tick() {
   render();
 }
 
+function demoAdvance(id) {
+  if (mode !== "demo") return false;
+  const st = demoState[id];
+  if (!st || st.result === "done" || st.health === "failed" || st.health === "stopped") return false;
+  const b = DEMO_BASE[id];
+  st.dn = Math.min(b.texts.length, st.dn + 1);
+  if (st.dn >= b.texts.length) {
+    st.cur = 0;
+    st.health = "done";
+    st.running = false;
+    st.result = "done";
+    st.verdict = "ok";
+  } else {
+    st.cur = Math.min(b.texts.length, st.dn + 1);
+  }
+  render();
+  return true;
+}
+
+function demoFail(id) {
+  if (mode !== "demo") return false;
+  const st = demoState[id];
+  if (!st || st.result === "done" || st.health === "failed" || st.health === "stopped") return false;
+  st.health = "failed";
+  st.running = false;
+  st.result = "failed";
+  render();
+  return true;
+}
+
 window.__office = {
   state() {
     const ns = nodes.map((n) => {
@@ -998,6 +1129,8 @@ window.__office = {
     };
   },
   select(id) { if (nodes.some((n) => n.id === id)) openCard(id); },
+  demoAdvance,
+  demoFail,
 };
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
