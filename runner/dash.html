@@ -60,7 +60,7 @@ button.danger{color:var(--bad)}button:disabled{opacity:.45;cursor:default}
 a{color:var(--run);text-decoration:none;cursor:pointer}
 .card.mini{padding:6px 10px}code{font:12px Consolas,ui-monospace,monospace;background:var(--bar);padding:0 4px;border-radius:3px}
 .cmd{display:flex;align-items:center;gap:10px;background:var(--code);border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin:8px 0;cursor:pointer}.cmd:hover{border-color:var(--run)}.cmd code{background:none;padding:0;flex:1;word-break:break-all}
-.tag{font-size:11px;padding:1px 6px;border-radius:4px;background:var(--bar);color:var(--mute);white-space:nowrap}
+.tag{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;font-size:11px;padding:1px 6px;border-radius:4px;background:var(--bar);color:var(--mute);white-space:nowrap}
 @media (max-width:900px){.grid2{grid-template-columns:1fr}}
 @media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:auto 1fr}#side{max-height:34vh;border-right:0;border-bottom:1px solid var(--line)}.pad{padding:12px 16px}#bar{padding:10px 16px;flex-wrap:wrap}}
 </style>
