@@ -21,6 +21,7 @@
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
 //        ca setup <harness> [repo]   write MCP + rules config for claude|kiro|cursor|codex|vscode
+//        ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]   guided first-run setup
 //        ca mcp                            run the MCP server (runner/mcp.mjs), if installed
 //        ca tail <lane> [-f] [-n N]        readable transcript
 //        ca steer <lane> <message>         queue a message into the running session
@@ -45,6 +46,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
 const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
+// CodeArts settings.json (security.trustedFolders). CA_SETTINGS overrides the location for tests.
+const SETTINGS = process.env.CA_SETTINGS || path.join(CA_HOME, 'cli-data', 'settings.json');
 const EXE = process.env.CODEARTS_EXE || path.join(CA_HOME, 'installers', 'bin', 'codearts.exe');
 const REG = process.env.CA_REGISTRY || path.join(CA_HOME, 'lanes');
 const num = (k, d) => (process.env[k] ? Number(process.env[k]) : d);
@@ -113,7 +116,7 @@ const maasEnv = () => {
 function caEnv(extra = {}) {
   return {
     ...process.env, SHELL: workerShell(),
-    SCENARIO: 'codeartsdoer', KERNEL_DATA_DIR: path.join(CA_HOME, 'cli-data'), KERNEL_STATE_DIR: path.join(CA_HOME, 'state'),
+    SCENARIO: 'codeartsdoer', KERNEL_DATA_DIR: path.dirname(SETTINGS), KERNEL_STATE_DIR: path.join(CA_HOME, 'state'),
     KERNEL_CONFIG_DIR: CA_HOME, OPENCODE_CONFIG: path.join(CA_HOME, 'codearts_cli.json'),
     OPENCODE_CONFIG_FILE: 'codearts_cli.json,codearts_cli.jsonc', OPENCODE_CHANNEL: 'latest', PLUGIN_ENV: 'hc',
     OPENCODE_DISABLE_MODELS_FETCH: '1', OPENCODE_DISABLE_AUTOUPDATE: 'true', CODEARTS_DISABLE_AUTO_UPDATE: 'true',
@@ -728,6 +731,14 @@ async function cmdSetup(args) {
   if (typeof mod.default !== 'function') die('setup.mjs has no default export', 2);
   await mod.default(args);
 }
+// `ca onboard ...`: guided first-run setup, implemented in runner/onboard.mjs.
+async function cmdOnboard(args) {
+  const f = path.join(HERE, 'onboard.mjs');
+  if (!fs.existsSync(f)) die('onboard not installed', 2);
+  const mod = await import(pathToFileURL(f).href);
+  if (typeof mod.default !== 'function') die('onboard.mjs has no default export', 2);
+  await mod.default(args);
+}
 // Exit code of a finished lane, from the usage table: 0 done (review ready or skipped),
 // 1 failed/stopped/killed, 3 missing credentials, 4 needs review.
 function laneExit(s) {
@@ -800,9 +811,9 @@ function cmdInit(args) {
   console.log(`      ca wait ${laneId(repo, task)}`);
 }
 // Preflight for engineers and agents: every row is ok | warn | fail, secrets are never printed.
-async function cmdDoctor(args) {
-  const asJson = args.includes('--json');
-  const repo = path.resolve(args.filter((a) => !a.startsWith('--'))[0] || process.cwd());
+// Shared by `ca doctor` and the dashboard's GET /api/doctor (same function, no subprocess).
+async function doctorData(repoArg) {
+  const repo = path.resolve(repoArg || process.cwd());
   const rows = [];
   const add = (name, status, detail, fix = '') => rows.push({ name, status, detail, fix });
 
@@ -827,7 +838,7 @@ async function cmdDoctor(args) {
   const g = spawnSync('git', ['--version'], { encoding: 'utf8' });
   add('git', g.status === 0 ? 'ok' : 'fail', oneLine(((g.stdout || '') + (g.stderr || '')).trim(), 120) || 'git not found', g.status === 0 ? '' : 'install git');
 
-  const settings = readJSON(path.join(CA_HOME, 'cli-data', 'settings.json')) || {};
+  const settings = readJSON(SETTINGS) || {};
   const trusted = [].concat(settings.security?.trustedFolders || []).map(String);
   const underTrusted = (p) => { const a = path.resolve(p).toLowerCase(); return trusted.some((f) => { const b = path.resolve(f).toLowerCase(); return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep); }); };
   add('trusted folder', underTrusted(repo) ? 'ok' : 'warn', underTrusted(repo) ? `${repo} is trusted` : `${repo} is not in security.trustedFolders`,
@@ -851,12 +862,17 @@ async function cmdDoctor(args) {
   add('chrome', chromePath ? 'ok' : 'warn', chromePath || 'not found (optional, used by browser checks)', chromePath ? '' : 'install Google Chrome for the office and sprite checks');
 
   const fails = rows.filter((r) => r.status === 'fail').length;
-  if (asJson) console.log(JSON.stringify({ checks: rows }, null, 2));
+  return { checks: rows, fails };
+}
+async function cmdDoctor(args) {
+  const asJson = args.includes('--json');
+  const { checks, fails } = await doctorData(args.filter((a) => !a.startsWith('--'))[0]);
+  if (asJson) console.log(JSON.stringify({ checks }, null, 2));
   else {
     const cols = ['name', 'status', 'detail', 'fix'];
-    const w = cols.map((c, i) => Math.max(['NAME', 'STATUS', 'DETAIL', 'FIX'][i].length, ...rows.map((r) => String(r[c]).length)));
+    const w = cols.map((c, i) => Math.max(['NAME', 'STATUS', 'DETAIL', 'FIX'][i].length, ...checks.map((r) => String(r[c]).length)));
     console.log(['NAME', 'STATUS', 'DETAIL', 'FIX'].map((h, i) => h.padEnd(w[i])).join('  '));
-    for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
+    for (const r of checks) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
     console.log(`doctor: ${fails ? `not ready (${fails} fail)` : 'ready'}`);
   }
   if (fails) process.exit(1);
@@ -964,6 +980,7 @@ function cmdDash(args) {
       if (u.pathname === '/office-sprites.js') { try { const js = fs.readFileSync(path.join(HERE, 'office-sprites.js'), 'utf8'); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }); return res.end(js); } catch { return json({ error: 'office-sprites.js not found' }, 404); } }
       if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
       if (u.pathname === '/api/plans') return json(plans().map(planView));
+      if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach)$/);
       if (m) {
         const l = findLane(decodeURIComponent(m[1]));
@@ -997,7 +1014,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => (args.includes('--detach') ? cmdDetach(...args.filter((a) => !a.startsWith('--'))) : runLane(args[0], args[1])), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
+const table = { lane: () => (args.includes('--detach') ? cmdDetach(...args.filter((a) => !a.startsWith('--'))) : runLane(args[0], args[1])), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
