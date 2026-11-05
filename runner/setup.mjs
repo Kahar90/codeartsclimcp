@@ -40,10 +40,32 @@ function snippet(mapKey, serverKey, value) {
   return JSON.stringify({ [mapKey]: { [serverKey]: value } }, null, 2) + '\n';
 }
 
+// Read-only lanes tools that are safe to auto-approve: they never start or change a lane.
+const AUTO_APPROVE = ['ca_doctor', 'ca_status', 'ca_summary', 'ca_tail', 'ca_wait'];
+
+function addJSON(plan, errors, file, mapKey, serverKey, value) {
+  try { plan.push({ path: file, content: mergeJSON(file, mapKey, serverKey, value) }); }
+  catch (e) {
+    if (e.parseFile) errors.push({ message: `${e.message}: expected JSON, got something else (comments?)`, snippet: snippet(mapKey, serverKey, value) });
+    else throw e;
+  }
+}
+
 // A plan entry is { path, content, action }. Built first, then either printed (--dry-run)
 // or written, so a failed build never half-writes a repo.
 function buildPlan(harness, repo, flags) {
-  return { plan: [], errors: [] };
+  const plan = [];
+  const errors = [];
+  const notes = [];
+
+  if (harness === 'kiro') {
+    addJSON(plan, errors, path.join(repo, '.kiro', 'settings', 'mcp.json'), 'mcpServers', 'codearts',
+      { ...SERVER, disabled: false, autoApprove: AUTO_APPROVE });
+    plan.push({ path: path.join(repo, '.kiro', 'steering', 'codearts-lanes.md'), content: `---\ninclusion: manual\n---\n${WORKFLOW}` });
+    notes.push('kiro: the steering file is manual. Reference it in chat with #codearts-lanes.');
+  }
+
+  return { plan, errors, notes };
 }
 
 export default async function setup(args) {
@@ -56,7 +78,7 @@ export default async function setup(args) {
     process.exitCode = 2;
     return;
   }
-  const { plan, errors } = buildPlan(harness, repo, { dryRun: flags.has('--dry-run'), write: flags.has('--write') });
+  const { plan, errors, notes } = buildPlan(harness, repo, { dryRun: flags.has('--dry-run'), write: flags.has('--write') });
 
   if (errors.length) {
     for (const e of errors) {
@@ -68,6 +90,7 @@ export default async function setup(args) {
 
   if (flags.has('--dry-run')) {
     for (const p of plan) process.stdout.write(`${p.path}\n${p.content}\n`);
+    for (const n of notes) process.stdout.write(`${n}\n`);
     return;
   }
   for (const p of plan) {
@@ -79,4 +102,5 @@ export default async function setup(args) {
     }
     process.stdout.write(`${!exists ? 'wrote' : prev === p.content ? 'unchanged' : 'updated'} ${p.path}\n`);
   }
+  for (const n of notes) process.stdout.write(`${n}\n`);
 }
