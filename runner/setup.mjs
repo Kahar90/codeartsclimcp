@@ -23,7 +23,9 @@ function usage() {
 function loadJSON(file) {
   if (!fs.existsSync(file)) return {};
   const text = fs.readFileSync(file, 'utf8');
-  try { return JSON.parse(text); } catch { const e = new Error(`cannot parse ${file}`); e.parseFile = file; throw e; }
+  let v; try { v = JSON.parse(text); } catch { v = undefined; }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) { const e = new Error(`cannot parse ${file} as a JSON object`); e.parseFile = file; throw e; }
+  return v;
 }
 
 // Merge one server entry into <mapKey>.<serverKey> of a JSON config, keeping every other
