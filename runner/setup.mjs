@@ -140,19 +140,23 @@ export default async function setup(args) {
     return;
   }
 
+  // Give every entry its action: wrote (new), updated (changed) or unchanged (identical).
+  for (const p of plan) {
+    const prev = fs.existsSync(p.path) ? fs.readFileSync(p.path, 'utf8') : null;
+    p.action = prev === null ? 'wrote' : prev === p.content ? 'unchanged' : 'updated';
+  }
+
   if (flags.has('--dry-run')) {
     for (const p of plan) process.stdout.write(`${p.path}\n${p.content}\n`);
     for (const n of notes) process.stdout.write(`${n}\n`);
     return;
   }
   for (const p of plan) {
-    const exists = fs.existsSync(p.path);
-    const prev = exists ? fs.readFileSync(p.path, 'utf8') : null;
-    if (!exists || prev !== p.content) {
+    if (p.action !== 'unchanged') {
       fs.mkdirSync(path.dirname(p.path), { recursive: true });
       fs.writeFileSync(p.path, p.content);
     }
-    process.stdout.write(`${!exists ? 'wrote' : prev === p.content ? 'unchanged' : 'updated'} ${p.path}\n`);
+    process.stdout.write(`${p.action} ${p.path}\n`);
   }
   for (const n of notes) process.stdout.write(`${n}\n`);
 }
