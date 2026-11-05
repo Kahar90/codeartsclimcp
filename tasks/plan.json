@@ -2,8 +2,8 @@
   "title": "CodeArts lanes: Office view, harness-neutral CLI, MCP, onboarding",
   "goal": "Make codearts-build pleasant, reliable and informative for engineers in their existing workflow, usable from Claude Code, Kiro, Cursor, Codex and VS Code, with easy onboarding and a polished live Office view.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "Wave 3 mcp + office-motion running; setup merged; onboard lane started.",
+  "status": "done",
+  "now": "Done: all lanes merged, 7 contract checks pass on main, installed into the live skill.",
   "waves": [
     {
       "name": "Wave 1: Office view",
@@ -25,16 +25,17 @@
       "lanes": [
         "mcp",
         "setup",
-        "office-motion"
+        "office-motion",
+        "office-motion-fix"
       ],
-      "note": "parallel worktrees"
+      "note": "merged (motion needed one fix lane)"
     },
     {
       "name": "Wave 4: onboarding",
       "lanes": [
         "onboard"
       ],
-      "note": "after setup merges"
+      "note": "merged"
     }
   ],
   "lanes": [
@@ -105,6 +106,15 @@
         "package.json",
         "bin/"
       ]
+    },
+    {
+      "task": "office-motion-fix",
+      "repo": "../ca-office-wt-office-motion",
+      "model": "maas/glm-5.3",
+      "why": "resize geometry, reduced-motion fades, durations",
+      "files": [
+        "runner/office.html"
+      ]
     }
   ],
   "next": [
@@ -112,10 +122,22 @@
       "text": "Merge office-scene, office-sprites, cli-dx",
       "done": true
     },
-    "Merge wave 3, run all checks",
-    "Run onboard lane",
-    "README quickstart + harness guide",
-    "Install into the live skill, update SKILL.md"
+    {
+      "text": "Merge wave 3, run all checks",
+      "done": true
+    },
+    {
+      "text": "Run onboard lane",
+      "done": true
+    },
+    {
+      "text": "README quickstart + harness guide",
+      "done": true
+    },
+    {
+      "text": "Install into the live skill, update SKILL.md",
+      "done": true
+    }
   ],
   "decisions": [
     {
@@ -129,6 +151,22 @@
     {
       "at": "2026-11-05T17:27:27.912Z",
       "text": "Fixed ca lane with no args crashing (exit 2 now)."
+    },
+    {
+      "at": "2026-11-05T18:54:02.702Z",
+      "text": "Overruled onboard reviewer: setup stays planned without --yes or a TTY (no consent, no writes)."
+    },
+    {
+      "at": "2026-11-05T18:54:02.702Z",
+      "text": "Fixed mcp myself: answer in-flight requests before exiting on stdin end."
+    },
+    {
+      "at": "2026-11-05T18:54:02.702Z",
+      "text": "Fixed packaging myself: scripts/trust.mjs was not shipped (found by a real smoke lane)."
+    },
+    {
+      "at": "2026-11-05T18:54:02.702Z",
+      "text": "Verified for real: packed npm install, onboard --yes --smoke in a Cursor repo (exit 0), Claude Code client calling ca_doctor and ca_status over MCP."
     }
   ],
   "risks": [
