@@ -89,6 +89,8 @@ try {
   await wait(3500);
   const end = await ev(`(() => { const e = document.querySelector('#complete [data-count]'); return e ? { t: e.textContent, want: e.getAttribute('data-count') } : null; })()`);
   check('completion counters count up to their value', end && String(end.t).replace(/[^\d.]/g, '') === String(end.want).replace(/[^\d.]/g, ''), JSON.stringify({ mid, end }));
+  const sentence = await ev(`(() => { const e = document.querySelector('#complete'); return e ? e.textContent.replace(/\\s+/g, ' ') : ''; })()`);
+  check('completion time is human readable (e.g. 1h 26m), not raw seconds', /\b\d+h( \d+m)?\b|\b\d+m( \d+s)?\b/.test(sentence) && !/\b\d{3,} s\b/.test(sentence), sentence.slice(0, 160));
   await shot('8-complete');
 
   // reduced motion
@@ -96,6 +98,23 @@ try {
   await send('Page.navigate', { url: base + '/office?demo=1' }); await wait(300); s = await st();
   check('reduced motion: flag set and intro skipped', s.anim.reducedMotion === true && s.anim.intro === 'done', JSON.stringify(s.anim));
   check('reduced motion: no infinite animations', await ev(`document.getAnimations().every((a) => !a.effect || a.effect.getComputedTiming().iterations !== Infinity)`));
+  await wait(2200); await ev(`window.__office.demoFail('office-sprites')`); await wait(60);
+  const rmFx = await ev(`document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().duration > 0 && a.effect.getComputedTiming().duration <= 200).length`);
+  s = await st();
+  check('reduced motion: lane-failed still logged and shown as a short fade', /lane-failed:office-sprites/.test((s.anim.effects || []).join(' ')) && rmFx >= 1, `fx=${rmFx} ${JSON.stringify(s.anim.effects)}`);
+  await send('Emulation.setEmulatedMedia', { features: [] });
+
+  // resize across the small breakpoint: platforms re-bake their geometry in place
+  await send('Page.navigate', { url: base + '/office?demo=1' }); await wait(3200);
+  await ev(`(() => { const e = document.querySelector('[data-node="office-scene"]'); if (e) e.__mark = 9; return !!e; })()`);
+  const geo = () => ev(`(() => { const g = window.__office.state().geometry; const rx = [...document.querySelectorAll('[data-node] .plat-top')].map((e) => Number(e.getAttribute('rx'))); return { g, rx }; })()`);
+  await send('Emulation.setDeviceMetricsOverride', { width: 650, height: 800, deviceScaleFactor: 1, mobile: false }); await wait(2500);
+  let gs = await geo();
+  check('resize to small: geometry.small and every platform top uses the new RX', gs && gs.g && gs.g.small === true && gs.rx.length >= 4 && gs.rx.every((x) => x === gs.g.RX), JSON.stringify(gs));
+  await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false }); await wait(2500);
+  gs = await geo();
+  const kept = await ev(`(() => { const e = document.querySelector('[data-node="office-scene"]'); return e ? e.__mark : 'missing'; })()`);
+  check('resize back: large RX again, same elements (no rebuild)', gs && gs.g && gs.g.small === false && gs.rx.every((x) => x === gs.g.RX) && kept === 9, JSON.stringify({ gs, kept }));
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
