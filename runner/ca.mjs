@@ -14,16 +14,25 @@
 // waits forever, retries continue the SAME session (context kept), the runner itself runs
 // the brief's CHECK: lines and the git-clean gate, and feeds failures back to the builder.
 //
-// usage: ca lane <repo> <task>       run a lane (foreground; Claude backgrounds it)
-//        ca status                   table of lanes (alive, phase, idle, now doing)
-//        ca tail <lane> [-f] [-n N]  readable transcript
-//        ca steer <lane> <message>   queue a message into the running session
-//        ca attach <lane>            open the CodeArts TUI on the live session (watch + type)
-//        ca stop <lane>              abort the session and end the lane
-//        ca dash [port]              local web dashboard of all lanes (default 4777)
-//        ca gc                       forget lanes finished more than 3 days ago
-//        ca plan [<plan.json>]       show the lead's plan on the dashboard (goal, waves, next)
-//        ca note [--now] <text>      log a lead decision (--now: set the "lead is doing" line)
+// usage: ca lane <repo> <task> [--detach]  run a lane (foreground; --detach: background with a log)
+//        ca status [--json] [--all]        table of lanes (--json adds id, task, repo, result, progress)
+//        ca wait <lane...> [--timeout S] [--json] [--quiet]  block until lanes end; exit = worst lane
+//        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
+//        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
+//        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
+//        ca setup <harness> [repo]   write MCP + rules config for claude|kiro|cursor|codex|vscode
+//        ca mcp                            run the MCP server (runner/mcp.mjs), if installed
+//        ca tail <lane> [-f] [-n N]        readable transcript
+//        ca steer <lane> <message>         queue a message into the running session
+//        ca attach <lane>                  open the CodeArts TUI on the live session (watch + type)
+//        ca stop <lane>                    abort the session and end the lane
+//        ca dash [port]                    local web dashboard of all lanes (default 4777)
+//        ca gc                             forget lanes finished more than 3 days ago
+//        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
+//        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
+//        ca help | -h | --help             this usage
+//        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
+//        lane, 3 missing credentials, 4 needs review, 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,13 +40,13 @@ import os from 'node:os';
 import net from 'node:net';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
 const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
 const EXE = process.env.CODEARTS_EXE || path.join(CA_HOME, 'installers', 'bin', 'codearts.exe');
-const REG = path.join(CA_HOME, 'lanes');
+const REG = process.env.CA_REGISTRY || path.join(CA_HOME, 'lanes');
 const num = (k, d) => (process.env[k] ? Number(process.env[k]) : d);
 const HAS_MAAS = () => !!userEnv('MAAS_API_KEY');
 const CFG = {
@@ -666,6 +675,15 @@ function cmdGc() {
   for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
 }
 
+// ---------- engineer workflow: setup, wait, summary, init, doctor ----------
+async function cmdSetup(args) {
+  const f = path.join(HERE, 'setup.mjs');
+  if (!fs.existsSync(f)) die('setup not installed', 2);
+  const mod = await import(pathToFileURL(f).href);
+  if (typeof mod.default !== 'function') die('setup.mjs has no default export', 2);
+  await mod.default(args);
+}
+
 // ---------- the lead's plan (written by Claude, shown on the dashboard) ----------
 // <repo>/tasks/plan.json: { title, goal, lead, status, now, waves:[{name, lanes:[task], note}],
 //   lanes:[{task, repo?, model?, why?, files?}], next:[text | {text, done}], decisions:[{at, text}], risks:[text] }
@@ -794,6 +812,9 @@ function cmdDash(args) {
 function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(code); }
 
 const [cmd, ...args] = process.argv.slice(2);
-const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args) };
-if (!table[cmd]) { console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n')); process.exit(cmd ? 2 : 0); }
+const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
+  .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
+const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
+if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
+if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
