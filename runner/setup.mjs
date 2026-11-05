@@ -65,6 +65,18 @@ function buildPlan(harness, repo, flags) {
     notes.push('kiro: the steering file is manual. Reference it in chat with #codearts-lanes.');
   }
 
+  if (harness === 'cursor') {
+    addJSON(plan, errors, path.join(repo, '.cursor', 'mcp.json'), 'mcpServers', 'codearts', SERVER);
+    plan.push({
+      path: path.join(repo, '.cursor', 'rules', 'codearts-lanes.mdc'),
+      content: `---\ndescription: Delegate coding work to CodeArts lanes (plan, brief, start, wait, verify)\nalwaysApply: false\n---\n${WORKFLOW}`,
+    });
+  }
+
+  if (harness === 'vscode') {
+    addJSON(plan, errors, path.join(repo, '.vscode', 'mcp.json'), 'servers', 'codearts', { type: 'stdio', ...SERVER });
+  }
+
   return { plan, errors, notes };
 }
 
