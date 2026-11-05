@@ -130,13 +130,17 @@ export default async function onboard(args) {
     let doFix = yes;
     if (!doFix && interactive) doFix = await confirm(`Add ${repo} to the CodeArts trusted folders?`);
     if (doFix) {
-      const obj = loadSettings().obj; // re-read: keep every other setting
-      obj.security = obj.security && typeof obj.security === 'object' && !Array.isArray(obj.security) ? obj.security : {};
-      if (!Array.isArray(obj.security.trustedFolders)) obj.security.trustedFolders = [];
-      if (!isUnder(obj.security.trustedFolders.map(String).filter(Boolean), repo)) obj.security.trustedFolders.push(repo);
-      fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
-      fs.writeFileSync(SETTINGS, JSON.stringify(obj, null, 2) + '\n');
-      add(repoRows, 'trusted folder', 'fixed', `added ${repo} to security.trustedFolders`);
+      const re = loadSettings(); // re-read: keep every other setting
+      if (re.err) add(repoRows, 'trusted folder', 'fail', `cannot parse ${SETTINGS}: ${re.err}`, 'fix the JSON (or rename the file) and rerun; nothing was overwritten');
+      else {
+        const obj = re.obj;
+        obj.security = obj.security && typeof obj.security === 'object' && !Array.isArray(obj.security) ? obj.security : {};
+        if (!Array.isArray(obj.security.trustedFolders)) obj.security.trustedFolders = [];
+        if (!isUnder(obj.security.trustedFolders.map(String).filter(Boolean), repo)) obj.security.trustedFolders.push(repo);
+        fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
+        fs.writeFileSync(SETTINGS, JSON.stringify(obj, null, 2) + '\n');
+        add(repoRows, 'trusted folder', 'fixed', `added ${repo} to security.trustedFolders`);
+      }
     } else add(repoRows, 'trusted folder', 'planned', `${repo} is not in security.trustedFolders`, `ca onboard --yes adds it (or add it to ${SETTINGS})`);
   }
 
