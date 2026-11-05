@@ -1,0 +1,2 @@
+[office-scene 23:05:32] lane ca-office--office-scene: starting codearts server in D:\Coding\ca-office
+[office-scene 23:05:34] server http://127.0.0.1:56565 (codearts 26.10.14); watch: ca tail ca-office--office-scene -f | ca attach ca-office--office-scene | ca dash
