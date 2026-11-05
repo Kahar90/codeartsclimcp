@@ -19,10 +19,31 @@ function usage() {
   );
 }
 
+// Read a JSON config, missing file = {}. A file we cannot parse is left untouched.
+function loadJSON(file) {
+  if (!fs.existsSync(file)) return {};
+  const text = fs.readFileSync(file, 'utf8');
+  try { return JSON.parse(text); } catch { const e = new Error(`cannot parse ${file}`); e.parseFile = file; throw e; }
+}
+
+// Merge one server entry into <mapKey>.<serverKey> of a JSON config, keeping every other
+// key and every other server. Always 2-space indent and a trailing newline.
+function mergeJSON(file, mapKey, serverKey, value) {
+  const obj = loadJSON(file);
+  if (!obj[mapKey] || typeof obj[mapKey] !== 'object' || Array.isArray(obj[mapKey])) obj[mapKey] = {};
+  obj[mapKey][serverKey] = value;
+  return JSON.stringify(obj, null, 2) + '\n';
+}
+
+// The JSON a user must paste by hand when their config does not parse.
+function snippet(mapKey, serverKey, value) {
+  return JSON.stringify({ [mapKey]: { [serverKey]: value } }, null, 2) + '\n';
+}
+
 // A plan entry is { path, content, action }. Built first, then either printed (--dry-run)
 // or written, so a failed build never half-writes a repo.
 function buildPlan(harness, repo, flags) {
-  return [];
+  return { plan: [], errors: [] };
 }
 
 export default async function setup(args) {
@@ -35,7 +56,15 @@ export default async function setup(args) {
     process.exitCode = 2;
     return;
   }
-  const plan = buildPlan(harness, repo, { dryRun: flags.has('--dry-run'), write: flags.has('--write') });
+  const { plan, errors } = buildPlan(harness, repo, { dryRun: flags.has('--dry-run'), write: flags.has('--write') });
+
+  if (errors.length) {
+    for (const e of errors) {
+      process.stderr.write(`${e.message}\nAdd this by hand instead:\n${e.snippet}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
 
   if (flags.has('--dry-run')) {
     for (const p of plan) process.stdout.write(`${p.path}\n${p.content}\n`);
