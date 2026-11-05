@@ -68,12 +68,52 @@ methods.initialize = (params) => ({
 });
 methods.ping = () => ({});
 
+// ---------- tool runner: node ca.mjs <args>, always async spawn, never spawnSync ----------
+// Children are tracked so none is left running after stdin ends; only processes this server
+// started are ever killed. Args go through an argv array (no shell), so paths with spaces work.
+const children = new Set();
+function killChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => {});
+    else child.kill('SIGKILL');
+  } catch { /* already gone */ }
+}
+function runCli(args, timeoutMs = 120000) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(process.execPath, [CA, ...args], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (e) {
+      resolve({ code: 125, stdout: '', stderr: `could not start ${CA}: ${e && e.message}` });
+      return;
+    }
+    children.add(child);
+    let out = '';
+    let err = '';
+    let settled = false;
+    let timer = null;
+    const finish = (code) => { if (settled) return; settled = true; children.delete(child); clearTimeout(timer); resolve({ code, stdout: out, stderr: err }); };
+    timer = setTimeout(() => {
+      err += `\n[mcp] ca ${args[0]} still running after ${Math.round(timeoutMs / 1000)}s, killed it`;
+      killChild(child);
+      finish(125);
+    }, Math.max(1000, timeoutMs));
+    child.stdout.on('data', (d) => { out += d; if (out.length > 8e6) out = out.slice(-4e6); });
+    child.stderr.on('data', (d) => { err += d; if (err.length > 2e6) err = err.slice(-1e6); });
+    child.on('error', (e) => { err += `\n[mcp] could not run ca ${args[0]}: ${e && e.message}`; finish(125); });
+    child.on('close', (code) => finish(code === null || code === undefined ? 125 : code));
+  });
+}
+
 // ---------- stdin loop: one JSON-RPC message per line, exit when stdin ends ----------
 let exited = false;
 function shutdown() {
   if (exited) return;
   exited = true;
   closing = true;
+  for (const c of [...children]) killChild(c); // only children this server started
+  children.clear();
   const done = () => { try { process.exit(0); } catch {} };
   const timer = setTimeout(done, 300);
   try { process.stdout.write('', () => { clearTimeout(timer); done(); }); } catch { clearTimeout(timer); done(); }
@@ -88,3 +128,4 @@ rl.on('line', (line) => {
 });
 rl.on('close', shutdown);
 process.stdin.on('error', () => shutdown());
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown());
