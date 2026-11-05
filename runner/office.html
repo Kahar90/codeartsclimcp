@@ -789,7 +789,44 @@ function diffEffects() {
 }
 
 function playIntro() {
-  animState.intro = "done";
+  if (animState.reducedMotion) { animState.intro = "done"; return; }
+  animState.intro = "running";
+  const tilt = $("tilt");
+  const ta = tilt.animate([
+    { transform: "perspective(950px) rotateX(34deg) scale(1.06)", opacity: 0 },
+    { transform: "perspective(950px) rotateX(0deg) scale(1)", opacity: 1 },
+  ], { duration: 900, easing: EASE_OUT, fill: "backwards" });
+  ta.onfinish = () => { ta.cancel(); positionActors(); };
+  let i = 0;
+  for (const n of nodes) {
+    const g = nodeEls.get(n.id);
+    if (g) {
+      const delay = 150 + i * 90;
+      g.querySelector(".lift").animate([
+        { transform: "translateY(38px) scale(.55)", opacity: 0 },
+        { transform: "translateY(0px) scale(1)", opacity: 1 },
+      ], { duration: 520, easing: EASE_SPRING, delay, fill: "backwards" });
+      g.querySelector(".plate").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: delay + 330, easing: EASE_OUT, fill: "backwards" });
+      const el = charEls.get(n.id);
+      if (el) el.animate([
+        { transform: "translateY(-34px)", opacity: 0 },
+        { transform: "translateY(0px)", opacity: 1 },
+      ], { duration: 480, easing: EASE_SPRING, delay: delay + 250, fill: "backwards" });
+      const st = linkEls.get(n.id);
+      if (st) {
+        let len = 0;
+        try { len = st.path.getTotalLength(); } catch (e) {}
+        if (len) {
+          st.path.style.strokeDasharray = len + " " + len;
+          const la = st.path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: 480, easing: EASE_OUT, delay: 380 + i * 90, fill: "backwards" });
+          la.onfinish = () => { st.path.style.strokeDasharray = ""; };
+        }
+      }
+    }
+    i++;
+  }
+  clearTimeout(introTimer);
+  introTimer = setTimeout(() => { animState.intro = "done"; }, 1800);
 }
 
 function render() {
