@@ -26,6 +26,9 @@ try {
   check('GET /office-sprites.js route exists', [200, 404].includes((await fetch(base + '/office-sprites.js')).status));
   const dashHtml = await (await fetch(base + '/')).text();
   check('lanes dashboard links to the office view', /href="\/office"/.test(dashHtml));
+  const stale = await fetch(base + '/api/lane/no-such-lane-xyz/detail');
+  let alive = false; try { alive = (await fetch(base + '/api/lanes')).ok; } catch {}
+  check('unknown lane gives 404 and the dashboard stays up', stale.status === 404 && alive, `${stale.status} alive=${alive}`);
 
   let ws; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); const p = t.find((x) => x.type === 'page'); if (p) ws = p.webSocketDebuggerUrl; } catch {} }
   const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
