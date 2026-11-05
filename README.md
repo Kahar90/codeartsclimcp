@@ -24,7 +24,7 @@ ca onboard --yes                                # checks, fixes, detects your ha
 
 `ca onboard` checks Node, the CodeArts CLI, credentials, git and folder trust, fixes what it
 safely can (trusted folder, `git init`), detects your harness from `.kiro/`, `.cursor/`,
-`.claude/`, `AGENTS.md` or `.vscode/`, writes its MCP config and rules, and prints the first
+`.claude/`, `opencode.json`, `AGENTS.md` or `.vscode/`, writes its MCP config and rules, and prints the first
 prompt to type. Without `--yes` it asks before each fix; in a terminal it can also take your
 AK/SK with hidden input. Add `--smoke` to run a 25 s probe lane. `--dry-run` shows the plan.
 
@@ -37,14 +37,15 @@ Prerequisites it will point you to if missing:
 
 ## Use it from your harness
 
-| Harness | Setup | Start |
-|---|---|---|
-| Kiro | `ca setup kiro` writes `.kiro/settings/mcp.json` + `.kiro/steering/codearts-lanes.md` | In chat: `#codearts-lanes` and your goal |
-| Cursor | `ca setup cursor` writes `.cursor/mcp.json` + `.cursor/rules/codearts-lanes.mdc` | In chat: `@codearts-lanes` and your goal |
-| Claude Code | `ca setup claude` writes `.mcp.json` (or `claude mcp add -s user codearts -- node <ca.mjs> mcp`) | `/codearts-build <goal>` (skill) or the `codearts_build` MCP prompt |
-| Codex | `ca setup codex --write` appends `[mcp_servers.codearts]` to `~/.codex/config.toml`, adds an AGENTS.md section | Ask it to follow the CodeArts lanes section |
-| VS Code | `ca setup vscode` writes `.vscode/mcp.json` | Agent mode chat, codearts tools |
-| Shell / CI | nothing | `ca init`, `ca lane --detach`, `ca wait` (below) |
+| Harness | Setup | Start | Verified |
+|---|---|---|---|
+| Kiro | `ca setup kiro` writes `.kiro/settings/mcp.json` (read-only tools in `autoApprove`) + `.kiro/steering/codearts-lanes.md` (manual) | In chat: `#codearts-lanes` and your goal | format checked against kiro.dev docs |
+| Cursor | `ca setup cursor` writes `.cursor/mcp.json` + `.cursor/rules/codearts-lanes.mdc` | In chat: `@codearts-lanes` and your goal (or let the agent pick the rule) | format checked against cursor.com docs |
+| Claude Code | `ca setup claude` writes `.mcp.json` (or `claude mcp add -s user codearts -- node <ca.mjs> mcp`) | `/codearts-build <goal>` (skill) or the `codearts_build` MCP prompt | real client run |
+| Codex | `ca setup codex --write` appends `[mcp_servers.codearts]` (read-only tools pre-approved) to `~/.codex/config.toml`, adds an AGENTS.md section | Ask it to follow the CodeArts lanes section | real `codex exec` run |
+| opencode | `ca setup opencode` writes `opencode.json` (`mcp.codearts`) + an AGENTS.md section | Ask it to follow the CodeArts lanes section | real `opencode run` |
+| VS Code | `ca setup vscode` writes `.vscode/mcp.json` (VS Code also reads the root `.mcp.json` from `ca setup claude`) | Agent mode chat, codearts tools | format checked against code.visualstudio.com docs |
+| Shell / CI | nothing | `ca init`, `ca lane --detach`, `ca wait` (below) | contract checks |
 
 Every setup merges into existing config (other servers and keys are kept), is safe to rerun,
 and supports `--dry-run`. Read-only tools (`ca_status`, `ca_summary`, `ca_tail`, `ca_wait`,
@@ -75,7 +76,7 @@ Change course mid-run with `ca steer <lane> "also handle HEAD requests"`; stop w
 |---|---|
 | `ca onboard [--harness h] [--repo d] [--yes] [--smoke] [--dry-run] [--json]` | guided first-run setup |
 | `ca doctor [--json] [repo]` | preflight: node, codearts, credentials, MaaS key, git, trust, shell, dashboard |
-| `ca setup <harness> [repo] [--dry-run] [--write]` | MCP + rules config for claude, kiro, cursor, codex, vscode |
+| `ca setup <harness> [repo] [--dry-run] [--write]` | MCP + rules config for claude, kiro, cursor, codex, opencode, vscode |
 | `ca init <repo> <task> [--goal ..] [--force]` | scaffold `tasks/<task>.md` from the brief template |
 | `ca lane <repo> <task> [--detach]` | run a lane (foreground, or detached with a log file) |
 | `ca wait <lane...> [--timeout S] [--json] [--quiet]` | block until lanes finish; exit code = worst result |

@@ -18,15 +18,16 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA_MJS = path.join(HERE, 'ca.mjs');
 const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
 const SETTINGS = process.env.CA_SETTINGS || path.join(CA_HOME, 'cli-data', 'settings.json');
-const HARNESSES = ['kiro', 'cursor', 'claude', 'codex', 'vscode'];
+const HARNESSES = ['kiro', 'cursor', 'claude', 'codex', 'vscode', 'opencode'];
 // Marker -> harness, first match wins (.claude/CLAUDE.md -> claude, .codex/AGENTS.md -> codex).
-const MARKERS = [['kiro', '.kiro'], ['cursor', '.cursor'], ['claude', '.claude'], ['claude', 'CLAUDE.md'], ['codex', '.codex'], ['codex', 'AGENTS.md'], ['vscode', '.vscode']];
+const MARKERS = [['kiro', '.kiro'], ['cursor', '.cursor'], ['claude', '.claude'], ['claude', 'CLAUDE.md'], ['opencode', 'opencode.json'], ['opencode', '.opencode'], ['codex', '.codex'], ['codex', 'AGENTS.md'], ['vscode', '.vscode']];
 const HARNESS_NEXT = {
   kiro: 'In Kiro chat: #codearts-lanes then describe the goal',
   cursor: 'In Cursor chat: @codearts-lanes then describe the goal',
   claude: 'In Claude Code: /codearts-build <goal> (or the codearts_build MCP prompt)',
   codex: 'In Codex: ask it to follow AGENTS.md CodeArts lanes section',
   vscode: 'In VS Code chat (agent mode): use the codearts MCP tools',
+  opencode: 'In opencode: ask it to follow the CodeArts lanes section of AGENTS.md (codearts MCP tools)',
 };
 const PORTAL = 'https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth';
 const DASH = 'http://127.0.0.1:4777';
@@ -152,7 +153,7 @@ export default async function onboard(args) {
     if (hit) { harness = hit[0]; via = `detected from ${hit[1]}`; }
   }
   if (!harness) {
-    add(harnessRows, 'harness', 'warn', 'no harness detected (no .kiro, .cursor, .claude or CLAUDE.md, .codex or AGENTS.md, .vscode)', `ca onboard --harness <${HARNESSES.join('|')}>`);
+    add(harnessRows, 'harness', 'warn', 'no harness detected (no .kiro, .cursor, .claude or CLAUDE.md, .codex or AGENTS.md, .vscode, opencode.json)', `ca onboard --harness <${HARNESSES.join('|')}>`);
   } else {
     add(harnessRows, 'harness', 'ok', `${harness} (${via})`);
     const setupArgs = [CA_MJS, 'setup', harness, repo, ...(dry ? ['--dry-run'] : [])];

@@ -33,7 +33,7 @@ check('kiro: rerun does not duplicate the steering file', fs.readdirSync(path.jo
 
 // cursor
 r = ca(['setup', 'cursor', repo]); const c = js(path.join(repo, '.cursor', 'mcp.json'));
-check('cursor: .cursor/mcp.json', r.code === 0 && isServer(c?.mcpServers?.codearts), r.out);
+check('cursor: .cursor/mcp.json with type stdio', r.code === 0 && isServer(c?.mcpServers?.codearts) && c.mcpServers.codearts.type === 'stdio', r.out);
 const rule = rd(path.join(repo, '.cursor', 'rules', 'codearts-lanes.mdc'));
 check('cursor: rule file with description front matter', rule && /^---[\s\S]*description:[\s\S]*---/.test(rule) && /ca_lane_start/.test(rule));
 
@@ -52,12 +52,19 @@ check('claude: prints the user-scope alternative', /claude mcp add/.test(r.out))
 // codex: print by default, --write appends once
 r = ca(['setup', 'codex', repo]);
 check('codex: prints a TOML snippet without writing', r.code === 0 && /\[mcp_servers\.codearts\]/.test(r.out) && !fs.existsSync(path.join(codexHome, 'config.toml')), r.out);
+check('codex: read-only tools pre-approved, start/steer/stop not', ['ca_status', 'ca_summary', 'ca_wait'].every((t) => new RegExp(`\\[mcp_servers\\.codearts\\.tools\\.${t}\\]\\s*\\napproval_mode = "approve"`).test(r.out)) && !/tools\.ca_(lane_start|steer|stop)\]/.test(r.out), r.out.slice(0, 300));
 fs.writeFileSync(path.join(codexHome, 'config.toml'), 'model = "x"\n');
 r = ca(['setup', 'codex', repo, '--write']); ca(['setup', 'codex', repo, '--write']);
 const toml = rd(path.join(codexHome, 'config.toml')) || '';
 check('codex --write: appended once, existing config kept', r.code === 0 && toml.startsWith('model = "x"') && (toml.match(/\[mcp_servers\.codearts\]/g) || []).length === 1, toml);
 const agents = rd(path.join(repo, 'AGENTS.md')) || '';
 check('codex: AGENTS.md block between markers, once', (agents.match(/codearts-lanes:start/g) || []).length === 1 && /codearts-lanes:end/.test(agents) && /ca_wait/.test(agents));
+
+// opencode
+r = ca(['setup', 'opencode', repo]); const oc = js(path.join(repo, 'opencode.json'));
+const ocs = oc && oc.mcp && oc.mcp.codearts;
+check('opencode: opencode.json mcp.codearts local command array', r.code === 0 && ocs && ocs.type === 'local' && ocs.enabled === true && Array.isArray(ocs.command) && ocs.command[0] === 'node' && ocs.command[1].replace(/\\/g, '/') === caFwd && ocs.command[2] === 'mcp', JSON.stringify(oc));
+check('opencode: AGENTS.md block still once', ((rd(path.join(repo, 'AGENTS.md')) || '').match(/codearts-lanes:start/g) || []).length === 1);
 
 // dry run and errors
 const fresh = path.join(tmp, 'fresh'); fs.mkdirSync(fresh);
