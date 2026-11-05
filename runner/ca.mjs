@@ -622,14 +622,41 @@ function laneRow(l) {
   return { lane: l.id, health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
     commits: `${s.commits}/${s.steps}`, steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
-function cmdStatus(args) {
-  const rows = lanes().filter((l) => args.includes('--all') || !l.s.result || now() - (l.s.finishedAt || 0) < 24 * 3600e3).map(laneRow);
-  if (args.includes('--json')) { console.log(JSON.stringify(rows, null, 2)); return; }
-  if (!rows.length) { console.log('no lanes (ca status --all for older ones)'); return; }
+const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
+// A status row for scripts: every laneRow field plus identity, result, progress and file paths.
+function statusRow(l) {
+  const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
+  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '',
+    progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: s.tokens || {},
+    summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
+}
+function printRows(rows) {
   const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'steers', 'interrupts', 'verdict', 'now'];
   const w = cols.map((c) => Math.max(c.length, ...rows.map((r) => String(r[c]).length)));
   console.log(cols.map((c, i) => c.toUpperCase().padEnd(w[i])).join('  '));
   for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
+}
+function cmdStatus(args) {
+  const ls = lanes().filter((l) => args.includes('--all') || !l.s.result || now() - (l.s.finishedAt || 0) < 24 * 3600e3);
+  if (args.includes('--json')) { console.log(JSON.stringify(ls.map(statusRow), null, 2)); return; }
+  const rows = ls.map(laneRow);
+  if (!rows.length) { console.log('no lanes (ca status --all for older ones)'); return; }
+  printRows(rows);
+}
+function cmdSummary(args) {
+  const l = findLane(args.filter((a) => !a.startsWith('--'))[0]);
+  const s = l.s; const sm = path.join(l.dir, 'summary.md');
+  const text = fs.existsSync(sm) ? fs.readFileSync(sm, 'utf8') : '';
+  if (args.includes('--json')) {
+    const pg = stepProgress(s);
+    console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', verdict: s.verdict || '',
+      elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: s.tokens || {}, commits: s.commitLog || [], steps: pg.list,
+      gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
+    return;
+  }
+  if (text) { process.stdout.write(text.endsWith('\n') ? text : text + '\n'); return; }
+  console.log(`lane ${l.id} ${s.result ? s.result + ', no summary.md yet' : 'still running'}`);
+  printRows([laneRow(l)]);
 }
 async function cmdTail(args) {
   const follow = args.includes('-f'); const ni = args.indexOf('-n'); const n = ni >= 0 ? Number(args[ni + 1]) : 40;
@@ -814,7 +841,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
+const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
