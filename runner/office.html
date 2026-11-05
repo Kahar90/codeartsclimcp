@@ -135,7 +135,10 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .steer button:hover{background:#41415c}
 .steer button:disabled{opacity:.5;cursor:default}
 #steerMsg{font-size:11px;color:#8a90a4;flex:0 0 auto}
-#complete{background:#161618;border:1px solid #2b2b33;border-radius:16px;padding:16px 18px}
+#complete{background:#161618;border:1px solid #2b2b33;border-radius:16px;padding:16px 18px;animation:riseup .45s var(--ease-out)}
+@keyframes riseup{from{transform:translateY(16px);opacity:0}}
+#complete tbody tr{animation:rowin .4s var(--ease-out) backwards}
+@keyframes rowin{from{opacity:0;transform:translateY(8px)}}
 #complete h2{display:flex;align-items:center;gap:10px;color:#4cc27e;margin:0 0 6px;font-size:18px}
 .okball{width:26px;height:26px;flex:0 0 26px;border-radius:50%;background:#4cc27e;color:#0b2a17;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:15px}
 .csum{color:#b6bbc9;margin:0 0 4px;font-size:13.5px}
@@ -234,7 +237,7 @@ const nodeEls = new Map();
 const charEls = new Map();
 const linkEls = new Map();
 const prevById = new Map();
-let sceneBuilt = false, prevInit = false, lastLayoutSig = "", completeSig = "";
+let sceneBuilt = false, prevInit = false, lastLayoutSig = "", completeSig = "", countGen = 0;
 let introPlayed = false, introTimer = null, cardTimer = null;
 let cardKind = "", cardSelId = "", cardReq = 0, crefs = null, cardCloseAnim = null;
 
@@ -896,6 +899,22 @@ function isComplete() {
   return ls.length > 0 && ls.every((l) => l.result === "done" || l.result === "needs review");
 }
 
+function countUp(sec) {
+  const els = [...sec.querySelectorAll("[data-count]")];
+  if (!els.length || animState.reducedMotion) return;
+  for (const el of els) el.textContent = "0";
+  const gen = ++countGen;
+  const t0 = performance.now();
+  const step = (t) => {
+    if (gen !== countGen) return;
+    const p = Math.min(1, (t - t0) / 1200);
+    const e = 1 - Math.pow(1 - p, 3);
+    for (const el of els) el.textContent = String(Math.round((parseInt(el.getAttribute("data-count"), 10) || 0) * e));
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function renderComplete() {
   const sec = $("complete");
   if (!isComplete()) { sec.hidden = true; completeSig = ""; return; }
@@ -909,9 +928,10 @@ function renderComplete() {
   sec.innerHTML = `<h2><span class="okball">\u2713</span>All tasks complete</h2>
     <p class="csum"><b class="num" data-count="${ls.length}">${ls.length}</b> lane${ls.length === 1 ? "" : "s"} delivered <b class="num" data-count="${commits}">${commits}</b> commit${commits === 1 ? "" : "s"} in <b class="num" data-count="${secs}">${secs}</b> s of lane time.</p>
     <table><thead><tr><th>Lane</th><th>Steps</th><th>Commits</th><th>Tokens</th><th>Verdict</th></tr></thead><tbody>
-    ${ls.map((l) => `<tr><td>${esc(l.task || l.id)}</td><td>${(l.progress && l.progress.done) || 0} / ${(l.progress && l.progress.total) || 0}</td><td>${commitsOf(l)}</td><td>${tokStr(l.tokens)}</td><td>${esc(l.verdict || "")}</td></tr>`).join("")}
+    ${ls.map((l, i) => `<tr style="animation-delay:${80 + i * 40}ms"><td>${esc(l.task || l.id)}</td><td>${(l.progress && l.progress.done) || 0} / ${(l.progress && l.progress.total) || 0}</td><td>${commitsOf(l)}</td><td>${tokStr(l.tokens)}</td><td>${esc(l.verdict || "")}</td></tr>`).join("")}
     </tbody></table>`;
   sec.hidden = false;
+  countUp(sec);
 }
 
 function logEffect(name) {
