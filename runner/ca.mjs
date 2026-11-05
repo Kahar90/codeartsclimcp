@@ -332,7 +332,7 @@ async function runLane(repoArg, task) {
         server.api('POST', `/question/${pr.id}/reject`, {}).catch((err) => L(`  ! question reject failed: ${err.message}`)); break;
       }
       case 'todo.updated': if (Array.isArray(pr.todos) && (!sid || sid === S.buildSession || sid === S.activeSession)) S.todos = pr.todos.map((t) => ({ text: oneLine(t.content, 200), status: t.status })); break;
-      case 'file.edited': { const f = pr.file && path.relative(repo, path.resolve(repo, pr.file)).replace(/\\/g, '/'); if (f && !f.startsWith('..') && !/^(tasks\/|\.codeartsdoer)/.test(f) && !S.files.includes(f)) { S.files.push(f); if (S.files.length > 200) S.files.shift(); } break; }
+      case 'file.edited': { const f = pr.file && path.relative(repo, path.resolve(repo, pr.file)).replace(/\\/g, '/'); if (f && !f.startsWith('..') && !path.isAbsolute(f) && !/^(tasks\/|\.codeartsdoer)/.test(f) && !S.files.includes(f)) { S.files.push(f); if (S.files.length > 200) S.files.shift(); } break; }
       case 'tui.toast.show': if (pr.variant === 'error' || pr.variant === 'warning') L(`  ! toast ${pr.variant}: ${oneLine(pr.message, 200)}`); break;
     }
     save();
