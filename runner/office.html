@@ -226,6 +226,114 @@ function buildNodes(m) {
   return [lead, ...lanes];
 }
 
+function computeLayout() {
+  const w = $("stage").clientWidth || 800;
+  const small = w < 700;
+  const RX = small ? 92 : 148, RY = small ? 34 : 54;
+  const CW = small ? 56 : 88, CH = small ? 80 : 124;
+  const PLATE = small ? 30 : 44;
+  const colP = RX * 2 + (small ? 56 : 64);
+  const rowP = RY * 2 + (small ? 90 : 118);
+  const leadX = RX + 34, leadY = CH + RY + 26;
+  for (const n of nodes) {
+    if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
+    else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
+  }
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (const n of nodes) { x0 = Math.min(x0, n.x - RX); x1 = Math.max(x1, n.x + RX); y0 = Math.min(y0, n.y - CH); y1 = Math.max(y1, n.y + RY + PLATE); }
+  const pad = 28;
+  return { small, RX, RY, CW, CH, PLATE, trunkX: leadX + RX + 26, vb: { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 } };
+}
+
+function nodeSvg(n) {
+  const L = layout;
+  const hk = n.kind === "lead" ? "lead" : healthKey(n.health);
+  const name = n.task.length > 24 ? n.task.slice(0, 23) + "\u2026" : n.task;
+  const pw = Math.min(L.RX * 1.9, Math.max(84, name.length * 7.8 + 20));
+  const ph = L.small ? 22 : 26;
+  return `<g class="node h-${hk}" data-id="${esc(n.id)}" transform="translate(${n.x} ${n.y})" tabindex="0" role="button" aria-label="${esc(n.task)}">
+    <ellipse class="spot" rx="${L.RX * 1.5}" ry="${L.RY * 1.9}" fill="url(#spotg)"/>
+    <ellipse rx="${L.RX - 2}" ry="${L.RY - 2}" fill="url(#topg)"/>
+    <ellipse rx="${Math.round(L.RX * 0.55)}" ry="${Math.round(L.RY * 0.55)}" fill="none" stroke="#ffffff" stroke-opacity=".06"/>
+    <ellipse class="rim" rx="${L.RX}" ry="${L.RY}" fill="none" stroke="url(#rim-${hk})"/>
+    <g transform="translate(0 ${L.RY + 8})"><g transform="skewX(-16)"><rect x="${-pw / 2}" y="0" width="${pw}" height="${ph}" rx="5" fill="#101015" stroke="#34343f"/><text x="0" y="${ph - 8}" text-anchor="middle" class="platetxt">${esc(name)}</text></g></g>
+  </g>`;
+}
+
+function renderScene() {
+  const L = layout, svg = $("floor");
+  svg.setAttribute("viewBox", `${L.vb.x} ${L.vb.y} ${L.vb.w} ${L.vb.h}`);
+  const defs = `<defs>
+    <linearGradient id="rim-run" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2dd4a0"/><stop offset="1" stop-color="#157a58"/></linearGradient>
+    <linearGradient id="rim-warn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e6b95c"/><stop offset="1" stop-color="#8a6317"/></linearGradient>
+    <linearGradient id="rim-bad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2706c"/><stop offset="1" stop-color="#8e211b"/></linearGradient>
+    <linearGradient id="rim-done" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4cc27e"/><stop offset="1" stop-color="#1d7a45"/></linearGradient>
+    <linearGradient id="rim-plan" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9298a6"/><stop offset="1" stop-color="#4b5160"/></linearGradient>
+    <linearGradient id="rim-lead" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b18cf8"/><stop offset="1" stop-color="#5b3aa8"/></linearGradient>
+    <radialGradient id="topg"><stop offset="0" stop-color="#1d1d25"/><stop offset="1" stop-color="#0a0a0e"/></radialGradient>
+    <radialGradient id="spotg"><stop offset="0" stop-color="#5fa8ff" stop-opacity=".4"/><stop offset="1" stop-color="#5fa8ff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="floorglow" cx=".5" cy=".42" r=".75"><stop offset="0" stop-color="#7c5cbf" stop-opacity=".12"/><stop offset="1" stop-color="#7c5cbf" stop-opacity="0"/></radialGradient>
+    <pattern id="isogrid" width="76" height="38" patternUnits="userSpaceOnUse"><path d="M0 19 L38 0 L76 19 L38 38 Z" fill="none" stroke="#ffffff" stroke-opacity=".05" stroke-width="1"/></pattern>
+  </defs>`;
+  const fr = `<rect x="${L.vb.x}" y="${L.vb.y}" width="${L.vb.w}" height="${L.vb.h}" fill="#0d0d12"/>` +
+    `<rect x="${L.vb.x}" y="${L.vb.y}" width="${L.vb.w}" height="${L.vb.h}" fill="url(#floorglow)"/>` +
+    `<rect x="${L.vb.x}" y="${L.vb.y}" width="${L.vb.w}" height="${L.vb.h}" fill="url(#isogrid)"/>`;
+  const lead = nodes[0];
+  linkCount = 0;
+  let links = "";
+  for (const n of nodes) {
+    if (n.kind !== "lane") continue;
+    linkCount++;
+    const d = `M ${lead.x + L.RX - 8} ${lead.y} L ${L.trunkX} ${lead.y} L ${L.trunkX} ${n.y} L ${n.x - L.RX + 8} ${n.y}`;
+    links += `<path class="link" d="${d}"/>`;
+    if (isWorking(n)) links += `<g><circle r="${L.small ? 5 : 8}" fill="#2dd4a0" opacity=".18"/><circle r="${L.small ? 2.2 : 3.4}" fill="#8df3d2"/><animateMotion dur="${(2.6 + n.row * 0.45 + n.wave * 0.3).toFixed(2)}s" repeatCount="indefinite" path="${d}"/></g>`;
+  }
+  svg.innerHTML = defs + fr + links + nodes.map(nodeSvg).join("");
+  renderActors();
+}
+
+function fallbackSprite(hue) {
+  return `<svg viewBox="0 0 60 84" xmlns="http://www.w3.org/2000/svg"><ellipse cx="30" cy="79" rx="15" ry="4" fill="rgba(0,0,0,.45)"/><circle cx="30" cy="17" r="11" fill="hsl(${hue},42%,74%)"/><rect x="15" y="28" width="30" height="46" rx="13" fill="hsl(${hue},48%,58%)"/></svg>`;
+}
+function spriteSvg(role, st, hue) {
+  try { if (window.OfficeSprites && window.OfficeSprites.draw) return window.OfficeSprites.draw(role, { state: st, hue }); } catch (e) {}
+  return fallbackSprite(hue);
+}
+
+function renderActors() {
+  const L = layout;
+  $("actors").innerHTML = nodes.map((n) => {
+    const role = roleOf(n), st = isWorking(n) ? "working" : "idle";
+    return `<div class="char${st === "working" ? " working" : ""}" data-id="${esc(n.id)}" style="width:${L.CW}px;height:${L.CH}px">${spriteSvg(role, st, HUES[role])}</div>`;
+  }).join("");
+  positionActors();
+}
+
+function sceneToClient(x, y) {
+  const svg = $("floor");
+  try {
+    const pt = svg.createSVGPoint(); pt.x = x; pt.y = y;
+    const m = pt.matrixTransform(svg.getScreenCTM());
+    return { x: m.x, y: m.y };
+  } catch (e) { return { x: 0, y: 0 }; }
+}
+
+function positionActors() {
+  if (!layout) return;
+  const L = layout, r = $("stage").getBoundingClientRect();
+  for (const el of $("actors").children) {
+    const n = nodes.find((x) => x.id === el.dataset.id);
+    if (!n) continue;
+    const p = sceneToClient(n.x, n.y);
+    el.style.left = Math.round(p.x - r.left - L.CW / 2) + "px";
+    el.style.top = Math.round(p.y - r.top - L.CH + (L.small ? 2 : 6)) + "px";
+  }
+}
+
+function syncSel() {
+  for (const g of $("floor").querySelectorAll("g.node")) g.classList.toggle("sel", g.dataset.id === selected);
+}
+
 function renderTop() {
   const p = model.plan;
   $("goal").textContent = p.goal || p.title || "(no goal)";
@@ -248,6 +356,10 @@ function render() {
   model = mode === "demo" ? demoModel() : liveModel();
   nodes = buildNodes(model);
   renderTop();
+  layout = computeLayout();
+  const sig = JSON.stringify([layout.small, Math.round(layout.vb.w), Math.round(layout.vb.h), nodes.map((n) => [n.id, n.health, n.phase, n.running, roleOf(n), isWorking(n)])]);
+  if (sig !== sceneSig) { sceneSig = sig; renderScene(); syncSel(); }
+  else positionActors();
 }
 
 async function tick() {
@@ -263,6 +375,11 @@ async function tick() {
 }
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
+new ResizeObserver(() => {
+  if (!layout) return;
+  const small = ($("stage").clientWidth || 800) < 700;
+  if (small !== layout.small) render(); else positionActors();
+}).observe($("stage"));
 render();
 if (mode !== "demo") { tick(); setInterval(tick, 2000); }
 })();
