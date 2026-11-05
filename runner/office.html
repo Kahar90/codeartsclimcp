@@ -978,9 +978,23 @@ function spawnRipple(n) {
   a.onfinish = () => e.remove();
 }
 
+function reducedFlash(n, color) {
+  const g = nodeEls.get(n.id);
+  if (!g) return;
+  const e = document.createElementNS(NS, "ellipse");
+  e.setAttribute("class", "rflash");
+  e.setAttribute("rx", layout.RX);
+  e.setAttribute("ry", layout.RY);
+  e.setAttribute("fill", color);
+  g.querySelector(".fx").appendChild(e);
+  const a = e.animate([{ opacity: 0.45 }, { opacity: 0 }], { duration: 150, easing: EASE_OUT, fill: "forwards" });
+  a.onfinish = () => e.remove();
+}
+
 function spawnBurst(n) {
   const g = nodeEls.get(n.id);
-  if (!g || animState.reducedMotion) return;
+  if (!g) return;
+  if (animState.reducedMotion) { reducedFlash(n, "#8fe6b8"); return; }
   const grp = document.createElementNS(NS, "g");
   grp.setAttribute("class", "burst");
   const sq = layout.RY / layout.RX;
@@ -1002,7 +1016,7 @@ function spawnBurst(n) {
 }
 
 function shakeNode(n) {
-  if (animState.reducedMotion) return;
+  if (animState.reducedMotion) { reducedFlash(n, "#f07a7a"); return; }
   const g = nodeEls.get(n.id);
   const targets = [];
   if (g) targets.push(g.querySelector(".lift"));
@@ -1023,9 +1037,11 @@ function shakeNode(n) {
 
 function flashGlow(n) {
   const g = nodeEls.get(n.id);
-  if (!g || animState.reducedMotion) return;
+  if (!g) return;
   const grp = g.querySelector(g.__glowSide === "a" ? ".glowgrp.ga" : ".glowgrp.gb");
-  if (grp) grp.animate([{ opacity: 1 }, { opacity: 0.12 }, { opacity: 1 }, { opacity: 0.25 }, { opacity: 1 }], { duration: 480, easing: EASE_OUT });
+  if (!grp) return;
+  if (animState.reducedMotion) { grp.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: EASE_OUT }); return; }
+  grp.animate([{ opacity: 1 }, { opacity: 0.12 }, { opacity: 1 }, { opacity: 0.25 }, { opacity: 1 }], { duration: 480, easing: EASE_OUT });
 }
 
 function diffEffects() {
