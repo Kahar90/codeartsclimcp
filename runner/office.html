@@ -514,6 +514,27 @@ async function tick() {
   render();
 }
 
+window.__office = {
+  state() {
+    const ns = nodes.map((n) => {
+      const p = sceneToClient(n.x, n.y);
+      return { id: n.id, kind: n.kind, task: n.task, health: n.kind === "lead" ? "lead" : String(n.health || "planned"), x: p.x, y: p.y, steps: { done: n.steps.done, total: n.steps.total } };
+    });
+    const open = !!selected && !$("card").hidden;
+    return {
+      mode,
+      goal: (model && model.plan && model.plan.goal) || "",
+      plan: (model && model.plan && model.plan.title) || "",
+      nodes: ns,
+      links: linkCount,
+      selected: selected || null,
+      card: open ? { open: true, title: cardInfo.title, steps: cardInfo.steps, progress: cardInfo.progress } : { open: false, title: "", steps: [], progress: "" },
+      complete: isComplete(),
+    };
+  },
+  select(id) { if (nodes.some((n) => n.id === id)) openCard(id); },
+};
+
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
 $("floor").addEventListener("click", (e) => {
   const g = e.target && e.target.closest ? e.target.closest("g.node") : null;
