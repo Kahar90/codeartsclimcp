@@ -468,6 +468,25 @@ function renderTop() {
   } else { sel.hidden = true; plansSig = ""; }
 }
 
+function isComplete() {
+  const ls = model ? model.lanes : [];
+  return ls.length > 0 && ls.every((l) => l.result === "done" || l.result === "needs review");
+}
+
+function renderComplete() {
+  const sec = $("complete");
+  if (!isComplete()) { sec.hidden = true; return; }
+  const ls = model.lanes;
+  const commits = ls.reduce((a, l) => a + commitsOf(l), 0);
+  const ms = ls.reduce((a, l) => a + (l.startedAt ? ((l.finishedAt || Date.now()) - l.startedAt) : 0), 0);
+  sec.innerHTML = `<h2><span class="okball">\u2713</span>All tasks complete</h2>
+    <p class="csum">${ls.length} lane${ls.length === 1 ? "" : "s"} delivered ${commits} commit${commits === 1 ? "" : "s"} in ${fmtDur(ms)} of lane time.</p>
+    <table><thead><tr><th>Lane</th><th>Steps</th><th>Commits</th><th>Tokens</th><th>Verdict</th></tr></thead><tbody>
+    ${ls.map((l) => `<tr><td>${esc(l.task || l.id)}</td><td>${(l.progress && l.progress.done) || 0} / ${(l.progress && l.progress.total) || 0}</td><td>${commitsOf(l)}</td><td>${tokStr(l.tokens)}</td><td>${esc(l.verdict || "")}</td></tr>`).join("")}
+    </tbody></table>`;
+  sec.hidden = false;
+}
+
 function render() {
   model = mode === "demo" ? demoModel() : liveModel();
   nodes = buildNodes(model);
@@ -480,6 +499,7 @@ function render() {
     if (!nodes.some((n) => n.id === selected)) closeCard();
     else renderCard(false);
   }
+  renderComplete();
 }
 
 async function tick() {
