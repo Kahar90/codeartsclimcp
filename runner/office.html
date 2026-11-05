@@ -32,7 +32,8 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 #floorglow{position:absolute;inset:0;background:radial-gradient(ellipse 80% 65% at 50% 42%,rgba(124,92,191,.16),rgba(124,92,191,0) 70%)}
 #floor{position:absolute;inset:0;width:100%;height:100%;display:block}
 #actors{position:absolute;inset:0;pointer-events:none}
-.char{position:absolute;pointer-events:none}
+.char{position:absolute;pointer-events:none;transition:transform var(--dur-hover) var(--ease-out);will-change:transform}
+.char.hover{transform:translateY(-6px)}
 .cfloat{position:absolute;inset:0}
 .cfloat svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible}
 .char.working .cfloat svg{animation:bob 1.7s ease-in-out infinite}
@@ -41,6 +42,9 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
 #floor .link{stroke:#98a0b4;stroke-opacity:.38;stroke-width:1.6;fill:none;stroke-linejoin:round;stroke-linecap:round}
 #floor .node{cursor:pointer}
+#floor .node .lift{transition:transform var(--dur-hover) var(--ease-out);will-change:transform}
+#floor .node.hover .lift{transform:translateY(-6px)}
+#floor .node.hover .glow{opacity:.95!important}
 #floor .node .spot{opacity:0;transform:scale(.8);transform-box:fill-box;transform-origin:center;transition:opacity var(--dur-ui) var(--ease-out),transform var(--dur-ui) var(--ease-out)}
 #floor .node.sel .spot{opacity:1;transform:scale(1)}
 #floor .node:focus{outline:none}
@@ -83,6 +87,8 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .card.tail-left::before,.card.tail-right::before{content:"";position:absolute;top:22px;width:12px;height:12px;background:#1d1d24;border-left:1px solid #3d3d49;border-bottom:1px solid #3d3d49}
 .card.tail-left::before{left:-7px;transform:rotate(45deg)}
 .card.tail-right::before{right:-7px;transform:rotate(225deg)}
+.card.tail-left{transform-origin:left center}
+.card.tail-right{transform-origin:right center}
 .chead{display:flex;gap:10px;align-items:center}
 .avatar{width:38px;height:38px;flex:0 0 38px;background:#141419;border:1px solid #33333f;border-radius:9px;padding:3px}
 .avatar svg{width:100%;height:100%;display:block;overflow:visible}
@@ -224,7 +230,7 @@ const linkEls = new Map();
 const prevById = new Map();
 let sceneBuilt = false, prevInit = false, lastLayoutSig = "", completeSig = "";
 let introPlayed = false, introTimer = null, cardTimer = null;
-let cardKind = "", cardSelId = "", cardReq = 0, crefs = null;
+let cardKind = "", cardSelId = "", cardReq = 0, crefs = null, cardCloseAnim = null;
 
 const DEMO_T0 = Date.now();
 const DEMO_BASE = {
@@ -629,6 +635,23 @@ function syncSel() {
   for (const g of $("floor").querySelectorAll("g.node")) g.classList.toggle("sel", g.dataset.node === selected);
 }
 
+function setHovered(id) {
+  if (hovered === id) return;
+  if (hovered) {
+    const g = nodeEls.get(hovered);
+    if (g) g.classList.remove("hover");
+    const el = charEls.get(hovered);
+    if (el) el.classList.remove("hover");
+  }
+  hovered = id;
+  if (id) {
+    const g = nodeEls.get(id);
+    if (g) g.classList.add("hover");
+    const el = charEls.get(id);
+    if (el) el.classList.add("hover");
+  }
+}
+
 const STEP_LI = `<li class="step"><span class="stepic"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="ck" d="M3.2 8.6 L6.8 12 L12.6 4.8"/></svg></span><span class="txt"></span></li>`;
 
 function syncSteps(ol, steps, numbered) {
@@ -777,6 +800,12 @@ async function updateCard(opening) {
     cardInfo = { title: n.task, steps, progress: `${dn} / ${total}` };
   }
   syncSteps(crefs.steps, steps, !lead);
+  if (opening && !animState.reducedMotion) {
+    const lis = crefs.steps.children;
+    for (let i = 0; i < lis.length; i++) {
+      lis[i].animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0px)" }], { duration: 240, delay: 60 + i * 40, easing: EASE_OUT, fill: "backwards" });
+    }
+  }
   positionCard();
 }
 
@@ -786,20 +815,39 @@ function openCard(id) {
   selected = id;
   syncSel();
   const n = nodes.find((x) => x.id === id);
-  $("card").hidden = false;
+  const card = $("card");
+  card.hidden = false;
+  if (cardCloseAnim) { cardCloseAnim.cancel(); cardCloseAnim = null; }
   buildCard(n);
   positionCard();
-  animState.card = "open";
+  clearTimeout(cardTimer);
+  if (animState.reducedMotion) {
+    animState.card = "open";
+  } else {
+    animState.card = "opening";
+    cardTimer = setTimeout(() => { if (animState.card === "opening") animState.card = "open"; }, 300);
+    card.animate([
+      { transform: "scale(.92) translateY(6px)", opacity: 0 },
+      { transform: "scale(1) translateY(0px)", opacity: 1 },
+    ], { duration: 260, easing: EASE_SPRING });
+  }
   updateCard(true);
 }
 
 function closeCard() {
-  if (!selected && $("card").hidden) return;
+  const card = $("card");
+  if (card.hidden || animState.card === "closing") return;
   selected = null;
   syncSel();
   cardInfo = { title: "", steps: [], progress: "" };
-  $("card").hidden = true;
-  animState.card = "closed";
+  clearTimeout(cardTimer);
+  if (animState.reducedMotion) { card.hidden = true; animState.card = "closed"; return; }
+  animState.card = "closing";
+  cardCloseAnim = card.animate([
+    { transform: "scale(1)", opacity: 1 },
+    { transform: "scale(.95)", opacity: 0 },
+  ], { duration: 160, easing: EASE_IN, fill: "forwards" });
+  cardCloseAnim.onfinish = () => { cardCloseAnim.cancel(); cardCloseAnim = null; card.hidden = true; animState.card = "closed"; };
 }
 
 function renderTop() {
@@ -963,6 +1011,11 @@ $("floor").addEventListener("keydown", (e) => {
   if (g) { e.preventDefault(); openCard(g.dataset.node); }
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCard(); });
+document.addEventListener("mousemove", (e) => {
+  const t = e.target;
+  const g = t && t.closest ? t.closest("g.node") : null;
+  setHovered(g ? g.dataset.node : null);
+});
 new ResizeObserver(() => { if (layout) render(); }).observe($("stage"));
 if (mode === "demo") render();
 setInterval(tick, 2000);
