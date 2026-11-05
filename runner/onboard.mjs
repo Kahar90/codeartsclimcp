@@ -94,6 +94,7 @@ export default async function onboard(args) {
       else if (/^maas key$/i.test(c.name) && c.status !== 'ok') fix = credFix('create a MaaS API key', 'MAAS_API_KEY');
       add(envRows, c.name, c.status, c.detail || '', fix);
     }
+    if (interactive) await offerSecrets(envRows);
   }
 
   // ---- 2. repository: git repo with a commit, trusted folder ----
@@ -254,3 +255,75 @@ function askLine() {
   });
 }
 async function confirm(q) { process.stdout.write(`${q} [y/N] `); return /^y(es)?$/i.test((await askLine()).trim()); }
+
+// Hidden input on a TTY: raw mode, nothing echoed; Enter returns the value, Ctrl-C exits,
+// backspace edits. Only reached in interactive mode, so isTTY is guaranteed.
+function askHidden(prompt) {
+  return new Promise((res) => {
+    process.stdout.write(prompt);
+    let buf = Buffer.alloc(0);
+    const finish = () => {
+      process.stdin.removeListener('data', on);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write('\n');
+      res(buf.toString('utf8'));
+    };
+    const on = (d) => {
+      for (const b of d) {
+        if (b === 0x0d || b === 0x0a) return finish();
+        if (b === 0x03) { process.stdout.write('^C\n'); process.exit(130); }
+        if (b === 0x08 || b === 0x7f) { buf = buf.subarray(0, -1); continue; }
+        buf = Buffer.concat([buf, Buffer.from([b])]);
+      }
+    };
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', on);
+  });
+}
+
+// Store one user-level env var via PowerShell. The secret travels in the child process
+// env (CA_ONBOARD_SECRET), never on the command line, and is never printed or logged.
+function storeUserEnv(name, value) {
+  const r = run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+    `[Environment]::SetEnvironmentVariable('${name}', $env:CA_ONBOARD_SECRET, 'User')`],
+    { env: { ...process.env, CA_ONBOARD_SECRET: value }, timeout: 20000 });
+  return r.status === 0;
+}
+
+// Interactive only: for a failing/warning credentials or maas key row, offer to type the
+// missing keys with hidden input and store them in the user environment right away.
+async function offerSecrets(rows) {
+  const groups = [
+    { name: 'credentials', keys: ['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK'], what: 'CodeArts AK/SK' },
+    { name: 'maas key', keys: ['MAAS_API_KEY'], what: 'MaaS API key' },
+  ];
+  for (const g of groups) {
+    const r = rows.find((x) => x.name.toLowerCase() === g.name && ['fail', 'warn'].includes(x.status));
+    if (!r) continue;
+    const missing = g.keys.filter((k) => !process.env[k]);
+    if (!missing.length) continue;
+    if (!(await confirm(`Enter the missing ${g.what} (${missing.join(', ')}) now and store it in the user environment? Input is hidden`))) continue;
+    const vals = [];
+    for (const k of missing) {
+      const v = await askHidden(`${k}: `);
+      if (!v) break;
+      vals.push([k, v]);
+    }
+    if (vals.length < missing.length) { process.stdout.write('  skipped, no value entered (the manual steps below still apply)\n'); continue; }
+    const failed = [];
+    for (const [k, v] of vals) {
+      process.env[k] = v; // this run sees it too (the smoke lane inherits our env)
+      if (!storeUserEnv(k, v)) failed.push(k);
+    }
+    if (!failed.length) {
+      r.status = 'fixed';
+      r.detail = `${missing.join(', ')} stored in the user environment; open a new terminal so other programs see it`;
+      r.fix = '';
+    } else {
+      const done = vals.map(([k]) => k).filter((k) => !failed.includes(k));
+      r.detail = `${r.detail}; could not store ${failed.join(', ')} automatically (PowerShell failed)${done.length ? `, stored ${done.join(', ')}` : ''}`;
+    }
+  }
+}
