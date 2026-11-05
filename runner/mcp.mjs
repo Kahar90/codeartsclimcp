@@ -312,6 +312,22 @@ methods['tools/call'] = async (params) => {
   }
 };
 
+// ---------- prompt: the lead workflow ----------
+methods['prompts/list'] = () => ({
+  prompts: [{
+    name: 'codearts_build',
+    description: 'The lead workflow over CodeArts lanes: doctor, plan, briefs, start, wait, judge, verify, report. Returns docs/workflow.md with the goal as the first line.',
+    arguments: [{ name: 'goal', description: 'one sentence goal of the whole build', required: false }],
+  }],
+});
+methods['prompts/get'] = (params) => {
+  if (params.name !== 'codearts_build') throw new RpcError(-32602, `Unknown prompt: ${params.name}`);
+  let text;
+  try { text = fs.readFileSync(WORKFLOW, 'utf8'); } catch (e) { throw new RpcError(-32603, `cannot read docs/workflow.md: ${e && e.message}`); }
+  const goal = params.arguments && typeof params.arguments.goal === 'string' ? params.arguments.goal.trim() : '';
+  return { messages: [{ role: 'user', content: { type: 'text', text: goal ? `Goal: ${goal}\n\n${text}` : text } }] };
+};
+
 // ---------- stdin loop: one JSON-RPC message per line, exit when stdin ends ----------
 let exited = false;
 function shutdown() {
