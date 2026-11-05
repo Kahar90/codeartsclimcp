@@ -51,6 +51,19 @@ const isUnder = (list, p) => {
   const a = path.resolve(p).toLowerCase();
   return list.some((f) => { const b = path.resolve(f).toLowerCase(); return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep); });
 };
+// Base dir for the throwaway smoke repo: prefer ~/.t3/scratch, else the first trusted
+// folder that exists and is writable, else the OS temp dir when it is trusted.
+function pickSmokeBase() {
+  const { obj } = loadSettings();
+  const trusted = trustedList(obj);
+  const writable = (d) => { try { fs.accessSync(d, fs.constants.W_OK); return true; } catch { return false; } };
+  const scratch = path.join(os.homedir(), '.t3', 'scratch');
+  if (fs.existsSync(scratch) && writable(scratch)) return scratch;
+  for (const t of trusted) { const p = path.resolve(t); if (fs.existsSync(p) && writable(p)) return p; }
+  const tmp = os.tmpdir();
+  if (isUnder(trusted, tmp)) return tmp;
+  return null;
+}
 
 export default async function onboard(args) {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
@@ -163,8 +176,38 @@ export default async function onboard(args) {
     }
   }
 
-  // ---- 4. smoke test ----
-  add(smokeRows, 'smoke test', 'skipped', 'not requested; ca onboard --smoke runs a throwaway probe lane');
+  // ---- 4. smoke test: only with --smoke, never by default ----
+  if (!smoke) add(smokeRows, 'smoke test', 'skipped', 'not requested; ca onboard --smoke runs a throwaway probe lane');
+  else if (dry) add(smokeRows, 'smoke test', 'skipped', 'dry run: no lane started');
+  else {
+    const base = pickSmokeBase();
+    if (!base) add(smokeRows, 'smoke test', 'warn', 'no writable trusted folder for a throwaway repo (tried ~/.t3/scratch, security.trustedFolders, the temp dir)', 'add a trusted folder (ca onboard --yes) and rerun with --smoke');
+    else {
+      const dir = path.join(base, `ca-smoke-${Math.floor(Date.now() / 1000)}`);
+      let err = '';
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        if (git(dir, 'init').status !== 0) err = 'git init failed';
+        if (!err) {
+          let c = git(dir, 'commit', '--allow-empty', '-m', 'init');
+          if (c.status !== 0) c = git(dir, '-c', 'user.email=ca@localhost', '-c', 'user.name=ca', 'commit', '--allow-empty', '-m', 'init');
+          if (c.status !== 0) err = oneLine(c.stderr, 140);
+        }
+        if (!err) {
+          fs.mkdirSync(path.join(dir, 'tasks'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'tasks', 'probe.md'), 'Run `git log --oneline -1` with your bash tool once, reply with its output.\n');
+        }
+      } catch (e) { err = e.message; }
+      if (err) add(smokeRows, 'smoke test', 'fail', `could not prepare ${dir}: ${err}`);
+      else {
+        const t0 = Date.now();
+        const r = run(process.execPath, [CA_MJS, 'lane', dir, 'probe'], { timeout: 180000, env: { ...process.env, NO_REVIEW: '1' } });
+        const took = dur(Date.now() - t0);
+        if (r.status === 0) add(smokeRows, 'smoke test', 'ok', `probe lane done in ${took} (${dir})`);
+        else add(smokeRows, 'smoke test', 'fail', `probe lane failed (exit ${r.status ?? '?'}) in ${took}: ${oneLine((r.stdout || '').split(/\r?\n/).filter(Boolean).slice(-3).join(' | '), 180)}`, `see ${path.join(dir, 'tasks', 'probe.lane')}`);
+      }
+    }
+  }
 
   // ---- output ----
   const steps = [...envRows, ...repoRows, ...harnessRows, ...smokeRows];
