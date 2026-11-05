@@ -106,6 +106,167 @@ function runCli(args, timeoutMs = 120000) {
   });
 }
 
+// ---------- tools ----------
+class ArgError extends Error {
+  constructor(name) { super(name); this.argName = name; }
+}
+const needStr = (v, name) => {
+  if (typeof v !== 'string' || !v.trim()) throw new ArgError(name);
+  return v.trim();
+};
+const needCount = (v, name, def, max) => {
+  if (v === undefined || v === null || v === '') return def;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) throw new ArgError(name);
+  return Math.min(Math.round(n), max);
+};
+const optStr = (a, name) => (a[name] === undefined || a[name] === null ? [] : [needStr(a[name], name)]);
+
+const TOOLS = [
+  {
+    name: 'ca_doctor',
+    description: 'Preflight for lanes: runs ca doctor and returns one JSON row per check (node, codearts, credentials, git, folder trust, shell) with status ok, warn or fail. Use it before the first lane in a repo and fix every fail row; warn rows are optional. A doctor that reports failures is data, not a tool error.',
+    inputSchema: { type: 'object', properties: { repo: { type: 'string', description: 'repo path to check (default: the server working directory)' } }, required: [] },
+    ok: [0, 1],
+    timeout: 120000,
+    build: (a) => ['doctor', '--json', ...optStr(a, 'repo')],
+  },
+  {
+    name: 'ca_init',
+    description: 'Scaffold a lane brief at <repo>/tasks/<task>.md from the template, with the goal filled in. Use it once per lane, then edit the brief (numbered steps, one CHECK line per check, safety rules) before ca_lane_start. Refuses to overwrite an existing brief unless force is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'path of the repo the lane works in' },
+        task: { type: 'string', description: 'task name; becomes tasks/<task>.md and the lane id <repo>--<task>' },
+        goal: { type: 'string', description: 'one sentence goal written into the brief' },
+        force: { type: 'boolean', description: 'overwrite an existing brief' },
+      },
+      required: ['repo', 'task'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['init', needStr(a.repo, 'repo'), needStr(a.task, 'task'),
+      ...(a.goal !== undefined && a.goal !== null ? ['--goal', needStr(a.goal, 'goal')] : []),
+      ...(a.force ? ['--force'] : [])],
+  },
+  {
+    name: 'ca_lane_start',
+    description: 'Start a lane in the background (ca lane <repo> <task> --detach): a CodeArts worker reads the brief, builds, commits each step and runs the CHECK lines itself. Returns at once; follow it with ca_wait. Use it only after ca_doctor is clean and the brief at tasks/<task>.md exists.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'path of the repo the lane works in' },
+        task: { type: 'string', description: 'task name; the brief tasks/<task>.md must exist' },
+      },
+      required: ['repo', 'task'],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['lane', needStr(a.repo, 'repo'), needStr(a.task, 'task'), '--detach'],
+  },
+  {
+    name: 'ca_status',
+    description: 'Snapshot of all lanes as JSON: health, phase, elapsed, step progress, tokens, result, verdict. Use it to see what exists and what finished; to wait for a lane, block on ca_wait instead of polling this.',
+    inputSchema: { type: 'object', properties: { all: { type: 'boolean', description: 'include lanes that finished more than 24 h ago' } }, required: [] },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['status', '--json', ...(a.all ? ['--all'] : [])],
+  },
+  {
+    name: 'ca_summary',
+    description: 'Final report of one lane as JSON: result, verdict, commits, gates, fix rounds, interruptions, steering, outside-repo access and the summary text. Read it when a lane ends, judge the reviewer findings against the brief and verify the work yourself; open ca_tail only when the summary points at a problem.',
+    inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name (as in ca_status)' } }, required: ['lane'] },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['summary', needStr(a.lane, 'lane'), '--json'],
+  },
+  {
+    name: 'ca_tail',
+    description: 'Last lines of a lane transcript: worker replies, thinking, every tool call. Use it only when ca_summary or ca_status points at a problem; it is for debugging a lane, not for waiting (use ca_wait).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', description: 'lane id or task name' },
+        lines: { type: 'number', description: 'how many lines to return (default 60)' },
+      },
+      required: ['lane'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['tail', needStr(a.lane, 'lane'), '-n', String(needCount(a.lines, 'lines', 60, 10000))],
+  },
+  {
+    name: 'ca_steer',
+    description: 'Queue a steering message into a running lane (clarification, scope cut, "also do X"); it enters the session within about 2 s. Use it for course corrections while the lane runs; for a real change of direction use ca_stop, edit the brief and start a new lane.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', description: 'lane id or task name; the lane must still be running' },
+        message: { type: 'string', description: 'the message for the worker, applied on top of the brief' },
+      },
+      required: ['lane', 'message'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['steer', needStr(a.lane, 'lane'), needStr(a.message, 'message')],
+  },
+  {
+    name: 'ca_stop',
+    description: 'Stop a lane: the supervisor aborts the session and writes the summary within a few seconds; on a DEAD lane it cleans up. Use it when the direction changed or the lane is beyond steering, then edit the brief and start again.',
+    inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name' } }, required: ['lane'] },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['stop', needStr(a.lane, 'lane')],
+  },
+  {
+    name: 'ca_plan',
+    description: 'Register the lead plan JSON (tasks/plan.json: title, goal, waves, lanes, next, decisions, risks) so the dashboard shows goal, waves and lane progress. Use it after writing or updating the plan file.',
+    inputSchema: { type: 'object', properties: { file: { type: 'string', description: 'path of the plan JSON, usually tasks/plan.json' } }, required: ['file'] },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['plan', needStr(a.file, 'file')],
+  },
+  {
+    name: 'ca_note',
+    description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use it to keep the dashboard current while lanes run.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'the decision, or the current activity with now true' },
+        now: { type: 'boolean', description: 'true: set the "lead is doing" line instead of appending a decision' },
+      },
+      required: ['text'],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['note', ...(a.now ? ['--now'] : []), needStr(a.text, 'text')],
+  },
+];
+
+async function cliResult(tool, cliArgs) {
+  const r = await runCli(cliArgs, tool.timeout || 120000);
+  const ok = tool.ok.includes(r.code);
+  const text = ok
+    ? (r.stdout.trim() || r.stderr.trim() || `ca ${cliArgs[0]} exited ${r.code} with no output`)
+    : (((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim() || `ca ${cliArgs[0]} exited ${r.code} with no output`);
+  return { content: [{ type: 'text', text }], isError: !ok };
+}
+
+methods['tools/list'] = () => ({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+methods['tools/call'] = async (params) => {
+  const tool = TOOLS.find((t) => t.name === params.name);
+  if (!tool) throw new RpcError(-32602, `Unknown tool: ${params.name}`);
+  const args = params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {};
+  try {
+    if (tool.run) return await tool.run(args);
+    return await cliResult(tool, tool.build(args));
+  } catch (e) {
+    if (e instanceof ArgError) return { content: [{ type: 'text', text: `${tool.name}: missing or invalid required argument "${e.argName}"` }], isError: true };
+    throw e;
+  }
+};
+
 // ---------- stdin loop: one JSON-RPC message per line, exit when stdin ends ----------
 let exited = false;
 function shutdown() {
