@@ -71,6 +71,20 @@
       tieHi: hex(hue, 55, 58),
       boxFill: hex(hue, 50, 76),
       boxLine: hex(hue, 45, 42),
+      chair: hex(hue, 12, 27),
+      chairHi: hex(hue, 14, 37),
+      chairLo: hex(hue, 11, 17),
+      scr: hex(hue, 62, 46),
+      scrHi: hex(hue, 72, 66),
+      glow: hex(hue, 80, 60),
+      screenHi: hex(hue, 50, 16),
+      screenLo: hex(hue, 55, 8),
+      steel: '#a9bacf',
+      steelLo: '#8fa2ba',
+      deskHi: '#8a7052',
+      deskLo: '#54432f',
+      lapHi: '#454d5c',
+      lapLo: '#2c323d',
       skin: '#f3c39a',
       skinHi: '#ffdcb0',
       skinLo: '#dfa677',
@@ -106,6 +120,17 @@
       + lin(p + 'pants', 0, 0, 0, 1, stops([[0, c.pants], [1, c.pantsLo]]))
       + lin(p + 'shoe', 0, 0, 0, 1, stops([[0, c.shoeHi], [1, c.shoe]]))
       + rad(p + 'shadow', 0.5, 0.5, 0.5, stops([[0, '#000000', 0.35], [0.65, '#000000', 0.16], [1, '#000000', 0]]));
+  }
+
+  function defsDesk(c) {
+    var p = c.p;
+    return defsCommon(c)
+      + lin(p + 'chair', 0, 0, 0, 1, stops([[0, c.chairHi], [0.6, c.chair], [1, c.chairLo]]))
+      + lin(p + 'desk', 0, 0, 0, 1, stops([[0, c.deskHi], [1, c.deskLo]]))
+      + lin(p + 'screen', 0, 0, 0, 1, stops([[0, c.screenHi], [1, c.screenLo]]))
+      + lin(p + 'lap', 0, 0, 0, 1, stops([[0, c.lapHi], [1, c.lapLo]]))
+      + rad(p + 'glow', 0.5, 0.5, 0.5, stops([[0, c.glow, 0.4], [0.5, c.glow, 0.15], [1, c.glow, 0]]))
+      + rad(p + 'halo', 0.5, 0.5, 0.5, stops([[0, c.glow, 0.45], [0.55, c.glow, 0.15], [1, c.glow, 0]]));
   }
 
   function wrap(c, css, defs, body) {
@@ -171,6 +196,23 @@
       + '<circle cx="' + n(cx - ex + r * 0.04) + '" cy="' + n(ey - r * 0.05) + '" r="' + n(r * 0.04) + '" fill="#ffffff" opacity="0.9"/>'
       + '<circle cx="' + n(cx + ex + r * 0.04) + '" cy="' + n(ey - r * 0.05) + '" r="' + n(r * 0.04) + '" fill="#ffffff" opacity="0.9"/>'
       + '<path d="M ' + n(cx - r * 0.28) + ' ' + n(cy + r * 0.42) + ' Q ' + n(cx) + ' ' + n(cy + r * 0.68) + ' ' + n(cx + r * 0.28) + ' ' + n(cy + r * 0.42) + '" fill="none" stroke="#a35d43" stroke-width="' + n(r * 0.09) + '" stroke-linecap="round"/>';
+    if (o.glasses) {
+      var gr = r * 0.3;
+      var gy = ey + r * 0.02;
+      var gw = r * 0.075;
+      s += '<circle cx="' + n(cx - ex) + '" cy="' + n(gy) + '" r="' + n(gr) + '" fill="#cfe8ff" fill-opacity="0.25" stroke="' + c.ink + '" stroke-width="' + n(gw) + '"/>'
+        + '<circle cx="' + n(cx + ex) + '" cy="' + n(gy) + '" r="' + n(gr) + '" fill="#cfe8ff" fill-opacity="0.25" stroke="' + c.ink + '" stroke-width="' + n(gw) + '"/>'
+        + '<path d="M ' + n(cx - ex + gr) + ' ' + n(gy) + ' L ' + n(cx + ex - gr) + ' ' + n(gy) + '" fill="none" stroke="' + c.ink + '" stroke-width="' + n(gw) + '"/>'
+        + '<path d="M ' + n(cx - ex - gr) + ' ' + n(gy) + ' L ' + n(cx - r * 0.95) + ' ' + n(gy - r * 0.03) + '" fill="none" stroke="' + c.ink + '" stroke-width="' + n(gw) + '"/>'
+        + '<path d="M ' + n(cx + ex + gr) + ' ' + n(gy) + ' L ' + n(cx + r * 0.95) + ' ' + n(gy - r * 0.03) + '" fill="none" stroke="' + c.ink + '" stroke-width="' + n(gw) + '"/>';
+    }
+    if (o.phones) {
+      s += '<path d="M ' + n(cx - r * 0.98) + ' ' + n(cy - r * 0.1) + ' A ' + n(r * 0.99) + ' ' + n(r * 0.99) + ' 0 0 1 ' + n(cx + r * 0.98) + ' ' + n(cy - r * 0.1) + '" fill="none" stroke="' + c.ink + '" stroke-width="' + n(r * 0.16) + '"/>'
+        + '<circle cx="' + n(cx - r * 0.99) + '" cy="' + n(cy + r * 0.08) + '" r="' + n(r * 0.27) + '" fill="' + c.ink + '"/>'
+        + '<circle cx="' + n(cx + r * 0.99) + '" cy="' + n(cy + r * 0.08) + '" r="' + n(r * 0.27) + '" fill="' + c.ink + '"/>'
+        + '<circle cx="' + n(cx - r * 0.99) + '" cy="' + n(cy + r * 0.08) + '" r="' + n(r * 0.1) + '" fill="' + c.scrHi + '"/>'
+        + '<circle cx="' + n(cx + r * 0.99) + '" cy="' + n(cy + r * 0.08) + '" r="' + n(r * 0.1) + '" fill="' + c.scrHi + '"/>';
+    }
     return s;
   }
 
@@ -243,10 +285,131 @@
     return wrap(c, css, defs, b);
   }
 
+  function chair(c) {
+    var p = c.p;
+    return '<rect x="77" y="136" width="6" height="42" rx="3" fill="' + c.chairLo + '"/>'
+      + '<path d="M 56 180 Q 80 171 104 180" fill="none" stroke="' + c.chairLo + '" stroke-width="5" stroke-linecap="round"/>'
+      + '<circle cx="54" cy="181" r="3.4" fill="' + c.ink + '"/>'
+      + '<circle cx="106" cy="181" r="3.4" fill="' + c.ink + '"/>'
+      + '<rect x="52" y="74" width="56" height="52" rx="16" fill="url(#' + p + 'chair)"/>'
+      + '<rect x="46" y="112" width="11" height="30" rx="5.5" fill="' + c.chairLo + '"/>'
+      + '<rect x="103" y="112" width="11" height="30" rx="5.5" fill="' + c.chairLo + '"/>';
+  }
+
+  function desk(c) {
+    var p = c.p;
+    return '<path d="M 34 150 L 126 150 L 118 140 L 42 140 Z" fill="url(#' + p + 'desk)"/>'
+      + '<rect x="34" y="149" width="92" height="5" rx="2" fill="' + c.deskLo + '"/>'
+      + '<rect x="38" y="152" width="8" height="30" rx="3" fill="' + c.deskLo + '"/>'
+      + '<rect x="114" y="152" width="8" height="30" rx="3" fill="' + c.deskLo + '"/>'
+      + '<rect x="35" y="179" width="14" height="6" rx="3" fill="' + c.deskLo + '"/>'
+      + '<rect x="111" y="179" width="14" height="6" rx="3" fill="' + c.deskLo + '"/>';
+  }
+
+  function monitor(c, mode) {
+    var p = c.p;
+    var s = '';
+    if (mode === 'code') s += '<circle cx="80" cy="114" r="30" fill="url(#' + p + 'glow)"/>';
+    s += '<rect x="64" y="100" width="32" height="32" rx="4.5" fill="#2b303c"/>'
+      + '<rect x="67" y="103" width="26" height="24" rx="2.5" fill="url(#' + p + 'screen)"/>';
+    if (mode === 'code') {
+      s += '<rect class="' + p + 'cl1" x="70" y="107" width="14" height="2.6" rx="1.3" fill="' + c.scrHi + '"/>'
+        + '<rect class="' + p + 'cl2" x="70" y="112.5" width="20" height="2.6" rx="1.3" fill="' + c.scr + '"/>'
+        + '<rect class="' + p + 'cl3" x="70" y="118" width="11" height="2.6" rx="1.3" fill="' + c.scrHi + '"/>'
+        + '<rect class="' + p + 'cl4" x="70" y="123.5" width="17" height="2.6" rx="1.3" fill="' + c.scr + '"/>'
+        + '<rect class="' + p + 'cur" x="82.5" y="118" width="3" height="6.5" rx="1" fill="#ffffff"/>';
+    }
+    s += '<rect x="77" y="132" width="6" height="5" fill="#2b303c"/>'
+      + '<ellipse cx="80" cy="138.5" rx="10" ry="2.6" fill="#2b303c"/>';
+    return s;
+  }
+
+  function keyboard(c) {
+    return '<rect x="60" y="143" width="40" height="7" rx="2.5" fill="#333a47"/>'
+      + '<rect x="63" y="145" width="34" height="1.4" rx="0.7" fill="#4b5464"/>'
+      + '<rect x="72" y="147.4" width="16" height="1.4" rx="0.7" fill="#4b5464"/>';
+  }
+
+  function seatedBase(c) {
+    return limb(72, 148, 69, 176, 10, c.pants)
+      + limb(88, 148, 91, 176, 10, c.pantsLo)
+      + shoe(c, 68, 174.5)
+      + shoe(c, 92, 174.5)
+      + neck(c, 80, 70, 11, 18)
+      + torso(c, 80, 86, 142, 20, 'url(#' + c.p + 'shirt)');
+  }
+
+  function spriteBuilder(c) {
+    var p = c.p;
+    var b = shadow(c, 80, 188, 52, 9)
+      + chair(c)
+      + seatedBase(c)
+      + desk(c)
+      + monitor(c, 'code')
+      + keyboard(c)
+      + limb(61, 96, 58, 118, 8.5, c.shirt)
+      + limb(99, 96, 102, 118, 8.5, c.shirtLo);
+    var tapL = limb(58, 118, 66, 145, 8.5, c.shirt) + hand(c, 66, 146, 4.3);
+    var tapR = limb(102, 118, 94, 145, 8.5, c.shirtLo) + hand(c, 94, 146, 4.3);
+    if (c.working) {
+      b += '<g class="' + p + 'tapL">' + tapL + '</g><g class="' + p + 'tapR">' + tapR + '</g>';
+    } else {
+      b += tapL + tapR;
+    }
+    b += head(c, 80, 62, 20, { phones: true });
+    var css = '';
+    if (c.working) {
+      css = '.' + p + 'tapL{animation:' + p + 'tap .34s ease-in-out infinite}'
+        + '.' + p + 'tapR{animation:' + p + 'tap .34s ease-in-out .17s infinite}'
+        + '@keyframes ' + p + 'tap{0%,100%{transform:translateY(0)}50%{transform:translateY(2.2px)}}'
+        + '.' + p + 'cl1{animation:' + p + 'flk .8s ease-in-out infinite}'
+        + '.' + p + 'cl2{animation:' + p + 'flk 1.15s ease-in-out .3s infinite}'
+        + '.' + p + 'cl3{animation:' + p + 'flk .95s ease-in-out .15s infinite}'
+        + '.' + p + 'cl4{animation:' + p + 'flk 1.3s ease-in-out .5s infinite}'
+        + '@keyframes ' + p + 'flk{0%,100%{opacity:1}50%{opacity:.35}}'
+        + '.' + p + 'cur{animation:' + p + 'cur 1.1s linear infinite}'
+        + '@keyframes ' + p + 'cur{0%,49%{opacity:1}50%,100%{opacity:0}}';
+    }
+    return wrap(c, css, defsDesk(c), b);
+  }
+
+  function spriteFixer(c) {
+    var p = c.p;
+    var b = shadow(c, 80, 188, 52, 9)
+      + chair(c)
+      + seatedBase(c)
+      + desk(c)
+      + monitor(c, 'dark')
+      + '<g transform="rotate(-5 80 107)">'
+      + '<rect x="66" y="96" width="28" height="22" rx="3" fill="url(#' + p + 'lap)"/>'
+      + '<circle cx="80" cy="107" r="3.4" fill="' + c.scr + '"/>'
+      + '</g>'
+      + '<path d="M 65 118 L 95 118 L 99 126 L 61 126 Z" fill="' + c.lapLo + '"/>'
+      + limb3(61, 96, 56, 108, 63, 119, 8.5, c.shirt)
+      + hand(c, 63, 120, 4.3)
+      + limb3(99, 96, 104, 108, 97, 119, 8.5, c.shirtLo)
+      + hand(c, 97, 120, 4.3)
+      + head(c, 80, 62, 20)
+      + '<circle cx="80" cy="24" r="14" fill="url(#' + p + 'halo)"/>';
+    var wrench = '<g transform="rotate(-14 80 24)">'
+      + '<path d="M 72 9 Q 72 23 80 23 Q 88 23 88 9 L 83.4 9 Q 83.4 17.5 80 17.5 Q 76.6 17.5 76.6 9 Z" fill="' + c.steel + '"/>'
+      + '<rect x="77" y="21.5" width="6" height="17" rx="3" fill="' + c.steelLo + '"/>'
+      + '</g>';
+    b += c.working ? '<g class="' + p + 'wrench">' + wrench + '</g>' : wrench;
+    var css = '';
+    if (c.working) {
+      css = '.' + p + 'wrench{transform-box:fill-box;transform-origin:50% 50%;animation:' + p + 'wrench 1.8s ease-in-out infinite}'
+        + '@keyframes ' + p + 'wrench{0%,100%{transform:rotate(-9deg)}50%{transform:rotate(9deg)}}';
+    }
+    return wrap(c, css, defsDesk(c), b);
+  }
+
   function draw(role, opts) {
     var r = ROLES.indexOf(role) < 0 ? 'idle' : role;
     var c = ctx(r, opts);
     if (r === 'lead') return spriteLead(c);
+    if (r === 'builder') return spriteBuilder(c);
+    if (r === 'fixer') return spriteFixer(c);
     return spriteIdle(c);
   }
 
