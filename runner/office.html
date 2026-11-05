@@ -334,6 +334,122 @@ function syncSel() {
   for (const g of $("floor").querySelectorAll("g.node")) g.classList.toggle("sel", g.dataset.id === selected);
 }
 
+function stepList(steps, numbered) {
+  if (!steps.length) return `<div class="cempty">No steps yet</div>`;
+  return `<ol class="steps">${steps.map((s, i) => `<li class="s-${esc(s.state)}"><span class="stepic">${s.state === "done" ? "\u2713" : ""}</span><span class="txt">${numbered ? i + 1 + ". " : ""}${esc(s.text)}</span></li>`).join("")}</ol>`;
+}
+
+function cardHead(role, st, title, sub) {
+  return `<div class="chead"><div class="avatar">${spriteSvg(role, st, HUES[role])}</div><div><div class="ctitle">${esc(title)}</div><div class="csub">${esc(sub)}</div></div></div><hr class="cdiv">`;
+}
+
+async function laneSteps(n) {
+  if (mode === "demo") return (n.lane && n.lane.steps) || [];
+  if (!n.lane || !n.lane.models) return null;
+  const c = detailCache.get(n.id);
+  if (c && Date.now() - c.t < 2000) return c.steps;
+  try {
+    const d = await (await fetch(`/api/lane/${encodeURIComponent(n.id)}/detail`)).json();
+    if (!d || d.error || !Array.isArray(d.steps)) throw new Error("bad detail");
+    const steps = d.steps.map((s) => ({ text: s.text, state: s.state }));
+    detailCache.set(n.id, { t: Date.now(), steps });
+    return steps;
+  } catch (e) { return c ? c.steps : null; }
+}
+
+function positionCard() {
+  const card = $("card");
+  const n = nodes.find((x) => x.id === selected);
+  if (!n || !layout) { card.hidden = true; return; }
+  card.hidden = false;
+  const L = layout, r = $("stage").getBoundingClientRect();
+  const p = sceneToClient(n.x, n.y);
+  const scale = Math.min(r.width / L.vb.w, r.height / L.vb.h);
+  const cw = card.offsetWidth, chh = card.offsetHeight;
+  let left = p.x - r.left + L.RX * scale + 16;
+  let tail = "tail-left";
+  if (left + cw > r.width - 6) { left = p.x - r.left - L.RX * scale - 16 - cw; tail = "tail-right"; }
+  left = Math.max(6, Math.min(left, Math.max(6, r.width - cw - 6)));
+  let top = p.y - r.top - 34;
+  top = Math.max(6, Math.min(top, Math.max(6, r.height - chh - 6)));
+  card.style.left = Math.round(left) + "px";
+  card.style.top = Math.round(top) + "px";
+  card.className = "card " + tail;
+}
+
+async function renderCard(force) {
+  const id = selected;
+  if (!id) return;
+  const n = nodes.find((x) => x.id === id);
+  if (!n) return;
+  let html = "", info = { title: "", steps: [], progress: "" };
+  if (n.kind === "lead") {
+    const p = model.plan;
+    const steps = (p.next || []).map((x) => ({ text: x.text, state: x.done ? "done" : "pending" }));
+    const dn = steps.filter((s) => s.state === "done").length;
+    info = { title: p.title || "Plan", steps, progress: `${dn} / ${steps.length}` };
+    const dec = (p.decisions || []).slice(-3).reverse();
+    html = cardHead("lead", "idle", p.title || "Plan", `team leader \u00b7 ${p.lead || ""}`) +
+      (p.now ? `<div class="cnow"><b>now:</b> ${esc(p.now)}</div>` : "") +
+      `<div class="clabel">Planned next</div>` + stepList(steps, false) +
+      (dec.length ? `<div class="clabel">Recent decisions</div><ul class="dec">${dec.map((d) => `<li>${esc(d.text)}</li>`).join("")}</ul>` : "") +
+      `<div class="cfoot"><span>Progress: ${dn} / ${steps.length}</span><a class="laneslink" href="/">Open in Lanes</a></div>`;
+  } else {
+    const l = n.lane || {};
+    const steps = (await laneSteps(n)) || [];
+    if (selected !== id) return;
+    const total = (l.progress && l.progress.total) || steps.length;
+    const dn = steps.length ? steps.filter((s) => s.state === "done").length : ((l.progress && l.progress.done) || 0);
+    info = { title: n.task, steps, progress: `${dn} / ${total}` };
+    const sub = `team mate \u00b7 ${shortModel((l.models && l.models.build) || (l.plan && l.plan.model) || "unknown model")}`;
+    html = cardHead(roleOf(n), isWorking(n) ? "working" : "idle", n.task, sub) +
+      stepList(steps, true) +
+      `<div class="cfoot"><span>Progress: ${dn} / ${total}</span><span class="ctok">${tokStr(l.tokens)}</span><span class="badge h-${healthKey(n.health)}">${esc(healthText(n.health))}</span></div>` +
+      `<a class="laneslink" href="${mode === "demo" ? "/" : "/#/lane/" + encodeURIComponent(id)}">Open in Lanes</a>` +
+      (mode === "live" && l.running ? `<div class="steer"><input id="steerText" placeholder="Steer this lane..." maxlength="500"><button id="steerBtn">Send</button><span id="steerMsg"></span></div>` : "");
+  }
+  const sig = JSON.stringify([id, html]);
+  if (!force && sig === cardSig) { positionCard(); return; }
+  cardSig = sig;
+  cardInfo = info;
+  const sv = $("steerText") ? $("steerText").value : "";
+  const sf = document.activeElement === $("steerText");
+  $("card").innerHTML = html;
+  positionCard();
+  const btn = $("steerBtn");
+  if (btn) {
+    $("steerText").addEventListener("keydown", (e) => { if (e.key === "Enter") btn.click(); });
+    if (sv) { $("steerText").value = sv; if (sf) $("steerText").focus(); }
+    btn.onclick = async () => {
+      const text = $("steerText").value.trim();
+      if (!text) return;
+      btn.disabled = true;
+      try {
+        const r = await fetch(`/api/lane/${encodeURIComponent(id)}/steer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+        const j = await r.json();
+        $("steerMsg").textContent = j && j.ok ? "queued" : ((j && j.error) || "failed");
+        if (j && j.ok) $("steerText").value = "";
+      } catch (e) { $("steerMsg").textContent = "failed"; }
+      btn.disabled = false;
+    };
+  }
+}
+
+function openCard(id) {
+  if (!nodes.some((n) => n.id === id)) return;
+  selected = id;
+  syncSel();
+  renderCard(true);
+}
+
+function closeCard() {
+  selected = null;
+  cardSig = "";
+  cardInfo = { title: "", steps: [], progress: "" };
+  $("card").hidden = true;
+  syncSel();
+}
+
 function renderTop() {
   const p = model.plan;
   $("goal").textContent = p.goal || p.title || "(no goal)";
@@ -360,6 +476,10 @@ function render() {
   const sig = JSON.stringify([layout.small, Math.round(layout.vb.w), Math.round(layout.vb.h), nodes.map((n) => [n.id, n.health, n.phase, n.running, roleOf(n), isWorking(n)])]);
   if (sig !== sceneSig) { sceneSig = sig; renderScene(); syncSel(); }
   else positionActors();
+  if (selected) {
+    if (!nodes.some((n) => n.id === selected)) closeCard();
+    else renderCard(false);
+  }
 }
 
 async function tick() {
@@ -375,6 +495,16 @@ async function tick() {
 }
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
+$("floor").addEventListener("click", (e) => {
+  const g = e.target && e.target.closest ? e.target.closest("g.node") : null;
+  if (g) openCard(g.dataset.id); else closeCard();
+});
+$("floor").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const g = e.target && e.target.closest ? e.target.closest("g.node") : null;
+  if (g) { e.preventDefault(); openCard(g.dataset.id); }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCard(); });
 new ResizeObserver(() => {
   if (!layout) return;
   const small = ($("stage").clientWidth || 800) < 700;
