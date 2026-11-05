@@ -258,7 +258,7 @@ async function renderOnboard() {
         <li><span class="ic" style="color:var(--run)">4</span><span style="min-width:0"><code>ca wait &lt;lane&gt;</code><div class="small">blocks until it ends and prints CA_RESULT</div></span></li>
       </ul></div>
     </div></div></section>`;
-  const copy = async () => { $('onboard-copy').textContent = (await copyText('ca onboard --yes')) ? 'Copied' : 'Copy failed'; setTimeout(() => { const b = $('onboard-copy'); if (b) b.textContent = 'Copy'; }, 1500); };
+  const copy = async () => { const b = $('onboard-copy'); if (!b) return; b.textContent = (await copyText('ca onboard --yes')) ? 'Copied' : 'Copy failed'; setTimeout(() => { const b2 = $('onboard-copy'); if (b2) b2.textContent = 'Copy'; }, 1500); };
   $('onboard-cmd').onclick = copy;
   $('onboard-copy').onclick = (e) => { e.stopPropagation(); copy(); };
 }
