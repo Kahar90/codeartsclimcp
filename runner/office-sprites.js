@@ -135,7 +135,7 @@
 
   function wrap(c, css, defs, body) {
     var s = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 200" width="160" height="200" role="img">';
-    if (c.working && css) s += '<style>' + css + '</style>';
+    if (c.working && css) s += '<style>' + css + '@media(prefers-reduced-motion:reduce){[class^="os-"]{animation:none!important}}</style>';
     return s + '<defs>' + defs + '</defs>' + body + '</svg>';
   }
 
