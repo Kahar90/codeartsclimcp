@@ -1,2 +1,0 @@
-[office-sprites 23:05:34] lane ca-office-wt-office-sprites--office-sprites: starting codearts server in D:\Coding\ca-office-wt-office-sprites
-[office-sprites 23:05:36] server http://127.0.0.1:56572 (codearts 26.10.14); watch: ca tail ca-office-wt-office-sprites--office-sprites -f | ca attach ca-office-wt-office-sprites--office-sprites | ca dash
