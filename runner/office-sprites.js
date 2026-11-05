@@ -404,12 +404,57 @@
     return wrap(c, css, defsDesk(c), b);
   }
 
+  function spriteReviewer(c) {
+    var p = c.p;
+    if (!c.working) {
+      var empty = shadow(c, 80, 188, 52, 9)
+        + chair(c)
+        + desk(c)
+        + monitor(c, 'dark')
+        + keyboard(c);
+      return wrap(c, '', defsDesk(c), empty);
+    }
+    var b = shadow(c, 80, 188, 50, 9)
+      + '<rect x="46" y="64" width="68" height="70" rx="22" fill="url(#' + p + 'chair)"/>'
+      + '<rect x="52" y="146" width="56" height="32" rx="9" fill="' + c.chairLo + '"/>'
+      + '<rect x="54" y="176" width="9" height="8" rx="2.5" fill="#3d342c"/>'
+      + '<rect x="97" y="176" width="9" height="8" rx="2.5" fill="#3d342c"/>'
+      + neck(c, 80, 70, 11, 18)
+      + torso(c, 80, 86, 140, 20, 'url(#' + p + 'shirt)')
+      + '<rect x="50" y="128" width="60" height="20" rx="10" fill="' + c.chairHi + '"/>'
+      + limb(66, 148, 64, 176, 10, c.pants)
+      + limb(94, 148, 96, 176, 10, c.pantsLo)
+      + shoe(c, 64, 174.5)
+      + shoe(c, 96, 174.5)
+      + '<path d="M 60 133 L 100 133 L 96 127 L 64 127 Z" fill="' + c.lapLo + '"/>'
+      + '<rect x="64" y="103" width="32" height="25" rx="3" fill="url(#' + p + 'lap)"/>'
+      + '<circle cx="80" cy="115" r="3.4" fill="' + c.scr + '"/>'
+      + limb3(61, 96, 56, 110, 63, 129, 8.5, c.shirt)
+      + hand(c, 63, 130, 4.3)
+      + limb3(99, 96, 104, 110, 97, 129, 8.5, c.shirtLo)
+      + hand(c, 97, 130, 4.3)
+      + '<rect x="40" y="108" width="13" height="36" rx="6.5" fill="' + c.chairLo + '"/>'
+      + '<rect x="107" y="108" width="13" height="36" rx="6.5" fill="' + c.chairLo + '"/>'
+      + '<rect x="40" y="106" width="13" height="9" rx="4.5" fill="' + c.chairHi + '"/>'
+      + '<rect x="107" y="106" width="13" height="9" rx="4.5" fill="' + c.chairHi + '"/>'
+      + head(c, 80, 62, 20, { glasses: true })
+      + '<circle cx="106" cy="88" r="13" fill="url(#' + p + 'halo)"/>';
+    var mag = '<circle cx="106" cy="88" r="7" fill="#cfe8ff" fill-opacity="0.35" stroke="#eaf3ff" stroke-width="2.4"/>'
+      + '<path d="M 111 93 L 118 102" stroke="#eaf3ff" stroke-width="3.4" stroke-linecap="round" fill="none"/>'
+      + '<path d="M 101 85.5 Q 103 82.8 105.8 82.2" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" fill="none" opacity="0.8"/>';
+    b += '<g class="' + p + 'mag">' + mag + '</g>';
+    var css = '.' + p + 'mag{transform-box:fill-box;transform-origin:50% 50%;animation:' + p + 'mag 1.4s ease-in-out infinite}'
+      + '@keyframes ' + p + 'mag{0%,100%{transform:scale(1);opacity:.95}50%{transform:scale(1.15);opacity:.65}}';
+    return wrap(c, css, defsDesk(c), b);
+  }
+
   function draw(role, opts) {
     var r = ROLES.indexOf(role) < 0 ? 'idle' : role;
     var c = ctx(r, opts);
     if (r === 'lead') return spriteLead(c);
     if (r === 'builder') return spriteBuilder(c);
     if (r === 'fixer') return spriteFixer(c);
+    if (r === 'reviewer') return spriteReviewer(c);
     return spriteIdle(c);
   }
 
