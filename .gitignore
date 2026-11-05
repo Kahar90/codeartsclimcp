@@ -4,3 +4,4 @@ checks/profile-*/
 .codeartsdoer/
 tasks/*.lane/
 tasks/*.out
+tasks/*.lane.log
