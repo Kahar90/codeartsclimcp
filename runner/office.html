@@ -27,7 +27,8 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .nowline b{color:#c6cad8;font-weight:600}
 .stage{position:relative;height:clamp(420px,calc(100vh - 320px),640px);overflow:hidden;background:#0d0d12}
 #tilt{position:absolute;inset:0}
-#grid{position:absolute;inset:-80px;background-color:#0d0d12;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='76' height='38'%3E%3Cpath d='M0 19 L38 0 L76 19 L38 38 Z' fill='none' stroke='rgba(255,255,255,0.05)' stroke-width='1'/%3E%3C/svg%3E");background-size:76px 38px}
+#grid{position:absolute;inset:-80px;background-color:#0d0d12;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='76' height='38'%3E%3Cpath d='M0 19 L38 0 L76 19 L38 38 Z' fill='none' stroke='rgba(255,255,255,0.05)' stroke-width='1'/%3E%3C/svg%3E");background-size:76px 38px;will-change:transform;animation:drift 26s linear infinite}
+@keyframes drift{to{transform:translate(76px,38px)}}
 #floorglow{position:absolute;inset:0;background:radial-gradient(ellipse 80% 65% at 50% 42%,rgba(124,92,191,.16),rgba(124,92,191,0) 70%)}
 #floor{position:absolute;inset:0;width:100%;height:100%;display:block}
 #actors{position:absolute;inset:0;pointer-events:none}
@@ -36,6 +37,8 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .cfloat svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible}
 .char.working .cfloat svg{animation:bob 1.7s ease-in-out infinite}
 @keyframes bob{50%{transform:translateY(-3px)}}
+.char.floaty .cfloat{animation:floaty var(--fdur,3.8s) ease-in-out infinite;animation-delay:var(--fdel,0s);will-change:transform}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
 #floor .link{stroke:#98a0b4;stroke-opacity:.38;stroke-width:1.6;fill:none;stroke-linejoin:round;stroke-linecap:round}
 #floor .node{cursor:pointer}
 #floor .node .spot{opacity:0;transform:scale(.8);transform-box:fill-box;transform-origin:center;transition:opacity var(--dur-ui) var(--ease-out),transform var(--dur-ui) var(--ease-out)}
@@ -64,6 +67,17 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .glow.g-done .garc{stroke:url(#rim-done)}
 .glow.g-plan .garc{stroke:url(#rim-plan)}
 .glow.g-lead .garc{stroke:url(#rim-lead)}
+.node .glow{animation:breathe 2.6s ease-in-out infinite;animation-delay:var(--gdel,0s)}
+.h-warn .glow{animation-duration:4.6s}
+.h-bad .glow{animation-name:flicker;animation-duration:3.4s}
+.h-lead .glow{animation-duration:3.6s}
+.h-done .glow,.h-plan .glow{animation:none}
+@keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
+@keyframes flicker{0%,84%,100%{opacity:.5}88%{opacity:1}92%{opacity:.55}96%{opacity:.95}}
+.pkt{pointer-events:none}
+.phalo{fill:#2dd4a0;opacity:.16}
+.phead{fill:#d7ffe9;opacity:.95}
+.ptrail{fill:#2dd4a0;opacity:.5}
 .platetxt{fill:#c6cad8;font-size:12px;font-variant:small-caps;letter-spacing:.05em}
 .card{position:absolute;width:300px;max-width:calc(100% - 12px);max-height:calc(100% - 12px);overflow:auto;background:#1d1d24;border:1px solid #3d3d49;border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:12px;z-index:6}
 .card.tail-left::before,.card.tail-right::before{content:"";position:absolute;top:22px;width:12px;height:12px;background:#1d1d24;border-left:1px solid #3d3d49;border-bottom:1px solid #3d3d49}
@@ -362,6 +376,7 @@ function createNode(n) {
   const g = layer.lastElementChild;
   const hk = n.kind === "lead" ? "lead" : healthKey(n.health);
   g.__x = n.x; g.__y = n.y; g.__hk = hk; g.__task = n.task; g.__name = plateName(n.task); g.__glowSide = "a";
+  g.style.setProperty("--gdel", "-" + (hash(n.id) % 2400) + "ms");
   nodeEls.set(n.id, g);
   if (prevInit && !animState.reducedMotion) {
     g.querySelector(".lift").animate([{ transform: "translateY(30px) scale(.6)", opacity: 0 }, { transform: "translateY(0px) scale(1)", opacity: 1 }], { duration: 420, easing: EASE_SPRING, fill: "backwards" });
@@ -417,6 +432,53 @@ function killPackets(st) {
   st.pktEls.length = 0;
 }
 
+function samplePath(path, count) {
+  let len = 0;
+  try { len = path.getTotalLength(); } catch (e) { return []; }
+  const pts = [];
+  for (let i = 0; i < count; i++) {
+    const p = path.getPointAtLength((len * i) / (count - 1));
+    pts.push({ x: p.x, y: p.y });
+  }
+  return pts;
+}
+
+function spawnPackets(n, st) {
+  const pts = samplePath(st.path, 22);
+  if (pts.length < 2) return;
+  const dur = 2600 + n.row * 450 + n.wave * 300;
+  const kf = pts.map((p, i) => ({ transform: `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`, offset: i / (pts.length - 1) }));
+  const specs = [
+    { r: 8, cls: "phalo", del: 0 },
+    { r: 3.4, cls: "phead", del: 0 },
+    { r: 2.6, cls: "ptrail", del: -140 },
+    { r: 2, cls: "ptrail", del: -280 },
+    { r: 1.5, cls: "ptrail", del: -420 },
+  ];
+  for (const sp of specs) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("r", sp.r);
+    c.setAttribute("class", "pkt " + sp.cls);
+    c.setAttribute("transform", `translate(${pts[0].x} ${pts[0].y})`);
+    st.g.appendChild(c);
+    st.pktEls.push(c);
+    st.pktAnims.push(c.animate(kf, { duration: dur, delay: sp.del, iterations: Infinity, easing: "linear" }));
+  }
+}
+
+function ensurePackets() {
+  if (animState.intro === "running") return;
+  for (const n of nodes) {
+    if (n.kind !== "lane") continue;
+    const st = linkEls.get(n.id);
+    if (!st) continue;
+    const want = isWorking(n) && !animState.reducedMotion;
+    if (want === !!st.pktOn) continue;
+    if (want) { st.pktOn = true; spawnPackets(n, st); }
+    else { st.pktOn = false; killPackets(st); }
+  }
+}
+
 function syncLinks() {
   const layer = $("links");
   const seen = new Set();
@@ -435,6 +497,8 @@ function syncLinks() {
       st.d = d;
       st.path.setAttribute("d", d);
       st.path.style.strokeDasharray = "";
+      st.pktOn = false;
+      killPackets(st);
     }
   }
   for (const id of [...linkEls.keys()]) {
@@ -444,6 +508,7 @@ function syncLinks() {
     killPackets(st);
     fadeOutRemove(st.g);
   }
+  ensurePackets();
 }
 
 function fallbackSprite(hue) {
@@ -458,7 +523,10 @@ function createChar(n) {
   const el = document.createElement("div");
   const working = isWorking(n);
   const role = roleOf(n);
-  el.className = "char" + (working ? " working" : "");
+  el.className = "char" + (working ? " working" : " floaty");
+  const hv = hash(n.id);
+  el.style.setProperty("--fdur", (3.4 + (hv % 9) * 0.15).toFixed(2) + "s");
+  el.style.setProperty("--fdel", "-" + (hv % 3500) + "ms");
   el.dataset.char = n.id;
   el.__role = role;
   el.__working = working;
@@ -484,6 +552,7 @@ function updateChar(n, el) {
     el.__role = role;
     el.__working = working;
     el.classList.toggle("working", working);
+    el.classList.toggle("floaty", !working);
     crossfadeSprite(el, spriteSvg(role, working ? "working" : "idle", HUES[role]));
   }
   sizeChar(el);
@@ -826,7 +895,7 @@ function playIntro() {
     i++;
   }
   clearTimeout(introTimer);
-  introTimer = setTimeout(() => { animState.intro = "done"; }, 1800);
+  introTimer = setTimeout(() => { animState.intro = "done"; ensurePackets(); }, 1800);
 }
 
 function render() {
