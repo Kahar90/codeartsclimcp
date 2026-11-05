@@ -147,6 +147,8 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 #complete th,#complete td{padding:7px 10px;text-align:left;border-bottom:1px solid #26262e}
 #complete th{color:#8a90a4;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em}
 #complete td{color:#d6dae6}
+body.reduced #grid,body.reduced .node .glow,body.reduced .char .cfloat,body.reduced .char .cfloat svg,body.reduced .s-current .stepic,body.reduced #complete,body.reduced #complete tbody tr,body.reduced .s-done .stepic .ck{animation:none!important}
+body.reduced .glowgrp{transition-duration:.15s}
 @media (max-width:700px){
   body{padding:10px}
   .wrap{gap:10px}
@@ -1026,6 +1028,18 @@ function diffEffects() {
   prevInit = true;
 }
 
+function applyReduced() {
+  const red = mqReduce.matches;
+  if (red === animState.reducedMotion) return;
+  animState.reducedMotion = red;
+  document.body.classList.toggle("reduced", red);
+  if (red) {
+    for (const [, st] of linkEls) { st.pktOn = false; killPackets(st); }
+  } else {
+    ensurePackets();
+  }
+}
+
 function playIntro() {
   if (animState.reducedMotion) { animState.intro = "done"; return; }
   animState.intro = "running";
@@ -1169,6 +1183,8 @@ document.addEventListener("mousemove", (e) => {
   const g = t && t.closest ? t.closest("g.node") : null;
   setHovered(g ? g.dataset.node : null);
 });
+document.body.classList.toggle("reduced", animState.reducedMotion);
+mqReduce.addEventListener("change", applyReduced);
 new ResizeObserver(() => { if (layout) render(); }).observe($("stage"));
 if (mode === "demo") render();
 setInterval(tick, 2000);
