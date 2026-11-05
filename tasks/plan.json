@@ -1,0 +1,22 @@
+{
+  "title": "Office view for codearts-build",
+  "goal": "An isometric agent-office visualizer for the lane dashboard: lead and lanes as glowing platforms with characters, step checklist cards, live progress, completion summary.",
+  "lead": "Claude Opus 5.5",
+  "status": "running",
+  "now": "Waiting for both lanes (scene page and character sprites) to finish.",
+  "waves": [
+    { "name": "Wave 1", "lanes": ["office-scene", "office-sprites"], "note": "parallel, disjoint files" }
+  ],
+  "lanes": [
+    { "task": "office-scene", "repo": ".", "model": "maas/glm-5.3", "why": "page, layout, data, card, routes", "files": ["runner/office.html", "runner/ca.mjs", "runner/dash.html"] },
+    { "task": "office-sprites", "repo": "../ca-office-wt-office-sprites", "model": "maas/glm-5.3", "why": "SVG characters per role", "files": ["runner/office-sprites.js"] }
+  ],
+  "next": [
+    "Merge the sprites worktree into main",
+    "Run both checks on main, look at the screenshots",
+    "Copy office files and route into the live skill runner",
+    "Update SKILL.md"
+  ],
+  "decisions": [],
+  "risks": ["Sprite art quality from a text-only model; Claude judges the screenshots"]
+}
