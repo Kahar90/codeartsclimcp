@@ -343,6 +343,34 @@ function plateName(t) { return t.length > 24 ? t.slice(0, 23) + "\u2026" : t; }
 function plateWidth(name, L) { return Math.min(L.RX * 1.9, Math.max(84, name.length * 7.8 + 20)); }
 function wallD() { const L = layout; return `M ${-L.RX} 0 A ${L.RX} ${L.RY} 0 0 0 ${L.RX} 0 L ${L.RX} ${L.WALL} A ${L.RX} ${L.RY} 0 0 1 ${-L.RX} ${L.WALL} Z`; }
 function frontArcD() { const L = layout; return `M ${-L.RX} ${L.WALL} A ${L.RX} ${L.RY} 0 0 0 ${L.RX} ${L.WALL}`; }
+function geoSig() { const L = layout; return `${L.small}|${L.RX}|${L.RY}|${L.CW}|${L.CH}|${L.WALL}|${L.PLATE_Y}|${L.PLATE_H}`; }
+function bakeNodeGeometry(g, name) {
+  const L = layout;
+  const front = frontArcD(), wall = wallD();
+  const pw = Math.round(plateWidth(name, L));
+  const spot = g.querySelector(".spot");
+  spot.setAttribute("rx", L.RX * 1.5);
+  spot.setAttribute("ry", L.RY * 1.9);
+  g.querySelector(".wall").setAttribute("d", wall);
+  const top = g.querySelector(".plat-top");
+  top.setAttribute("rx", L.RX);
+  top.setAttribute("ry", L.RY);
+  const inner = g.querySelector(".inner");
+  inner.setAttribute("rx", Math.round(L.RX * 0.55));
+  inner.setAttribute("ry", Math.round(L.RY * 0.55));
+  for (const arc of g.querySelectorAll(".garc")) arc.setAttribute("d", front);
+  const rim = g.querySelector(".rim");
+  rim.setAttribute("rx", L.RX);
+  rim.setAttribute("ry", L.RY);
+  g.querySelector(".front").setAttribute("d", front);
+  const plate = g.querySelector(".plate");
+  plate.setAttribute("transform", `translate(0 ${L.PLATE_Y})`);
+  const rect = plate.querySelector("rect");
+  rect.setAttribute("width", pw);
+  rect.setAttribute("x", -pw / 2);
+  rect.setAttribute("height", L.PLATE_H);
+  plate.querySelector(".platetxt").setAttribute("y", L.PLATE_H - 8);
+}
 
 function buildSceneSkeleton() {
   $("floor").innerHTML = `<defs>
@@ -368,7 +396,7 @@ function nodeSvg(n) {
     + `<ellipse class="spot" rx="${L.RX * 1.5}" ry="${L.RY * 1.9}" fill="url(#spotg)"/>`
     + `<g class="lift">`
     + `<path class="wall" d="${wall}"/>`
-    + `<ellipse class="top" rx="${L.RX - 2}" ry="${L.RY - 2}" fill="url(#topg)"/>`
+    + `<ellipse class="top plat-top" rx="${L.RX}" ry="${L.RY}" fill="url(#topg)"/>`
     + `<ellipse class="inner" rx="${Math.round(L.RX * 0.55)}" ry="${Math.round(L.RY * 0.55)}" fill="none" stroke="#ffffff" stroke-opacity=".06"/>`
     + `<g class="glowgrp ga">${glowInner}</g>`
     + `<g class="glowgrp gb" style="opacity:0">${glowInner}</g>`
@@ -384,7 +412,7 @@ function createNode(n) {
   layer.insertAdjacentHTML("beforeend", nodeSvg(n));
   const g = layer.lastElementChild;
   const hk = n.kind === "lead" ? "lead" : healthKey(n.health);
-  g.__x = n.x; g.__y = n.y; g.__hk = hk; g.__task = n.task; g.__name = plateName(n.task); g.__glowSide = "a";
+  g.__x = n.x; g.__y = n.y; g.__hk = hk; g.__task = n.task; g.__name = plateName(n.task); g.__geo = geoSig(); g.__glowSide = "a";
   g.style.setProperty("--gdel", "-" + (hash(n.id) % 2400) + "ms");
   nodeEls.set(n.id, g);
   if (prevInit && !animState.reducedMotion) {
@@ -413,6 +441,8 @@ function updateNode(n, g) {
     rect.setAttribute("width", pw);
     rect.setAttribute("x", -pw / 2);
   }
+  const geo = geoSig();
+  if (g.__geo !== geo) { g.__geo = geo; bakeNodeGeometry(g, name); }
 }
 
 function removeNode(id) {
@@ -1145,6 +1175,7 @@ window.__office = {
       plan: (model && model.plan && model.plan.title) || "",
       nodes: ns,
       links: linkCount,
+      geometry: layout ? { small: layout.small, RX: layout.RX, RY: layout.RY, WALL: layout.WALL } : null,
       selected: selected || null,
       hovered: hovered || null,
       card: open ? { open: true, title: cardInfo.title, steps: cardInfo.steps, progress: cardInfo.progress } : { open: false, title: "", steps: [], progress: "" },
