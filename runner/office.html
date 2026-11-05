@@ -123,5 +123,149 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
   <section id="complete" hidden></section>
 </main>
 <script src="/office-sprites.js"></script>
+<script>
+"use strict";
+(() => {
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const q = new URLSearchParams(location.search);
+const demoDone = q.get("demo") === "done";
+const mode = q.has("demo") ? "demo" : "live";
+
+const HUES = { lead: 265, builder: 160, reviewer: 42, fixer: 16, idle: 222 };
+const healthKey = (h) => {
+  const k = String(h || "").split("(")[0].trim();
+  if (k === "running" || k === "running tool") return "run";
+  if (["quiet", "needs review", "stopped", "killed", "attention", "partial"].includes(k)) return "warn";
+  if (["STALLED", "DEAD", "failed"].includes(k)) return "bad";
+  if (k === "done") return "done";
+  if (k === "planned") return "plan";
+  return "run";
+};
+const healthText = (h) => String(h || "").split("(")[0].trim() || "planned";
+const isWorking = (n) => n.kind === "lane" && healthKey(n.health) === "run";
+const roleOf = (n) => n.kind === "lead" ? "lead" : (n.health === "planned" || n.phase === "planned") ? "idle" : n.phase === "review" ? "reviewer" : n.phase === "fix" ? "fixer" : "builder";
+const tokStr = (t) => { const n = t ? (t.input || 0) + (t.output || 0) + (t.reasoning || 0) : 0; return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "K tok" : n + " tok"; };
+const commitsOf = (l) => parseInt(String(l.commits || "0").split("/")[0], 10) || 0;
+const shortModel = (m) => String(m || "").replace(/^huaweicloud-maas\//, "codearts/");
+function fmtDur(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + "s";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "m";
+  return Math.floor(m / 60) + "h" + String(m % 60).padStart(2, "0") + "m";
+}
+
+let plansArr = [], lanesArr = [], planSel = null, plansSig = "";
+let model = null, nodes = [], layout = null, linkCount = 0;
+let selected = null, cardSig = "", cardInfo = { title: "", steps: [], progress: "" };
+let sceneSig = "", fetchErr = "";
+const detailCache = new Map();
+
+function demoModel() {
+  const t0 = Date.now();
+  const done = demoDone;
+  const mkSteps = (texts, dn, cur) => texts.map((tx, i) => ({ text: tx, state: done || i < dn ? "done" : cur === i + 1 ? "current" : "pending" }));
+  const mk = (id, o) => {
+    const started = t0 - (o.dur + 6) * 60000;
+    return {
+      id, task: id, health: done ? "done" : o.health, phase: o.phase, running: !done && !!o.running,
+      result: done ? "done" : (o.result || ""), verdict: done ? "ok" : (o.verdict || ""),
+      commits: `${done ? o.texts.length : o.dn}/${o.texts.length}`,
+      models: { build: o.model }, tokens: o.tokens,
+      progress: { done: done ? o.texts.length : o.dn, total: o.texts.length, current: !done && o.cur ? { n: o.cur, text: o.texts[o.cur - 1] } : null },
+      steps: mkSteps(o.texts, o.dn, o.cur), startedAt: started, finishedAt: done ? started + o.dur * 60000 : null,
+    };
+  };
+  const scene = mk("office-scene", { health: "running", running: true, phase: "build", model: "maas/glm-5.3",
+    texts: ["Routes in ca.mjs", "Page shell with the goal box", "Data layer with demo mode", "Scene, cards and completion"],
+    dn: 2, cur: 3, dur: 46, tokens: { input: 12100, output: 21400, reasoning: 4800 } });
+  const sprites = mk("office-sprites", { health: "quiet", running: false, phase: "build", model: "maas/glm-5.3",
+    texts: ["Sprite contract check", "Draw the five roles", "Polish the animations"],
+    dn: 1, cur: 2, dur: 32, tokens: { input: 3900, output: 7100, reasoning: 1400 } });
+  const review = mk("review-pass", { health: "done", running: false, phase: "review", model: "maas/glm-5.3",
+    texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"],
+    dn: 4, cur: 0, dur: 8, tokens: { input: 1700, output: 3200, reasoning: 700 }, result: "done", verdict: "ok" });
+  const at = (m) => new Date(t0 - m * 60000).toISOString();
+  return {
+    plan: {
+      id: "demo", title: "Office view for codearts-build", goal: "Build the Office view for codearts-build lanes",
+      lead: "Claude Opus 5.5", status: done ? "done" : "running",
+      now: done ? "All lanes finished; reviewing the screenshots." : "Waiting for the scene and sprites lanes to finish.",
+      next: [{ text: "Merge the sprites worktree into main", done: true }, { text: "Run both checks on main and look at the screenshots", done: false }, { text: "Copy the office files into the live skill runner", done: false }],
+      decisions: [
+        { at: at(52), text: "Sprites lane works in a separate worktree so both lanes run in parallel." },
+        { at: at(41), text: "The scene page polls the runner API directly; the server stays stateless." },
+        { at: at(12), text: "Fallback characters keep the page working before the sprites land." },
+      ],
+    },
+    lanes: [scene, sprites, review],
+    waves: [{ name: "Wave 1", lanes: [scene, sprites] }, { name: "Wave 2", lanes: [review] }],
+  };
+}
+
+function liveModel() {
+  const plan = (planSel && plansArr.find((p) => p.id === planSel)) || plansArr[0] || null;
+  if (plan) return { plan, lanes: plan.waves.flatMap((w) => w.lanes || []), waves: plan.waves };
+  const recent = lanesArr.filter((l) => l.startedAt && Date.now() - l.startedAt < 86400e3);
+  return {
+    plan: { id: "", title: "Recent lanes", goal: "Recent lanes", lead: "Claude", status: "", now: "", next: [], decisions: [] },
+    lanes: recent, waves: [{ name: "Recent lanes", lanes: recent }],
+  };
+}
+
+function buildNodes(m) {
+  const p = m.plan;
+  const lead = { id: "lead", kind: "lead", task: p.lead || "Lead", health: "lead", phase: "", running: false, lane: null, wave: -1, row: -1,
+    steps: { done: (p.next || []).filter((x) => x.done).length, total: (p.next || []).length } };
+  const lanes = [];
+  (m.waves || []).forEach((w, wi) => (w.lanes || []).forEach((l, li) => lanes.push({
+    id: l.id, kind: "lane", task: l.task || l.id, health: l.health || "planned", phase: l.phase || "", running: !!l.running, lane: l, wave: wi, row: li,
+    steps: { done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 },
+  })));
+  return [lead, ...lanes];
+}
+
+function renderTop() {
+  const p = model.plan;
+  $("goal").textContent = p.goal || p.title || "(no goal)";
+  $("leadChip").textContent = p.lead || "";
+  $("leadChip").hidden = !p.lead;
+  $("statusChip").textContent = p.status || "";
+  $("statusChip").hidden = !p.status;
+  $("nowText").textContent = fetchErr ? fetchErr + " (retrying every 2 s)" : (p.now || "");
+  $("nowline").hidden = !$("nowText").textContent;
+  const sel = $("planSel");
+  const sig = JSON.stringify(plansArr.map((x) => x.id));
+  if (mode === "live" && plansArr.length > 1) {
+    sel.hidden = false;
+    if (sig !== plansSig) { plansSig = sig; sel.innerHTML = plansArr.map((x) => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join(""); }
+    sel.value = (planSel && plansArr.some((x) => x.id === planSel)) ? planSel : plansArr[0].id;
+  } else { sel.hidden = true; plansSig = ""; }
+}
+
+function render() {
+  model = mode === "demo" ? demoModel() : liveModel();
+  nodes = buildNodes(model);
+  renderTop();
+}
+
+async function tick() {
+  if (mode === "demo") return;
+  try {
+    const [pr, lr] = await Promise.all([fetch("/api/plans"), fetch("/api/lanes")]);
+    plansArr = await pr.json();
+    lanesArr = await lr.json();
+    if (!planSel) planSel = (plansArr[0] && plansArr[0].id) || null;
+    fetchErr = "";
+  } catch (e) { fetchErr = "dashboard server not reachable"; }
+  render();
+}
+
+$("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
+render();
+if (mode !== "demo") { tick(); setInterval(tick, 2000); }
+})();
+</script>
 </body>
 </html>
