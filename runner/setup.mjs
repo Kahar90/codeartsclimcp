@@ -77,6 +77,12 @@ function buildPlan(harness, repo, flags) {
     addJSON(plan, errors, path.join(repo, '.vscode', 'mcp.json'), 'servers', 'codearts', { type: 'stdio', ...SERVER });
   }
 
+  if (harness === 'claude') {
+    addJSON(plan, errors, path.join(repo, '.mcp.json'), 'mcpServers', 'codearts', SERVER);
+    notes.push(`claude: repo scope written to .mcp.json. For every project instead, run:\n  claude mcp add -s user codearts -- node ${CA_MJS} mcp`);
+    notes.push('claude: the CodeArts Claude Code skill "codearts-build" covers the workflow.');
+  }
+
   return { plan, errors, notes };
 }
 
