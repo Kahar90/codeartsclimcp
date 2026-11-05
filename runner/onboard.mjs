@@ -19,6 +19,15 @@ const CA_MJS = path.join(HERE, 'ca.mjs');
 const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
 const SETTINGS = process.env.CA_SETTINGS || path.join(CA_HOME, 'cli-data', 'settings.json');
 const HARNESSES = ['kiro', 'cursor', 'claude', 'codex', 'vscode'];
+// Marker -> harness, first match wins (.claude/CLAUDE.md -> claude, .codex/AGENTS.md -> codex).
+const MARKERS = [['kiro', '.kiro'], ['cursor', '.cursor'], ['claude', '.claude'], ['claude', 'CLAUDE.md'], ['codex', '.codex'], ['codex', 'AGENTS.md'], ['vscode', '.vscode']];
+const HARNESS_NEXT = {
+  kiro: 'In Kiro chat: #codearts-lanes then describe the goal',
+  cursor: 'In Cursor chat: @codearts-lanes then describe the goal',
+  claude: 'In Claude Code: /codearts-build <goal> (or the codearts_build MCP prompt)',
+  codex: 'In Codex: ask it to follow AGENTS.md CodeArts lanes section',
+  vscode: 'In VS Code chat (agent mode): use the codearts MCP tools',
+};
 const PORTAL = 'https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth';
 const DASH = 'http://127.0.0.1:4777';
 const oneLine = (s, n = 200) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
@@ -117,8 +126,42 @@ export default async function onboard(args) {
     } else add(repoRows, 'trusted folder', 'planned', `${repo} is not in security.trustedFolders`, `ca onboard --yes adds it (or add it to ${SETTINGS})`);
   }
 
-  // ---- 3. harness ----
-  const harness = harnessArg || null;
+  // ---- 3. harness: detect from markers (--harness overrides), then run ca setup ----
+  let harness = harnessArg || null;
+  let via = harnessArg ? `--harness ${harnessArg}` : '';
+  if (!harness) {
+    const hit = MARKERS.find(([, m]) => fs.existsSync(path.join(repo, m)));
+    if (hit) { harness = hit[0]; via = `detected from ${hit[1]}`; }
+  }
+  if (!harness) {
+    add(harnessRows, 'harness', 'warn', 'no harness detected (no .kiro, .cursor, .claude or CLAUDE.md, .codex or AGENTS.md, .vscode)', `ca onboard --harness <${HARNESSES.join('|')}>`);
+  } else {
+    add(harnessRows, 'harness', 'ok', `${harness} (${via})`);
+    const setupArgs = [CA_MJS, 'setup', harness, repo, ...(dry ? ['--dry-run'] : [])];
+    if (dry) {
+      const r = run(process.execPath, setupArgs, { timeout: 30000 });
+      if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} --dry-run exited ${r.status ?? '?'}: ${oneLine(r.stderr || r.stdout, 180)}`, `run node ca.mjs setup ${harness} ${repo}`);
+      else {
+        const planned = (r.stdout || '').split(/\r?\n/).map((l) => l.trim())
+          .filter((l) => { const lo = l.toLowerCase(); return lo === repo.toLowerCase() || lo.startsWith(repo.toLowerCase() + path.sep); });
+        add(harnessRows, 'harness setup', 'planned', planned.length ? `would write: ${planned.join(', ')}` : `ca setup ${harness} ${repo} (dry run)`, 'ca onboard --yes');
+      }
+    } else {
+      let doFix = yes;
+      if (!doFix && interactive) doFix = await confirm(`Run ca setup ${harness} for ${repo} (writes the MCP server and rules config)?`);
+      if (doFix) {
+        const r = run(process.execPath, setupArgs, { timeout: 30000 });
+        if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} exited ${r.status ?? '?'}: ${oneLine(r.stderr || r.stdout, 180)}`, `run node ca.mjs setup ${harness} ${repo}`);
+        else {
+          const lines = (r.stdout || '').split(/\r?\n/).filter(Boolean);
+          const acts = lines.map((l) => l.match(/^(wrote|updated|unchanged) (.+)$/)).filter(Boolean);
+          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l));
+          const detail = [acts.map((m) => `${m[1]} ${m[2]}`).join(', '), ...notes.map((n) => oneLine(n, 140))].filter(Boolean).join('; ');
+          add(harnessRows, 'harness setup', acts.some((m) => m[1] !== 'unchanged') ? 'fixed' : 'ok', detail || `ca setup ${harness} ran`);
+        }
+      } else add(harnessRows, 'harness setup', 'planned', `ca setup ${harness} ${repo} writes the MCP server and rules config`, 'ca onboard --yes');
+    }
+  }
 
   // ---- 4. smoke test ----
   add(smokeRows, 'smoke test', 'skipped', 'not requested; ca onboard --smoke runs a throwaway probe lane');
@@ -129,6 +172,7 @@ export default async function onboard(args) {
   const ready = fails === 0;
   const next = [];
   if (!harness) next.push(`ca onboard --harness <${HARNESSES.join('|')}>`);
+  else next.push(HARNESS_NEXT[harness]);
   next.push(`Dashboard: ${DASH}`);
 
   if (asJson) console.log(JSON.stringify({ harness, repo, ready, steps, next }, null, 2));
