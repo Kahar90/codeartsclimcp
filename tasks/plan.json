@@ -3,7 +3,7 @@
   "goal": "Make codearts-build pleasant, reliable and informative for engineers in their existing workflow, usable from Claude Code, Kiro, Cursor, Codex and VS Code, with easy onboarding and a polished live Office view.",
   "lead": "Claude Opus 5.5",
   "status": "running",
-  "now": "Wave 3 running: mcp, setup, office-motion in parallel worktrees.",
+  "now": "Wave 3 mcp + office-motion running; setup merged; onboard lane started.",
   "waves": [
     {
       "name": "Wave 1: Office view",
