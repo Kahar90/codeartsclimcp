@@ -10,7 +10,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA_MJS = path.resolve(HERE, 'ca.mjs').replace(/\\/g, '/');
 const WORKFLOW = fs.readFileSync(path.resolve(HERE, '..', 'docs', 'workflow.md'), 'utf8');
 const SERVER = { command: 'node', args: [CA_MJS, 'mcp'] };
-const HARNESSES = ['claude', 'kiro', 'cursor', 'codex', 'vscode'];
+const HARNESSES = ['claude', 'kiro', 'cursor', 'codex', 'vscode', 'opencode'];
 
 function usage() {
   process.stderr.write(
@@ -86,7 +86,7 @@ function buildPlan(harness, repo, flags) {
   }
 
   if (harness === 'cursor') {
-    addJSON(plan, errors, path.join(repo, '.cursor', 'mcp.json'), 'mcpServers', 'codearts', SERVER);
+    addJSON(plan, errors, path.join(repo, '.cursor', 'mcp.json'), 'mcpServers', 'codearts', { type: 'stdio', ...SERVER }); // Cursor docs list type as required
     plan.push({
       path: path.join(repo, '.cursor', 'rules', 'codearts-lanes.mdc'),
       content: `---\ndescription: Delegate coding work to CodeArts lanes (plan, brief, start, wait, verify)\nalwaysApply: false\n---\n${WORKFLOW}`,
@@ -104,7 +104,9 @@ function buildPlan(harness, repo, flags) {
   }
 
   if (harness === 'codex') {
-    const toml = `[mcp_servers.codearts]\ncommand = "node"\nargs = [${tomlStr(CA_MJS)}, "mcp"]\n`;
+    // Codex asks before every MCP tool call: pre-approve the read-only tools (same set as Kiro).
+    const toml = `[mcp_servers.codearts]\ncommand = "node"\nargs = [${tomlStr(CA_MJS)}, "mcp"]\n`
+      + AUTO_APPROVE.map((t) => `\n[mcp_servers.codearts.tools.${t}]\napproval_mode = "approve"\n`).join('');
     const config = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml');
     if (flags.write && !flags.dryRun) {
       const existing = readText(config);
@@ -117,6 +119,13 @@ function buildPlan(harness, repo, flags) {
       notes.push(`codex: MCP server for ${config}. Add this block:\n${toml}`);
     }
     plan.push({ path: path.join(repo, 'AGENTS.md'), content: upsertBlock(readText(path.join(repo, 'AGENTS.md')), WORKFLOW) });
+  }
+
+  if (harness === 'opencode') {
+    // opencode: project opencode.json "mcp" map (command is one array), rules from AGENTS.md.
+    addJSON(plan, errors, path.join(repo, 'opencode.json'), 'mcp', 'codearts', { type: 'local', command: [SERVER.command, ...SERVER.args], enabled: true });
+    plan.push({ path: path.join(repo, 'AGENTS.md'), content: upsertBlock(readText(path.join(repo, 'AGENTS.md')), WORKFLOW) });
+    notes.push('opencode: the codearts tools load in this repo; AGENTS.md carries the workflow.');
   }
 
   return { plan, errors, notes };

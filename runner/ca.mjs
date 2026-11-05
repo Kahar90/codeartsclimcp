@@ -20,7 +20,7 @@
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
-//        ca setup <harness> [repo]   write MCP + rules config for claude|kiro|cursor|codex|vscode
+//        ca setup <harness> [repo]   write MCP + rules config for claude|kiro|cursor|codex|vscode|opencode
 //        ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]   guided first-run setup
 //        ca mcp                            run the MCP server (runner/mcp.mjs), if installed
 //        ca tail <lane> [-f] [-n N]        readable transcript

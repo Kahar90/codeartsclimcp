@@ -241,7 +241,7 @@ async function renderOnboard() {
   const chip = (s) => `<span class="badge ${s === 'ok' ? 'h-done' : s === 'warn' ? 'h-needs-review' : 'h-failed'}">${esc(s)}</span>`;
   const mark = (s) => `<span class="ic" style="color:${s === 'ok' ? 'var(--ok)' : s === 'warn' ? 'var(--warn)' : 'var(--bad)'}">${s === 'ok' ? '&#10003;' : s === 'warn' ? '!' : '&#10007;'}</span>`;
   const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0"><span class="row" style="justify-content:flex-start;gap:8px"><b>${esc(c.name)}</b>${chip(c.status)}</span>${c.detail ? `<div class="small">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(c.fix)}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
-  const harnesses = [['kiro', 'Kiro'], ['cursor', 'Cursor'], ['claude', 'Claude Code'], ['codex', 'Codex'], ['vscode', 'VS Code']];
+  const harnesses = [['kiro', 'Kiro'], ['cursor', 'Cursor'], ['claude', 'Claude Code'], ['codex', 'Codex'], ['vscode', 'VS Code'], ['opencode', 'opencode']];
   $('view').innerHTML = `<section id="onboard"><div class="pad">
     <h2 class="title">Set up CodeArts lanes</h2>
     <p class="goal">One-time setup: CodeArts credentials, a git repo, a trusted folder and your harness (Kiro, Cursor, Claude Code, Codex or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
