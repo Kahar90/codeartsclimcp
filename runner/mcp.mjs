@@ -330,6 +330,7 @@ methods['prompts/get'] = (params) => {
 
 // ---------- stdin loop: one JSON-RPC message per line, exit when stdin ends ----------
 let exited = false;
+const inflight = new Set();
 function shutdown() {
   if (exited) return;
   exited = true;
@@ -346,8 +347,11 @@ rl.on('line', (line) => {
   if (!t) return;
   let msg;
   try { msg = JSON.parse(t); } catch { return send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error: line is not valid JSON' } }); }
-  handleMessage(msg).catch((e) => log('unhandled message error:', e));
+  const p = handleMessage(msg).catch((e) => log('unhandled message error:', e));
+  inflight.add(p); p.finally(() => inflight.delete(p));
 });
-rl.on('close', shutdown);
+// stdin ended: answer what is already in flight (scripts pipe a few requests and close), then exit.
+// Capped at 30 s so a long ca_wait cannot keep an orphaned server alive.
+rl.on('close', () => { const cap = new Promise((r) => setTimeout(r, 30000).unref()); Promise.race([Promise.allSettled([...inflight]), cap]).then(shutdown); });
 process.stdin.on('error', () => shutdown());
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => shutdown());
