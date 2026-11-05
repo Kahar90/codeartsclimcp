@@ -983,7 +983,9 @@ function cmdDash(args) {
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach)$/);
       if (m) {
-        const l = findLane(decodeURIComponent(m[1]));
+        const q = decodeURIComponent(m[1]); const all = lanes();
+        const l = all.find((x) => x.id === q) || all.find((x) => x.task === q) || all.find((x) => x.id.includes(q));
+        if (!l) return json({ error: `no lane matches "${q}"` }, 404); // never die(): one stale browser tab must not kill the dashboard
         if (m[2] === 'detail') return json(laneDetail(l));
         if (m[2] === 'log') {
           const f = path.join(l.dir, 'live.log'); const from = Number(u.searchParams.get('from') || 0);
