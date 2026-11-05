@@ -121,6 +121,10 @@ const needCount = (v, name, def, max) => {
   return Math.min(Math.round(n), max);
 };
 const optStr = (a, name) => (a[name] === undefined || a[name] === null ? [] : [needStr(a[name], name)]);
+const needLanes = (v) => {
+  if (!Array.isArray(v) || v.length < 1 || !v.every((x) => typeof x === 'string' && x.trim())) throw new ArgError('lanes');
+  return v.map((x) => x.trim());
+};
 
 const TOOLS = [
   {
@@ -172,6 +176,19 @@ const TOOLS = [
     ok: [0],
     timeout: 60000,
     build: (a) => ['status', '--json', ...(a.all ? ['--all'] : [])],
+  },
+  {
+    name: 'ca_wait',
+    description: 'Block until every given lane has a result or timeout_s passes (default 300, max 3000). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed or stopped, 3 missing credentials, 4 needs review) and timedOut. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lanes: { type: 'array', items: { type: 'string' }, description: 'lane ids or task names to wait for (as in ca_status)' },
+        timeout_s: { type: 'number', description: 'how long to block at most, seconds (default 300, max 3000)' },
+      },
+      required: ['lanes'],
+    },
+    run: waitResult,
   },
   {
     name: 'ca_summary',
@@ -243,6 +260,34 @@ const TOOLS = [
     build: (a) => ['note', ...(a.now ? ['--now'] : []), needStr(a.text, 'text')],
   },
 ];
+
+// The last {...} JSON object on stdout: ca wait prints CA_RESULT lines plus one JSON object
+// ({"lanes":[...]} when done, {"timeout":true,"lanes":[status rows]} on exit 124).
+function lastJsonObject(s) {
+  const lines = String(s || '').split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (t.charCodeAt(0) !== 123 || t.charCodeAt(t.length - 1) !== 125) continue;
+    try {
+      const v = JSON.parse(t);
+      if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    } catch { /* a CA_RESULT or partial line, keep looking */ }
+  }
+  return null;
+}
+
+// ca_wait: exit codes 0, 1, 4 and 124 are results; 2 (unknown lane) and anything else are tool errors.
+async function waitResult(a) {
+  const lanes = needLanes(a.lanes);
+  const timeoutS = needCount(a.timeout_s, 'timeout_s', 300, 3000);
+  const r = await runCli(['wait', ...lanes, '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
+  const final = lastJsonObject(r.stdout);
+  if (![0, 1, 4, 124].includes(r.code) || !final) {
+    const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();
+    return { content: [{ type: 'text', text: `ca_wait exited ${r.code}${raw ? ':\n' + raw : ' with no output'}` }], isError: true };
+  }
+  return { content: [{ type: 'text', text: JSON.stringify({ ...final, exit: r.code, timedOut: r.code === 124 }, null, 2) }], isError: false };
+}
 
 async function cliResult(tool, cliArgs) {
   const r = await runCli(cliArgs, tool.timeout || 120000);
