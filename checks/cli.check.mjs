@@ -70,8 +70,8 @@ const bf = path.join(repo, 'tasks', 'feature-x.md');
 check('init writes tasks/<task>.md', r.code === 0 && fs.existsSync(bf), r.err);
 const brief = fs.existsSync(bf) ? fs.readFileSync(bf, 'utf8') : '';
 check('init brief has goal, CHECK line and safety rules', /Add a feature x/.test(brief) && /^CHECK:/m.test(brief) && /Safety rules/.test(brief));
-r = ca(['init', repo, 'feature-x']); check('init refuses to overwrite without --force', r.code === 2 && fs.readFileSync(bf, 'utf8') === brief, `${r.code}`);
-r = ca(['init', repo, 'feature-x', '--force', '--goal', 'Other']); check('init --force overwrites', r.code === 0 && /Other/.test(fs.readFileSync(bf, 'utf8')));
+r = ca(['init', repo, 'feature-x']); check('init refuses to overwrite without --force', r.code === 2 && fs.existsSync(bf) && fs.readFileSync(bf, 'utf8') === brief, `${r.code}`);
+r = ca(['init', repo, 'feature-x', '--force', '--goal', 'Other']); check('init --force overwrites', r.code === 0 && fs.existsSync(bf) && /Other/.test(fs.readFileSync(bf, 'utf8')));
 const nogit = path.join(tmp, 'plain'); fs.mkdirSync(nogit);
 r = ca(['init', nogit, 't']); check('init in a non-git folder warns (git init hint)', /git init/.test(r.out + r.err));
 
