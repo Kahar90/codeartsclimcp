@@ -566,7 +566,8 @@ async function runLane(repoArg, task) {
   // ---- summary ----
   syncCommits();
   S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done') : (reason === 'stopped' ? 'stopped' : 'failed');
-  S.reason = reason; S.exitCode = exitCode; S.phase = 'finished'; S.activity = S.result; S.busy = false; S.finishedAt = now();
+  const finalExit = S.result === 'needs review' ? 4 : exitCode;
+  S.reason = reason; S.exitCode = finalExit; S.phase = 'finished'; S.activity = S.result; S.busy = false; S.finishedAt = now();
   const log = git(repo, 'log', '--oneline', `${START}..HEAD`);
   const left = dirty();
   const reviewBody = review ? (() => { const ls = review.split(/\r?\n/); const i = ls.findIndex((l) => /^\s*1\.\s/.test(l)); return ls.slice(i >= 0 ? i : Math.max(0, ls.length - 16)).filter((l) => l.trim() && !/^\s*VERDICT:/i.test(l)).slice(0, 24).join('\n'); })() : '';
@@ -589,8 +590,23 @@ async function runLane(repoArg, task) {
   L(`== finished: ${S.result}${reason ? ' (' + reason + ')' : ''}`);
   save(true);
   process.stdout.write('\n' + md + '\n');
+  process.stdout.write(`CA_RESULT ${JSON.stringify({ lane: id, result: S.result, verdict: S.verdict || '', exit: finalExit, summaryPath: path.join(dir, 'summary.md') })}\n`);
   cleanup();
-  process.exit(exitCode);
+  process.exit(finalExit);
+}
+
+// `ca lane <repo> <task> --detach`: same lane, background, log file, returns at once.
+function cmdDetach(repoArg, task) {
+  const repo = path.resolve(repoArg);
+  const briefFile = path.join(repo, 'tasks', `${task}.md`);
+  if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
+  const id = laneId(repo, task);
+  const logFile = path.join(repo, 'tasks', `${task}.lane.log`);
+  const out = fs.openSync(logFile, 'a');
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'lane', repoArg, task], { detached: true, stdio: ['ignore', out, out], windowsHide: true });
+  child.unref();
+  console.log(`lane ${id} started (pid ${child.pid}). Log: ${logFile}. Wait: ca wait ${id}. Watch: ${dashUrl()}`);
+  process.exit(0);
 }
 
 // ---------- control commands ----------
@@ -843,6 +859,11 @@ async function cmdDoctor(args) {
   }
   if (fails) process.exit(1);
 }
+async function cmdMcp() {
+  const f = path.join(HERE, 'mcp.mjs');
+  if (!fs.existsSync(f)) die('mcp server not installed', 2);
+  await import(pathToFileURL(f).href);
+}
 
 // ---------- the lead's plan (written by Claude, shown on the dashboard) ----------
 // <repo>/tasks/plan.json: { title, goal, lead, status, now, waves:[{name, lanes:[task], note}],
@@ -974,7 +995,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
+const table = { lane: () => (args.includes('--detach') ? cmdDetach(...args.filter((a) => !a.startsWith('--'))) : runLane(args[0], args[1])), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
