@@ -1,0 +1,22 @@
+{
+  "name": "codearts-lanes",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CodeArts lanes runner: supervise private CodeArts coding lanes from any agent harness",
+  "bin": {
+    "ca": "runner/ca.mjs"
+  },
+  "files": [
+    "runner",
+    "templates",
+    "docs",
+    "bin",
+    "scripts"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node -e \"const fs=require('fs'),cp=require('child_process');let bad=0;for(const f of fs.readdirSync('checks').filter((c)=>c.endsWith('.check.mjs')).sort()){console.log('== '+f);try{cp.execFileSync(process.execPath,['checks/'+f],{stdio:'inherit'})}catch{console.error('FAILED '+f);bad=1}}process.exit(bad)\""
+  }
+}
