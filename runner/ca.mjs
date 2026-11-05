@@ -763,6 +763,24 @@ async function cmdWait(args) {
     await sleep(Math.min(2000, deadline - now()));
   }
 }
+function cmdInit(args) {
+  const gi = args.indexOf('--goal');
+  const goal = gi >= 0 ? args[gi + 1] : '';
+  if (gi >= 0 && !goal) die('usage: ca init <repo> <task> [--goal "<text>"] [--force]', 2);
+  const pos = args.filter((a, i) => !a.startsWith('--') && !(gi >= 0 && i === gi + 1));
+  const [repoArg, task] = pos;
+  if (!repoArg || !task) die('usage: ca init <repo> <task> [--goal "<text>"] [--force]', 2);
+  const repo = path.resolve(repoArg);
+  const file = path.join(repo, 'tasks', `${task}.md`);
+  if (fs.existsSync(file) && !args.includes('--force')) die(`${file} exists (use --force to overwrite)`, 2);
+  const tpl = fs.readFileSync(path.join(SKILL, 'templates', 'brief.md'), 'utf8');
+  fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
+  fs.writeFileSync(file, tpl.replace(/<one sentence goal[^>]*>/, goal || 'TODO: goal'));
+  console.log(`brief: ${file}`);
+  if (!git(repo, 'rev-parse', '--git-dir')) console.log('not a git repo yet: run git init && git commit --allow-empty -m init');
+  console.log(`next: ca lane ${repoArg} ${task} --detach`);
+  console.log(`      ca wait ${laneId(repo, task)}`);
+}
 
 // ---------- the lead's plan (written by Claude, shown on the dashboard) ----------
 // <repo>/tasks/plan.json: { title, goal, lead, status, now, waves:[{name, lanes:[task], note}],
@@ -894,7 +912,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
+const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
