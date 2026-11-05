@@ -94,8 +94,8 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .card.tail-left{transform-origin:left center}
 .card.tail-right{transform-origin:right center}
 .chead{display:flex;gap:10px;align-items:center}
-.avatar{width:38px;height:38px;flex:0 0 38px;background:#141419;border:1px solid #33333f;border-radius:9px;padding:3px}
-.avatar svg{width:100%;height:100%;display:block;overflow:visible}
+.avatar{width:40px;height:40px;flex:0 0 40px;background:radial-gradient(circle at 50% 35%,#262633,#141419);border:1px solid #33333f;border-radius:10px;overflow:hidden}
+.avatar svg{width:100%;height:100%;display:block}
 .ctitle{font-weight:650;font-size:14.5px;overflow-wrap:anywhere}
 .csub{color:#98a0b4;font-size:12px;margin-top:1px}
 .cdiv{border:0;border-top:1px solid #32323e;margin:10px 0}
@@ -318,17 +318,17 @@ function computeLayout() {
   const w = $("stage").clientWidth || 800;
   const small = w < 700;
   const RX = small ? 92 : 148, RY = small ? 34 : 54;
-  const CW = Math.round(RX * 0.8), CH = Math.round(CW * 1.25);
+  const CW = Math.round(RX * 1.15), CH = Math.round(CW * 1.25);
   const WALL = 14;
   const PLATE_Y = RY + WALL + 4, PLATE_H = small ? 22 : 26;
   const colP = RX * 2 + (small ? 56 : 64);
-  const rowP = RY * 2 + (small ? 128 : 140);
+  const rowP = RY * 2 + (small ? 150 : 170);
   const leadX = RX + 34, leadY = CH + RY + 26;
   for (const n of nodes) {
     if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
     else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
   }
-  const footOff = 10, feetFrac = 0.93;
+  const footOff = Math.round(RY * 0.3), feetFrac = 0.93;
   let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
   for (const n of nodes) {
     x0 = Math.min(x0, n.x - RX); x1 = Math.max(x1, n.x + RX);
@@ -556,8 +556,8 @@ function syncLinks() {
 function fallbackSprite(hue) {
   return `<svg viewBox="0 0 60 84" xmlns="http://www.w3.org/2000/svg"><ellipse cx="30" cy="79" rx="15" ry="4" fill="rgba(0,0,0,.45)"/><circle cx="30" cy="17" r="11" fill="hsl(${hue},42%,74%)"/><rect x="15" y="28" width="30" height="46" rx="13" fill="hsl(${hue},48%,58%)"/></svg>`;
 }
-function spriteSvg(role, st, hue) {
-  try { if (window.OfficeSprites && window.OfficeSprites.draw) return window.OfficeSprites.draw(role, { state: st, hue }); } catch (e) {}
+function spriteSvg(role, st, hue, portrait) {
+  try { if (window.OfficeSprites && window.OfficeSprites.draw) return window.OfficeSprites.draw(role, { state: st, hue, portrait: !!portrait }); } catch (e) {}
   return fallbackSprite(hue);
 }
 
@@ -767,7 +767,7 @@ function setAvatar(role, st) {
   const sig = role + ":" + st;
   if (!crefs || crefs.avatarSig === sig) return;
   crefs.avatarSig = sig;
-  crefs.avatar.innerHTML = spriteSvg(role, st, HUES[role]);
+  crefs.avatar.innerHTML = spriteSvg(role, st, HUES[role], true);
 }
 
 async function laneSteps(n) {
