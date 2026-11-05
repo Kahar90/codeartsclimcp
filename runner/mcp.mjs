@@ -49,6 +49,25 @@ async function handleMessage(msg) {
   }
 }
 
+// ---------- initialize, ping ----------
+const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const INSTRUCTIONS = [
+  'You are the lead over CodeArts build lanes: the lanes are the workers.',
+  'Run ca_doctor first and fix every fail row, write one brief per lane with ca_init, then start it with ca_lane_start.',
+  'Block on ca_wait instead of polling ca_status; exit 124 means still running, call it again.',
+  'When a lane ends, read ca_summary, judge the reviewer findings against the brief and verify the work yourself by running the repo checks on the branch.',
+  'Steer a running lane with ca_steer, stop it with ca_stop.',
+  'The human watches the dashboard at http://127.0.0.1:4777 (Office view at /office).',
+].join(' ');
+
+methods.initialize = (params) => ({
+  protocolVersion: PROTOCOLS.includes(params.protocolVersion) ? params.protocolVersion : PROTOCOLS[0],
+  capabilities: { tools: {}, prompts: {} },
+  serverInfo: { name: 'codearts-lanes', version: VERSION },
+  instructions: INSTRUCTIONS,
+});
+methods.ping = () => ({});
+
 // ---------- stdin loop: one JSON-RPC message per line, exit when stdin ends ----------
 let exited = false;
 function shutdown() {
