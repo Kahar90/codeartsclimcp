@@ -1,22 +1,137 @@
 {
-  "title": "Office view for codearts-build",
-  "goal": "An isometric agent-office visualizer for the lane dashboard: lead and lanes as glowing platforms with characters, step checklist cards, live progress, completion summary.",
+  "title": "CodeArts lanes: Office view, harness-neutral CLI, MCP, onboarding",
+  "goal": "Make codearts-build pleasant, reliable and informative for engineers in their existing workflow, usable from Claude Code, Kiro, Cursor, Codex and VS Code, with easy onboarding and a polished live Office view.",
   "lead": "Claude Opus 5.5",
   "status": "running",
-  "now": "Waiting for both lanes (scene page and character sprites) to finish.",
+  "now": "Wave 3 running: mcp, setup, office-motion in parallel worktrees.",
   "waves": [
-    { "name": "Wave 1", "lanes": ["office-scene", "office-sprites"], "note": "parallel, disjoint files" }
+    {
+      "name": "Wave 1: Office view",
+      "lanes": [
+        "office-scene",
+        "office-sprites"
+      ],
+      "note": "merged"
+    },
+    {
+      "name": "Wave 2: engineer CLI",
+      "lanes": [
+        "cli-dx"
+      ],
+      "note": "merged"
+    },
+    {
+      "name": "Wave 3: harnesses + motion",
+      "lanes": [
+        "mcp",
+        "setup",
+        "office-motion"
+      ],
+      "note": "parallel worktrees"
+    },
+    {
+      "name": "Wave 4: onboarding",
+      "lanes": [
+        "onboard"
+      ],
+      "note": "after setup merges"
+    }
   ],
   "lanes": [
-    { "task": "office-scene", "repo": ".", "model": "maas/glm-5.3", "why": "page, layout, data, card, routes", "files": ["runner/office.html", "runner/ca.mjs", "runner/dash.html"] },
-    { "task": "office-sprites", "repo": "../ca-office-wt-office-sprites", "model": "maas/glm-5.3", "why": "SVG characters per role", "files": ["runner/office-sprites.js"] }
+    {
+      "task": "office-scene",
+      "repo": ".",
+      "model": "maas/glm-5.3",
+      "why": "page, layout, data, card",
+      "files": [
+        "runner/office.html"
+      ]
+    },
+    {
+      "task": "office-sprites",
+      "repo": "../ca-office-wt-office-sprites",
+      "model": "maas/glm-5.3",
+      "why": "SVG characters",
+      "files": [
+        "runner/office-sprites.js"
+      ]
+    },
+    {
+      "task": "cli-dx",
+      "repo": ".",
+      "model": "maas/glm-5.3",
+      "why": "doctor, wait, json, init, detach",
+      "files": [
+        "runner/ca.mjs"
+      ]
+    },
+    {
+      "task": "mcp",
+      "repo": "../ca-office-wt-mcp",
+      "model": "maas/glm-5.3",
+      "why": "MCP stdio server for any harness",
+      "files": [
+        "runner/mcp.mjs"
+      ]
+    },
+    {
+      "task": "setup",
+      "repo": "../ca-office-wt-setup",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "one-command harness config",
+      "files": [
+        "runner/setup.mjs"
+      ]
+    },
+    {
+      "task": "office-motion",
+      "repo": "../ca-office-wt-office-motion",
+      "model": "maas/glm-5.3",
+      "why": "polished animation",
+      "files": [
+        "runner/office.html",
+        "runner/office-sprites.js"
+      ]
+    },
+    {
+      "task": "onboard",
+      "repo": "../ca-office-wt-onboard",
+      "model": "maas/glm-5.3",
+      "why": "guided first run, packaging, dashboard empty state",
+      "files": [
+        "runner/onboard.mjs",
+        "runner/ca.mjs",
+        "runner/dash.html",
+        "package.json",
+        "bin/"
+      ]
+    }
   ],
   "next": [
-    "Merge the sprites worktree into main",
-    "Run both checks on main, look at the screenshots",
-    "Copy office files and route into the live skill runner",
-    "Update SKILL.md"
+    {
+      "text": "Merge office-scene, office-sprites, cli-dx",
+      "done": true
+    },
+    "Merge wave 3, run all checks",
+    "Run onboard lane",
+    "README quickstart + harness guide",
+    "Install into the live skill, update SKILL.md"
   ],
-  "decisions": [],
-  "risks": ["Sprite art quality from a text-only model; Claude judges the screenshots"]
+  "decisions": [
+    {
+      "at": "2026-11-05T17:27:27.911Z",
+      "text": "Overruled cli-dx reviewer: ca setup hook was a lead steer, not scope creep."
+    },
+    {
+      "at": "2026-11-05T17:27:27.912Z",
+      "text": "Fixed sprites myself: reviewer idle drew the empty desk, idle role drew a person."
+    },
+    {
+      "at": "2026-11-05T17:27:27.912Z",
+      "text": "Fixed ca lane with no args crashing (exit 2 now)."
+    }
+  ],
+  "risks": [
+    "Sprite art quality from a text-only model; Claude judges the screenshots"
+  ]
 }
