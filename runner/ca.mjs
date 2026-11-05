@@ -186,6 +186,7 @@ class Server {
 
 // ---------- lane supervisor ----------
 async function runLane(repoArg, task) {
+  if (!repoArg || !task) die('usage: ca lane <repo> <task> [--detach]', 2);
   const repo = path.resolve(repoArg);
   const briefFile = path.join(repo, 'tasks', `${task}.md`);
   if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
@@ -597,6 +598,7 @@ async function runLane(repoArg, task) {
 
 // `ca lane <repo> <task> --detach`: same lane, background, log file, returns at once.
 function cmdDetach(repoArg, task) {
+  if (!repoArg || !task) die('usage: ca lane <repo> <task> [--detach]', 2);
   const repo = path.resolve(repoArg);
   const briefFile = path.join(repo, 'tasks', `${task}.md`);
   if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
