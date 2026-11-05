@@ -759,6 +759,8 @@ function cmdDash(args) {
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     try {
       if (u.pathname === '/') { let html = page; try { html = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8'); } catch {} res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); }
+      if (u.pathname === '/office') { let html = ''; try { html = fs.readFileSync(path.join(HERE, 'office.html'), 'utf8'); } catch {} if (html) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); } }
+      if (u.pathname === '/office-sprites.js') { try { const js = fs.readFileSync(path.join(HERE, 'office-sprites.js'), 'utf8'); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }); return res.end(js); } catch { return json({ error: 'office-sprites.js not found' }, 404); } }
       if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
       if (u.pathname === '/api/plans') return json(plans().map(planView));
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach)$/);
