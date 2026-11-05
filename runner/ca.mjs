@@ -710,6 +710,59 @@ async function cmdSetup(args) {
   if (typeof mod.default !== 'function') die('setup.mjs has no default export', 2);
   await mod.default(args);
 }
+// Exit code of a finished lane, from the usage table: 0 done (review ready or skipped),
+// 1 failed/stopped/killed, 3 missing credentials, 4 needs review.
+function laneExit(s) {
+  if (s.result === 'done') return !s.verdict || s.verdict === 'ready' ? 0 : 4;
+  if (s.result === 'needs review') return 4;
+  if (s.result === 'failed' && s.exitCode === 3) return 3;
+  return 1;
+}
+const exitRank = (c) => ({ 1: 3, 3: 2, 4: 1 }[c] ?? 0);
+const worstExit = (codes) => codes.reduce((a, b) => (exitRank(b) > exitRank(a) ? b : a), 0);
+async function cmdWait(args) {
+  const asJson = args.includes('--json'); const quiet = args.includes('--quiet');
+  const ti = args.indexOf('--timeout');
+  const timeoutS = ti >= 0 ? Number(args[ti + 1]) : NaN;
+  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--timeout S] [--json] [--quiet]', 2);
+  const qs = args.filter((a, i) => !a.startsWith('--') && !(ti >= 0 && i === ti + 1));
+  if (!qs.length) die('usage: ca wait <lane...> [--timeout S] [--json] [--quiet]', 2);
+  const targets = qs.map((q) => findLane(q)); // resolve every lane first: unknown -> exit 2
+  const deadline = Number.isFinite(timeoutS) && timeoutS > 0 ? now() + timeoutS * 1000 : Infinity;
+  const last = new Map(); let lastBeat = 0;
+  const readState = (l) => readJSON(path.join(l.dir, 'state.json')) || l.s;
+  const note = (l, s) => {
+    const pg = stepProgress(s);
+    process.stderr.write(`[${hhmmss()}] ${l.id} ${health(s)} phase ${s.phase} step ${pg.done}/${pg.total} idle ${s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt))} now ${oneLine(s.activity, 70)}\n`);
+  };
+  for (;;) {
+    const states = targets.map((l) => {
+      const s = readState(l);
+      return { l, s: !s.result && !alive(s.pid) ? { ...s, result: 'failed', reason: 'supervisor gone' } : s };
+    });
+    for (const { l, s } of states) {
+      const pg = stepProgress(s);
+      const key = `${health(s)}|${s.phase}|${pg.current?.n ?? ''}`;
+      if (last.get(l.id) !== key) { last.set(l.id, key); if (!quiet) note(l, s); }
+    }
+    if (states.every(({ s }) => s.result)) {
+      const objs = states.map(({ l, s }) => ({ lane: l.id, result: s.result, verdict: s.verdict || '', exit: laneExit(s),
+        summaryPath: fs.existsSync(path.join(l.dir, 'summary.md')) ? path.join(l.dir, 'summary.md') : null }));
+      for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
+      if (asJson) process.stdout.write(JSON.stringify({ lanes: objs }) + '\n');
+      process.exit(worstExit(objs.map((o) => o.exit)));
+    }
+    if (now() >= deadline) {
+      const running = states.filter(({ s }) => !s.result).map(({ l }) => l);
+      if (asJson) console.log(JSON.stringify({ timeout: true, waitedS: timeoutS, lanes: running.map(statusRow) }));
+      else { console.log(`wait: timeout after ${timeoutS}s; still running:`); printRows(running.map(laneRow)); }
+      process.exit(124);
+    }
+    if (!lastBeat) lastBeat = now();
+    else if (now() - lastBeat >= 60000) { lastBeat = now(); if (!quiet) for (const { l, s } of states) if (!s.result) note(l, s); }
+    await sleep(Math.min(2000, deadline - now()));
+  }
+}
 
 // ---------- the lead's plan (written by Claude, shown on the dashboard) ----------
 // <repo>/tasks/plan.json: { title, goal, lead, status, now, waves:[{name, lanes:[task], note}],
@@ -841,7 +894,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
+const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
