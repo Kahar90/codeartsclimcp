@@ -781,6 +781,68 @@ function cmdInit(args) {
   console.log(`next: ca lane ${repoArg} ${task} --detach`);
   console.log(`      ca wait ${laneId(repo, task)}`);
 }
+// Preflight for engineers and agents: every row is ok | warn | fail, secrets are never printed.
+async function cmdDoctor(args) {
+  const asJson = args.includes('--json');
+  const repo = path.resolve(args.filter((a) => !a.startsWith('--'))[0] || process.cwd());
+  const rows = [];
+  const add = (name, status, detail, fix = '') => rows.push({ name, status, detail, fix });
+
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  add('node', nodeMajor >= 20 ? 'ok' : 'fail', `v${process.versions.node}`, nodeMajor >= 20 ? '' : 'install Node 20 or newer');
+
+  if (!fs.existsSync(EXE)) add('codearts', 'fail', `not found at ${EXE}`, 'install the CodeArts CLI');
+  else {
+    const r = spawnSync(EXE, ['--version'], { encoding: 'utf8', timeout: 20000, env: caEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const v = oneLine(((r.stdout || '') + ' ' + (r.stderr || '')).trim(), 120);
+    if (r.status === 0) add('codearts', 'ok', v || 'installed (no --version output)');
+    else add('codearts', 'warn', r.error ? `could not run: ${oneLine(r.error.message, 100)}` : `--version exited ${r.status ?? '?'}${v ? ': ' + v : ''}`, 'run the codearts exe manually to check the install');
+  }
+
+  const missCred = [!userEnv('CODEARTS_CLI_AK') && 'CODEARTS_CLI_AK', !userEnv('CODEARTS_CLI_SK') && 'CODEARTS_CLI_SK'].filter(Boolean);
+  add('credentials', missCred.length ? 'fail' : 'ok', missCred.length ? `missing ${missCred.join(', ')}` : 'set',
+    missCred.length ? 'set CODEARTS_CLI_AK and CODEARTS_CLI_SK in the (Windows user) environment; values are never printed' : '');
+
+  add('maas key', userEnv('MAAS_API_KEY') ? 'ok' : 'warn', userEnv('MAAS_API_KEY') ? 'set' : 'not set, falls back to CodeArts quota models',
+    userEnv('MAAS_API_KEY') ? '' : 'set MAAS_API_KEY to use the MaaS models');
+
+  const g = spawnSync('git', ['--version'], { encoding: 'utf8' });
+  add('git', g.status === 0 ? 'ok' : 'fail', oneLine(((g.stdout || '') + (g.stderr || '')).trim(), 120) || 'git not found', g.status === 0 ? '' : 'install git');
+
+  const settings = readJSON(path.join(CA_HOME, 'cli-data', 'settings.json')) || {};
+  const trusted = [].concat(settings.security?.trustedFolders || []).map(String);
+  const underTrusted = (p) => { const a = path.resolve(p).toLowerCase(); return trusted.some((f) => { const b = path.resolve(f).toLowerCase(); return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep); }); };
+  add('trusted folder', underTrusted(repo) ? 'ok' : 'warn', underTrusted(repo) ? `${repo} is trusted` : `${repo} is not in security.trustedFolders`,
+    underTrusted(repo) ? '' : `node ${path.join(SKILL, 'scripts', 'trust.mjs')} ${repo} (a ca lane run trusts the repo too)`);
+
+  const sh = workerShell();
+  const shOk = !!(sh && fs.existsSync(sh));
+  add('shell', shOk ? 'ok' : 'fail', sh || 'no SHELL set', shOk ? '' : 'set SHELL or CA_SHELL to Git bash (Git\\bin\\bash.exe)');
+
+  try {
+    const r = await fetch(`${dashUrl()}/api/lanes`, { signal: AbortSignal.timeout(1500) });
+    add('dashboard', r.ok ? 'ok' : 'warn', r.ok ? `running at ${dashUrl()}` : `HTTP ${r.status}`, r.ok ? '' : 'ca dash (lanes start it on demand)');
+  } catch { add('dashboard', 'warn', 'not running, starts on demand', 'ca dash (lanes start it on demand)'); }
+
+  const chromeCands = [process.env.CHROME_PATH,
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].filter(Boolean);
+  const chromePath = chromeCands.find((c) => fs.existsSync(c));
+  add('chrome', chromePath ? 'ok' : 'warn', chromePath || 'not found (optional, used by browser checks)', chromePath ? '' : 'install Google Chrome for the office and sprite checks');
+
+  const fails = rows.filter((r) => r.status === 'fail').length;
+  if (asJson) console.log(JSON.stringify({ checks: rows }, null, 2));
+  else {
+    const cols = ['name', 'status', 'detail', 'fix'];
+    const w = cols.map((c, i) => Math.max(['NAME', 'STATUS', 'DETAIL', 'FIX'][i].length, ...rows.map((r) => String(r[c]).length)));
+    console.log(['NAME', 'STATUS', 'DETAIL', 'FIX'].map((h, i) => h.padEnd(w[i])).join('  '));
+    for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
+    console.log(`doctor: ${fails ? `not ready (${fails} fail)` : 'ready'}`);
+  }
+  if (fails) process.exit(1);
+}
 
 // ---------- the lead's plan (written by Claude, shown on the dashboard) ----------
 // <repo>/tasks/plan.json: { title, goal, lead, status, now, waves:[{name, lanes:[task], note}],
@@ -912,7 +974,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
+const table = { lane: () => runLane(args[0], args[1]), status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
