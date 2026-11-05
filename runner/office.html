@@ -134,7 +134,6 @@ body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#
 .steer button{background:#33334a;border:1px solid #4a4a5c;border-radius:7px;color:#fff;font:12.5px system-ui,"Segoe UI",sans-serif;padding:6px 10px;cursor:pointer}
 .steer button:hover{background:#41415c}
 .steer button:disabled{opacity:.5;cursor:default}
-#steerMsg{font-size:11px;color:#8a90a4;flex:0 0 auto}
 #complete{background:#161618;border:1px solid #2b2b33;border-radius:16px;padding:16px 18px;animation:riseup .45s var(--ease-out)}
 @keyframes riseup{from{transform:translateY(16px);opacity:0}}
 #complete tbody tr{animation:rowin .4s var(--ease-out) backwards}
@@ -215,13 +214,6 @@ const roleOf = (n) => n.kind === "lead" ? "lead" : (n.health === "planned" || n.
 const tokStr = (t) => { const n = t ? (t.input || 0) + (t.output || 0) + (t.reasoning || 0) : 0; return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "K tok" : n + " tok"; };
 const commitsOf = (l) => parseInt(String(l.commits || "0").split("/")[0], 10) || 0;
 const shortModel = (m) => String(m || "").replace(/^huaweicloud-maas\//, "codearts/");
-function fmtDur(ms) {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return s + "s";
-  const m = Math.floor(s / 60);
-  if (m < 60) return m + "m";
-  return Math.floor(m / 60) + "h" + String(m % 60).padStart(2, "0") + "m";
-}
 function hash(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 9973; return h; }
 
 let plansArr = [], lanesArr = [], planSel = null, plansSig = "";
@@ -239,9 +231,9 @@ const nodeEls = new Map();
 const charEls = new Map();
 const linkEls = new Map();
 const prevById = new Map();
-let sceneBuilt = false, prevInit = false, lastLayoutSig = "", completeSig = "", countGen = 0;
+let sceneBuilt = false, prevInit = false, completeSig = "", countGen = 0;
 let introPlayed = false, introTimer = null, cardTimer = null;
-let cardKind = "", cardSelId = "", cardReq = 0, crefs = null, cardCloseAnim = null;
+let cardReq = 0, crefs = null, cardCloseAnim = null;
 
 const DEMO_T0 = Date.now();
 const DEMO_BASE = {
@@ -467,16 +459,17 @@ function spawnPackets(n, st) {
   const dur = 2600 + n.row * 450 + n.wave * 300;
   const kf = pts.map((p, i) => ({ transform: `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`, offset: i / (pts.length - 1) }));
   const specs = [
-    { r: 8, cls: "phalo", del: 0 },
-    { r: 3.4, cls: "phead", del: 0 },
-    { r: 2.6, cls: "ptrail", del: -140 },
-    { r: 2, cls: "ptrail", del: -280 },
-    { r: 1.5, cls: "ptrail", del: -420 },
+    { r: 8, cls: "phalo", del: 0, op: "" },
+    { r: 3.4, cls: "phead", del: 0, op: "" },
+    { r: 2.6, cls: "ptrail", del: 140, op: ".55" },
+    { r: 2, cls: "ptrail", del: 280, op: ".38" },
+    { r: 1.5, cls: "ptrail", del: 420, op: ".22" },
   ];
   for (const sp of specs) {
     const c = document.createElementNS(NS, "circle");
     c.setAttribute("r", sp.r);
     c.setAttribute("class", "pkt " + sp.cls);
+    if (sp.op) c.style.opacity = sp.op;
     c.setAttribute("transform", `translate(${pts[0].x} ${pts[0].y})`);
     st.g.appendChild(c);
     st.pktEls.push(c);
@@ -698,8 +691,6 @@ function syncSteps(ol, steps, numbered) {
 function buildCard(n) {
   const card = $("card");
   const lead = n.kind === "lead";
-  cardKind = lead ? "lead" : "lane";
-  cardSelId = n.id;
   const head = `<div class="chead"><div class="avatar"></div><div><div class="ctitle"></div><div class="csub"></div></div></div><hr class="cdiv">`;
   card.innerHTML = lead
     ? head
@@ -821,7 +812,8 @@ async function updateCard(opening) {
     crefs.tok.textContent = tokStr(l.tokens);
     const ht = healthText(n.health);
     if (crefs.badge.textContent !== ht) crefs.badge.textContent = ht;
-    crefs.badge.className = "badge h-" + healthKey(n.health);
+    const bc = "badge h-" + healthKey(n.health);
+    if (crefs.badge.className !== bc) crefs.badge.className = bc;
     crefs.link.href = mode === "demo" ? "/" : "/#/lane/" + encodeURIComponent(id);
     crefs.steer.hidden = !(mode === "live" && l.running);
     crefs.pfill.style.transform = `scaleX(${total ? dn / total : 0})`;
@@ -922,7 +914,7 @@ function renderComplete() {
   if (!isComplete()) { sec.hidden = true; completeSig = ""; return; }
   const ls = model.lanes;
   const commits = ls.reduce((a, l) => a + commitsOf(l), 0);
-  const ms = ls.reduce((a, l) => a + (l.startedAt ? ((l.finishedAt || Date.now()) - l.startedAt) : 0), 0);
+  const ms = ls.reduce((a, l) => a + (l.startedAt && l.finishedAt ? l.finishedAt - l.startedAt : 0), 0);
   const secs = Math.max(0, Math.round(ms / 1000));
   const sig = JSON.stringify([ls.map((l) => [l.task || l.id, (l.progress && l.progress.done) || 0, (l.progress && l.progress.total) || 0, commitsOf(l), tokStr(l.tokens), l.verdict || ""]), commits, secs]);
   if (sig === completeSig && !sec.hidden) return;
@@ -1086,7 +1078,6 @@ function render() {
   nodes = buildNodes(model);
   layout = computeLayout();
   renderTop();
-  lastLayoutSig = JSON.stringify([layout.small, Math.round(layout.vb.x), Math.round(layout.vb.y), Math.round(layout.vb.w), Math.round(layout.vb.h)]);
   syncScene();
   diffEffects();
   if (selected) {
