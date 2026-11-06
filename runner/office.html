@@ -54,7 +54,34 @@ const q = new URLSearchParams(location.search);
 const demoBig = q.get("demo") === "big";
 const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const mode = q.has("demo") ? "demo" : "live";
-const STAGE_W = 1280, STAGE_H = 720;
+let STAGE_W = 1280, STAGE_H = 720;
+let SCENE = {
+  stage: [1280, 720],
+  stations: { lead: { foot: [292, 356] }, builder: { foot: [626, 354] }, artist: { foot: [759, 601] }, reviewer: { foot: [1036, 350] } },
+  fixture: {
+    events: [
+      { atMs: 1300, type: "assignment", from: "lead", to: "builder" },
+      { atMs: 2000, type: "status", lane: "builder", status: "Running" },
+      { atMs: 3300, type: "press", lane: "builder" },
+      { atMs: 5250, type: "stepComplete", lane: "builder", step: "Data layer", progress: [3, 4] },
+      { atMs: 7200, type: "handoff", from: "lead", to: "artist" },
+      { atMs: 7900, type: "status", lane: "artist", status: "Running" },
+      { atMs: 9500, type: "press", lane: "artist" },
+      { atMs: 11500, type: "status", lane: "artist", status: "Done" },
+      { atMs: 13400, type: "escape" },
+    ],
+  },
+};
+async function loadScene() {
+  try {
+    const r = await fetch("/assets/scene.json");
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && Array.isArray(j.stageSize) && j.stageSize.length === 2 && j.stations && ["lead", "builder", "artist", "reviewer"].every((s) => j.stations[s] && Array.isArray(j.stations[s].foot))) {
+      SCENE = { stage: j.stageSize, stations: j.stations, fixture: j.fixture || { events: [] } };
+    }
+  } catch (e) {}
+}
 
 let plansArr = [], lanesArr = [], planSel = null, plansSig = "";
 let model = null, fetchErr = "", k = 1;
@@ -63,11 +90,14 @@ const detailCache = new Map();
 const DEMO_T0 = Date.now();
 const DEMO_BASE = {
   "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 46, tokens: { input: 12100, output: 21400, reasoning: 4800 },
-    texts: ["Routes in ca.mjs", "Page shell with the goal box", "Data layer with demo mode", "Scene, cards and completion"] },
+    texts: ["Routes in ca.mjs", "Page shell with the goal box", "Data layer with demo mode", "Scene, cards and completion"],
+    init: { dn: 2, cur: 3, health: "waiting", running: false, result: "", verdict: "" } },
   "office-sprites": { phase: "build", model: "maas/glm-5.3", dur: 32, tokens: { input: 3900, output: 7100, reasoning: 1400 },
-    texts: ["Sprite contract check", "Draw the five roles", "Polish the animations"] },
-  "review-pass": { phase: "review", model: "maas/glm-5.3", dur: 8, tokens: { input: 1700, output: 3200, reasoning: 700 },
-    texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"] },
+    texts: ["Sprite contract check", "Draw the five roles", "Polish the animations"],
+    init: { dn: 0, cur: 1, health: "waiting", running: false, result: "", verdict: "" } },
+  "office-review": { phase: "review", model: "maas/glm-5.3", dur: 8, tokens: { input: 1700, output: 3200, reasoning: 700 },
+    texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"],
+    init: { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" } },
 };
 const DEMO_BIG_BASE = {
   "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 46, tokens: { input: 12100, output: 21400, reasoning: 4800 },
@@ -88,32 +118,60 @@ const DEMO_BIG_BASE = {
   "office-motion": { phase: "build", model: "maas/glm-5.3", dur: 34, tokens: { input: 7300, output: 10600, reasoning: 2200 },
     texts: ["Motion brief", "Intro tilt", "Hover lift", "Working bob", "Packet trails", "Done burst", "Reduced motion fades", "Motion check green"],
     init: { dn: 8, cur: 0, health: "needs review", running: false, result: "needs review", verdict: "needs fixes" } },
-  "office-motion-fix": { phase: "fix", model: "maas/qwen3-coder", dur: 12, tokens: { input: 2100, output: 3400, reasoning: 600 },
-    texts: ["Read the review notes", "Fix the packet timing", "Re-run the motion check", "Ask for review again"],
-    init: { dn: 0, cur: 0, health: "planned", running: false, result: "", verdict: "" } },
+  "office-review": { phase: "review", model: "maas/glm-5.3", dur: 14, tokens: { input: 2600, output: 4100, reasoning: 900 },
+    texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"],
+    init: { dn: 4, cur: 0, health: "needs review", running: false, result: "needs review", verdict: "needs fixes" } },
   "onboard": { phase: "build", model: "maas/glm-5.3", dur: 25, tokens: { input: 4300, output: 6900, reasoning: 1100 },
     texts: ["Welcome panel copy", "Doctor rows per harness", "Onboard command snippet", "First-lane list", "Links to the docs", "Dismiss and remember", "Onboard check", "Screenshots for the README"],
     init: { dn: 0, cur: 0, health: "planned", running: false, result: "", verdict: "" } },
 };
 const DEMO_SET = demoBig ? DEMO_BIG_BASE : DEMO_BASE;
 const demoState = {};
-if (demoBig) {
-  for (const [id, b] of Object.entries(DEMO_BIG_BASE)) {
-    demoState[id] = demoDone
-      ? { dn: b.texts.length, cur: 0, health: "done", running: false, result: "done", verdict: "ready" }
-      : { ...b.init };
+for (const [id, b] of Object.entries(DEMO_SET)) {
+  demoState[id] = demoDone
+    ? { dn: b.texts.length, cur: 0, health: "done", running: false, result: "done", verdict: demoBig ? "ready" : "ok" }
+    : { ...b.init };
+}
+const demoHooks = { press: () => {}, escape: () => {} };
+const DEMO_STATION_LANE = { builder: "office-scene", artist: "office-sprites", reviewer: "office-review" };
+
+function demoApply(ev) {
+  const key = ev.lane || ev.to || "";
+  const id = DEMO_STATION_LANE[key] || key;
+  const st = demoState[id];
+  if (ev.type === "assignment" || ev.type === "handoff") {
+    if (st && !st.result) { st.health = "running"; st.running = true; }
+  } else if (ev.type === "status") {
+    if (!st) return;
+    if (String(ev.status || "").toLowerCase() === "done") {
+      st.dn = (DEMO_SET[id] && DEMO_SET[id].texts.length) || st.dn;
+      st.cur = 0; st.health = "done"; st.running = false;
+      st.result = "done"; st.verdict = demoBig ? "ready" : "ok";
+    } else {
+      st.health = String(ev.status || "running").toLowerCase();
+      st.running = st.health === "running";
+    }
+  } else if (ev.type === "stepComplete") {
+    if (st && !st.result) {
+      const total = (DEMO_SET[id] && DEMO_SET[id].texts.length) || 0;
+      st.dn = st.dn + 1;
+      st.cur = total && st.dn < total ? st.dn + 1 : 0;
+    }
+  } else if (ev.type === "press") {
+    demoHooks.press(id);
+    return;
+  } else if (ev.type === "escape") {
+    demoHooks.escape();
+    return;
   }
-} else {
-  for (const [id, b] of Object.entries(DEMO_BASE)) {
-    const fin = demoDone || id === "review-pass";
-    const dn = fin ? b.texts.length : (id === "office-sprites" ? 1 : 2);
-    const cur = fin ? 0 : (id === "office-sprites" ? 2 : 3);
-    demoState[id] = {
-      dn, cur,
-      health: fin ? "done" : (id === "office-sprites" ? "quiet" : "running"),
-      running: !demoDone && !fin && id === "office-scene",
-      result: fin ? "done" : "", verdict: fin ? "ok" : "",
-    };
+  render();
+}
+
+const DEMO_LEAD = 1000;
+function scheduleDemoEvents() {
+  if (mode !== "demo" || demoBig || demoDone || q.get("still") === "1") return;
+  for (const ev of (SCENE.fixture && SCENE.fixture.events) || []) {
+    setTimeout(() => { if (mode === "demo") demoApply(ev); }, (ev.atMs || 0) + DEMO_LEAD);
   }
 }
 
@@ -151,13 +209,13 @@ function demoModel() {
       lanes,
       waves: [
         { name: "Wave 1", lanes: [byId["office-scene"], byId["office-sprites"]] },
-        { name: "Wave 2", lanes: [byId["cli-dx"]] },
-        { name: "Wave 3", lanes: [byId["mcp"], byId["setup"], byId["office-motion"], byId["office-motion-fix"]] },
+        { name: "Wave 2", lanes: [byId["office-review"], byId["cli-dx"]] },
+        { name: "Wave 3", lanes: [byId["mcp"], byId["setup"], byId["office-motion"]] },
         { name: "Wave 4", lanes: [byId["onboard"]] },
       ],
     };
   }
-  const scene = mk("office-scene"), sprites = mk("office-sprites"), review = mk("review-pass");
+  const scene = mk("office-scene"), sprites = mk("office-sprites"), review = mk("office-review");
   return {
     plan: {
       id: "demo", title: "Office view for codearts-build", goal: "Build the Office view for codearts-build lanes",
@@ -278,6 +336,7 @@ window.__office = {
       plan: (model && model.plan && model.plan.title) || "",
       goal: (model && model.plan && model.plan.goal) || "",
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
+      lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 })),
     };
   },
   demoAdvance,
@@ -292,10 +351,15 @@ syncMotionBtn();
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
 new ResizeObserver(() => { sizeStage(); }).observe($("stagewrap"));
-sizeStage();
-if (mode === "demo") render();
-setInterval(tick, 2000);
-if (mode !== "demo") tick();
+(async () => {
+  await loadScene();
+  STAGE_W = SCENE.stage[0]; STAGE_H = SCENE.stage[1];
+  sizeStage();
+  scheduleDemoEvents();
+  if (mode === "demo") render();
+  setInterval(tick, 2000);
+  if (mode !== "demo") tick();
+})();
 })();
 </script>
 </body>
