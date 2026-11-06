@@ -116,7 +116,7 @@ Run `ca doctor`; every failing row has a fix line. Common ones:
 - **Model service timeouts**: lanes back off 2, 4, 6 minutes and resume; see `interruptions` in
   the summary.
 
-Env knobs: `BUILD_MODEL`, `REVIEW_MODEL`, `STALL_S`, `TOOL_STALL_S`, `MAX_RETRIES`, `MAX_FIXES`,
+Env knobs: `BUILD_MODEL`, `REVIEW_MODEL`, `STALL_S`, `TOOL_STALL_S`, `THINK_S`, `MAX_RETRIES`, `MAX_FIXES`,
 `CHECK_TIMEOUT`, `LANE_TIMEOUT`, `NO_REVIEW=1`, `CA_DASH=0`, `CA_DASH_PORT`, `CA_REGISTRY`.
 
 ## Privacy

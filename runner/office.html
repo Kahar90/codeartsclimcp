@@ -203,7 +203,7 @@ const HUES = { lead: 265, builder: 160, reviewer: 42, fixer: 16, done: 145, idle
 const healthKey = (h) => {
   const k = String(h || "").split("(")[0].trim();
   if (k === "running" || k === "running tool") return "run";
-  if (["quiet", "needs review", "stopped", "killed", "attention", "partial"].includes(k)) return "warn";
+  if (["quiet", "thinking", "needs review", "stopped", "killed", "attention", "partial"].includes(k)) return "warn";
   if (["STALLED", "DEAD", "failed"].includes(k)) return "bad";
   if (k === "done") return "done";
   if (k === "planned") return "plan";

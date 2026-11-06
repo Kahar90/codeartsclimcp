@@ -10,9 +10,10 @@
 //   inbox/       steering messages queued by `ca steer` / the dashboard
 //
 // Reliability: a watchdog aborts and resumes a session after STALL_S without model activity
-// (or TOOL_STALL_S on one tool call), permission prompts are answered by policy so nothing
-// waits forever, retries continue the SAME session (context kept), the runner itself runs
-// the brief's CHECK: lines and the git-clean gate, and feeds failures back to the builder.
+// (or TOOL_STALL_S on one tool call, or THINK_S of reasoning with no tool call), permission
+// prompts are answered by policy so nothing waits forever, retries continue the SAME session
+// (context kept), the runner itself runs the brief's CHECK: lines and the git-clean gate,
+// and feeds failures back to the builder.
 //
 // usage: ca lane <repo> <task> [--detach]  run a lane (foreground; --detach: background with a log)
 //        ca status [--json] [--all]        table of lanes (--json adds id, task, repo, result, progress)
@@ -32,6 +33,9 @@
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
 //        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
 //        ca help | -h | --help             this usage
+//        Env knobs: STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
+//        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
+//        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
 //        lane, 3 missing credentials, 4 needs review, 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
@@ -42,6 +46,7 @@ import net from 'node:net';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { thinkStall, progressAge } from './watchdog.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
@@ -58,6 +63,7 @@ const CFG = {
   get review() { return process.env.REVIEW_MODEL || (HAS_MAAS() ? 'maas/glm-5.3' : 'huaweicloud-maas/GLM-5.1'); },
   stall: num('STALL_S', 240),          // model silent this long while busy -> abort + resume
   toolStall: num('TOOL_STALL_S', 900), // one tool call running this long -> abort + resume
+  think: num('THINK_S', 480),          // busy this long with no tool call or answer text -> abort + nudge
   retries: num('MAX_RETRIES', 3),      // interruptions (stall, transport, crash) per phase
   fixes: num('MAX_FIXES', 3),          // gate failures fed back to the builder
   laneTimeout: num('LANE_TIMEOUT', 5400),
@@ -236,8 +242,8 @@ async function runLane(repoArg, task) {
   const S = {
     v: 1, id, task, repo, dir, pid: process.pid, startedAt: T0, updatedAt: T0, phase: 'starting', attempt: 0, fixes: 0,
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
-    lastEventAt: T0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
-    config: { stall: CFG.stall, toolStall: CFG.toolStall, retries: CFG.retries, fixes: CFG.fixes },
+    lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
+    config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes },
     tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, steps: 0 }, commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
   };
@@ -303,8 +309,10 @@ async function runLane(repoArg, task) {
         break;
       }
       case 'message.part.delta': {
-        const p = parts.get(pr.partID) || { type: 'text', text: '' }; if (pr.field === 'text') p.text = (p.text || '') + (pr.delta || '');
+        const known = parts.has(pr.partID); const p = parts.get(pr.partID) || { type: 'text', text: '' }; if (pr.field === 'text') p.text = (p.text || '') + (pr.delta || '');
         parts.set(pr.partID, p); if (sid === S.activeSession && !sx(sid).tools.size) S.activity = p.type === 'reasoning' ? 'thinking' : 'writing reply';
+        // only a part already announced as text counts as progress: an unannounced delta may be reasoning
+        if (sid === S.activeSession && known && p.type === 'text') S.lastTextAt = now();
         break;
       }
       case 'message.part.updated': {
@@ -317,6 +325,7 @@ async function runLane(repoArg, task) {
           const p = parts.get(part.id) || { type: part.type, text: '' }; p.type = part.type; if (typeof part.text === 'string' && part.text.length >= (p.text || '').length) p.text = part.text;
           parts.set(part.id, p); if (part.time?.end) flushPart(part.id);
           if (sid === S.activeSession && !sx(sid).tools.size) S.activity = part.type === 'reasoning' ? 'thinking' : 'writing reply';
+          if (sid === S.activeSession && part.type === 'text') S.lastTextAt = now();
         } else if (part.type === 'tool') {
           const s = sid ? sx(sid) : null; const st = part.state || {}; const key = part.callID || part.id;
           if (st.status === 'running' && s && !s.tools.has(key)) {
@@ -328,11 +337,13 @@ async function runLane(repoArg, task) {
             if (typeof fp === 'string' && path.isAbsolute(fp) && !insideRepo(fp)) {
               S.outside.push({ at: now(), tool: part.tool, path: fp }); L(`  ! outside the repo: ${part.tool} ${fp}`);
             }
+            if (sid === S.activeSession) S.lastToolAt = now();
           } else if ((st.status === 'completed' || st.status === 'error') && s) {
             const t = s.tools.get(key); s.tools.delete(key);
             const took = t ? ` (${dur(now() - t.since)})` : '';
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
+            if (sid === S.activeSession) S.lastToolAt = now();
           }
           if (sid === S.activeSession && s) { const t = [...s.tools.values()][0]; S.activity = t ? `tool ${t.tool}: ${oneLine(t.input, 80)}` : 'thinking'; S.tools = [...s.tools.values()].map((x) => ({ tool: x.tool, input: oneLine(x.input, 120), since: x.since })); }
         } else if (part.type === 'step-finish') {
@@ -376,6 +387,7 @@ async function runLane(repoArg, task) {
   const send = async (sid, text, model, agent) => {
     sent.add(text.trim()); const s = sx(sid); s.error = null; s.sawBusy = false; s.lastAct = now(); s.sentAt = now();
     S.activeSession = sid; S.busy = true;
+    S.turnStartAt = now(); S.lastToolAt = 0; S.lastTextAt = 0;
     await server.api('POST', `/session/${sid}/prompt_async`, { model: splitModel(model), ...(agent ? { agent } : {}), parts: [{ type: 'text', text }] });
   };
   const abort = async (sid) => {
@@ -432,6 +444,11 @@ async function runLane(repoArg, task) {
         L(`== watchdog: no model activity for ${dur(now() - s.lastAct)} (> ${CFG.stall}s): abort and resume`); await abort(sid);
         return { kind: 'stalled', what: `model silent over ${CFG.stall}s` };
       }
+      const ts = thinkStall({ busy: s.busy, toolsRunning: tools.length, turnStartAt: S.turnStartAt, lastToolAt: S.lastToolAt, lastTextAt: S.lastTextAt, now: now(), thinkS: CFG.think });
+      if (ts.stall) {
+        L(`== watchdog: thinking ${dur(ts.ageMs)} with no tool call (> ${CFG.think}s): abort and nudge`); await abort(sid);
+        return { kind: 'think', what: `thinking ${dur(ts.ageMs)} with no tool call`, nudge: ts.nudge };
+      }
     }
   }
   const classify = (err) => {
@@ -466,11 +483,13 @@ async function runLane(repoArg, task) {
         L('== codearts server died: restarting'); phase('restart', 'restarting codearts server');
         try { await server.start(); S.server = { url: server.url, pw: server.pw, pid: server.child.pid, version: server.version }; } catch (err) { return { ok: false, sid, reason: `server restart failed: ${err.message}` }; }
       }
-      const backoff = cls === 'rate' || cls === 'transport' ? 120 * interruptions : 15;
+      const backoff = cls === 'think' ? 5 : cls === 'rate' || cls === 'transport' ? 120 * interruptions : 15;
       phase('backoff');
       if (!(await waitInterruptible(backoff, `backoff after ${cls}`))) return { ok: false, sid, reason: 'stopped' };
       phase(label, 'resuming');
-      if (++sameSessionFails >= 2 && freshSession) {
+      if (o.kind === 'think') {
+        await send(sid, o.nudge, model, agent);
+      } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
         say(`switching to a fresh session ${sid}`); await send(sid, freshSession(cls, what), model, agent);
       } else {
@@ -630,6 +649,11 @@ function health(s) {
   if (!s.busy) return 'running';
   if (s.tools?.length) return 'running tool';
   if (idle > (s.config?.stall || 240) * 1000) return 'STALLED';
+  if (s.turnStartAt || s.lastToolAt || s.lastTextAt) {
+    const thinkS = s.config?.think ?? 480;
+    const age = progressAge({ turnStartAt: s.turnStartAt, lastToolAt: s.lastToolAt, lastTextAt: s.lastTextAt, now: now() });
+    if (thinkS > 0 && age > thinkS * 1000) return `thinking (${dur(age)}, no tool call)`;
+  }
   if (idle > 60000) return 'quiet';
   return 'running';
 }
