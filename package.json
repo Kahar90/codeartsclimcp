@@ -18,5 +18,10 @@
   },
   "scripts": {
     "check": "node -e \"const fs=require('fs'),cp=require('child_process');let bad=0;for(const f of fs.readdirSync('checks').filter((c)=>c.endsWith('.check.mjs')).sort()){console.log('== '+f);try{cp.execFileSync(process.execPath,['checks/'+f],{stdio:'inherit'})}catch{console.error('FAILED '+f);bad=1}}process.exit(bad)\""
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kahar90/codeartsclimcp.git"
   }
 }

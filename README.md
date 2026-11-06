@@ -1,5 +1,7 @@
 # CodeArts lanes
 
+Coding agents: start with [AGENTS.md](AGENTS.md) for setup on any harness and model.
+
 Delegate coding work to the Huawei CodeArts agent from the tools you already use. Your
 lead agent (Claude Code, Kiro, Cursor, Codex, VS Code, or you in a shell) plans and writes a
 short brief; a CodeArts **lane** writes the code in your git repo, commits each step, runs your
@@ -17,7 +19,7 @@ checks, fixes what fails and gets a read-only review. You read one summary and d
 ## Quickstart (3 commands)
 
 ```sh
-npm install -g <path-or-git-url-of-this-repo>   # puts `ca` on PATH (Node 20+, no dependencies)
+npm install -g github:Kahar90/codeartsclimcp   # puts `ca` on PATH (Node 20+, no dependencies)
 cd your-repo
 ca onboard --yes                                # checks, fixes, detects your harness, configures it
 ```
