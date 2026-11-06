@@ -66,6 +66,13 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 @keyframes win-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
 #win.win-in { animation: win-in 140ms ease-out; }
 #win.win-out { animation: win-out 100ms ease-in forwards; }
+#fx { position: absolute; inset: 0; pointer-events: none; }
+.packet { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--sel-ink); box-shadow: 0 0 8px var(--sel); }
+.checkmark { position: absolute; width: 16px; height: 16px; }
+.checkmark path { stroke: var(--run); }
+#lamp { position: absolute; left: calc(650 / 1280 * 100%); top: calc(120 / 720 * 100%); width: calc(230 / 1280 * 100%); height: calc(170 / 720 * 100%); transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(ellipse at center, rgba(255, 220, 150, 0.2), rgba(255, 220, 150, 0.07) 45%, transparent 70%); animation: lamp 4s ease-in-out infinite; }
+@keyframes lamp { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+body.no-motion #lamp { display: none; }
 body.narrow { height: auto; min-height: 100%; overflow-y: auto; }
 body.narrow #stagewrap { flex: none; }
 </style>
@@ -92,6 +99,7 @@ body.narrow #stagewrap { flex: none; }
   <div id="stage">
     <svg id="links" aria-hidden="true"></svg>
     <div id="sprites"></div>
+    <div id="fx" aria-hidden="true"><div id="lamp"></div></div>
     <div id="plates">
       <button type="button" class="plate" id="plate-lead" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span></button>
       <button type="button" class="plate" id="plate-builder" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span></button>
@@ -360,9 +368,11 @@ function renderTop() {
 function render() {
   model = mode === "demo" ? demoModel() : liveModel();
   renderTop();
+  const cues = diffCues();
   assignStations();
   renderStations();
   renderOverflow();
+  fireCues(cues);
   updateWin();
 }
 
@@ -794,6 +804,86 @@ $("winForm").addEventListener("submit", async (ev) => {
     syncComposer(model.lanes.find((x) => x.id === id));
   }
 });
+
+const effects = [];
+function recordEffect(type, laneId) { effects.push({ type, laneId, at: Date.now() }); if (effects.length > 60) effects.splice(0, effects.length - 60); }
+let snap = null;
+function diffCues() {
+  const cues = [];
+  const lanes = model.lanes;
+  const fresh = !snap || snap.planId !== model.plan.id || (snap.err && !fetchErr);
+  if (!fresh) {
+    for (const l of lanes) {
+      const p = snap.lanes.get(l.id);
+      if (!p) continue;
+      const done = (l.progress && l.progress.done) || 0;
+      const result = l.result || "";
+      if (!p.running && l.running && p.key === "idle") cues.push({ type: "receive", id: l.id });
+      if (done > p.done) cues.push({ type: "step", id: l.id });
+      if (result === "done" && p.result !== "done") cues.push({ type: "complete", id: l.id });
+    }
+  }
+  snap = { planId: model.plan.id, err: !!fetchErr, lanes: new Map(lanes.map((l) => [l.id, { running: !!l.running, done: (l.progress && l.progress.done) || 0, result: l.result || "", key: CAUI.status(l.health).key }])) };
+  return cues;
+}
+function firePacket(stKey) {
+  const lead = SCENE.stations.lead.foot, f = SCENE.stations[stKey].foot;
+  const x0 = lead[0] * k, y0 = (lead[1] + 34) * k;
+  const x1 = f[0] * k, y1 = (f[1] + 34) * k;
+  const dot = document.createElement("div");
+  dot.className = "packet";
+  $("fx").appendChild(dot);
+  const d1 = Math.abs(x1 - x0), d2 = Math.abs(y1 - y0);
+  const total = d1 + d2 || 1;
+  const anim = dot.animate([
+    { transform: "translate(" + x0 + "px," + y0 + "px)" },
+    { transform: "translate(" + x1 + "px," + y0 + "px)", offset: d1 / total },
+    { transform: "translate(" + x1 + "px," + y1 + "px)" },
+  ], { duration: 600, easing: "linear" });
+  anim.onfinish = () => dot.remove();
+}
+function fireCheck(stKey) {
+  const plate = $("plate-" + stKey);
+  const pr = plate.getBoundingClientRect();
+  if (!pr.width) return;
+  const sr = $("stage").getBoundingClientRect();
+  const el = document.createElement("div");
+  el.className = "checkmark";
+  el.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M3 9l3.5 3.5L13 5" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  el.style.left = (pr.right - sr.left + 6) + "px";
+  el.style.top = (pr.top - sr.top + pr.height / 2 - 8) + "px";
+  $("fx").appendChild(el);
+  const p = el.querySelector("path");
+  const len = p.getTotalLength();
+  p.style.strokeDasharray = len;
+  p.style.strokeDashoffset = len;
+  p.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: 300, easing: "ease-out", fill: "forwards" });
+  setTimeout(() => el.remove(), 1000);
+}
+function fireCues(cues) {
+  const on = PixelSprites.motion();
+  for (const c of cues) {
+    const stKey = laneStation.get(c.id);
+    if (!stKey || !on) continue;
+    if (c.type === "receive") {
+      recordEffect("receive", c.id);
+      if (sprites.lead) sprites.lead.play("receive");
+      firePacket(stKey);
+      const sp = sprites[stKey];
+      if (sp) setTimeout(() => { if (laneStation.get(c.id) === stKey) sp.play("receive"); }, 600);
+    } else if (c.type === "step") {
+      recordEffect("step", c.id);
+      fireCheck(stKey);
+    } else if (c.type === "complete") {
+      recordEffect("complete", c.id);
+      const sp = sprites[stKey];
+      if (sp) sp.play("complete");
+    }
+  }
+}
+function syncMotionUi() { document.body.classList.toggle("no-motion", !PixelSprites.motion()); }
+PixelSprites.onMotion(syncMotionUi);
+syncMotionUi();
 
 window.__office = {
   state() {
