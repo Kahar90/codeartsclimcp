@@ -17,7 +17,7 @@ const profile = path.join(process.env.TEMP || ROOT, `ca-lanes-profile-${Date.now
 const chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} };
 process.on('exit', cleanup);
-const timer = setTimeout(() => { console.log('FAIL timeout after 120 s'); cleanup(); process.exit(1); }, 120000);
+const timer = setTimeout(() => { console.log('FAIL timeout after 180 s'); cleanup(); process.exit(1); }, 180000);
 try {
   let up = false; for (let i = 0; i < 40 && !up; i++) { await wait(250); try { up = (await fetch(base + '/api/lanes')).ok; } catch {} }
   check('ca dash starts', up);
@@ -65,6 +65,18 @@ try {
   check('lane context row expands', (await ev('(function(){const b=document.querySelector("[data-ctx=gates]");const body=b.parentElement.querySelector(".ctxbody");return b.getAttribute("aria-expanded")==="true" && body.style.display!=="none" && body.innerText.length>0;})()')) === true);
   await ev('history.back()'); await wait(700);
   check('history.back returns to the plan', (await ev('location.hash')) === hash0);
+  // step-done flash: ?advance=1 finishes office-layout step 1 six seconds after load
+  await send('Page.navigate', { url: base + '/?demo=1&advance=1#/lane/demo-repo--office-layout' }); await wait(1500);
+  check('no step flashes on first load', (await ev('document.querySelectorAll(".steprow.flash").length')) === 0);
+  let flashed = ''; for (let i = 0; i < 20 && !flashed; i++) { await wait(500); flashed = await ev('document.querySelector(".steprow.flash .n")?.innerText || ""'); }
+  check('finished step flashes between polls', flashed === '1', String(flashed));
+  let gone = false; for (let i = 0; i < 16 && !gone; i++) { await wait(500); gone = (await ev('document.querySelectorAll(".steprow.flash").length')) === 0; }
+  check('flash clears on the next render', gone);
+  await ev('localStorage.setItem("ca-motion","off")');
+  await send('Page.navigate', { url: base + '/?demo=1&advance=1#/lane/demo-repo--office-layout' }); await wait(1000);
+  let sawFlash = false; for (let i = 0; i < 24; i++) { await wait(500); if ((await ev('document.querySelectorAll(".steprow.flash").length')) > 0) { sawFlash = true; break; } }
+  check('reduced motion skips the flash', !sawFlash);
+  await ev('localStorage.removeItem("ca-motion")');
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
