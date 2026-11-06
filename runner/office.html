@@ -20,6 +20,22 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 #motionBtn:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
 #stagewrap { flex: 1; min-height: 0; background: var(--stage); display: flex; align-items: center; justify-content: center; }
 #stage { position: relative; overflow: hidden; background: url("/assets/workshop.png") 0 0 / 100% 100% no-repeat; image-rendering: pixelated; }
+#links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#links path { fill: none; stroke: var(--sel); stroke-opacity: 0.75; }
+#sprites { position: absolute; inset: 0; pointer-events: none; }
+#plates { position: absolute; inset: 0; pointer-events: none; }
+.plate { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 10px; background: var(--panel-2); border: 2px solid var(--border-2); border-radius: 8px; font: 11px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: center; white-space: nowrap; }
+.plate .p-name { font-weight: 700; }
+.plate .p-sub { color: var(--muted); font-size: 10px; }
+#plate-lead { border-color: var(--lead); }
+#plate-builder { border-color: var(--builder); }
+#plate-artist { border-color: var(--artist); }
+#plate-reviewer { border-color: var(--reviewer); }
+#overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; gap: 4px; max-width: 250px; padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+#overflow[hidden] { display: none; }
+.ov-title { padding: 0 2px 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.ov-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 8px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px; font: 11px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: left; white-space: nowrap; }
+.ov-row .ov-st { color: var(--muted); font-size: 10px; }
 body.narrow { height: auto; min-height: 100%; overflow-y: auto; }
 body.narrow #stagewrap { flex: none; }
 </style>
@@ -43,7 +59,19 @@ body.narrow #stagewrap { flex: none; }
   <button id="motionBtn" type="button" aria-pressed="true">Motion</button>
 </div>
 <main id="stagewrap">
-  <div id="stage"></div>
+  <div id="stage">
+    <svg id="links" aria-hidden="true"></svg>
+    <div id="sprites"></div>
+    <div id="plates">
+      <button type="button" class="plate" id="plate-lead" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
+      <button type="button" class="plate" id="plate-builder" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
+      <button type="button" class="plate" id="plate-artist" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
+      <button type="button" class="plate" id="plate-reviewer" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
+    </div>
+    <div id="overflow" hidden>
+      <div class="ov-title" id="ovTitle"></div>
+    </div>
+  </div>
 </main>
 <script src="/assets/workshop.js"></script>
 <script>
@@ -283,6 +311,9 @@ function renderTop() {
 function render() {
   model = mode === "demo" ? demoModel() : liveModel();
   renderTop();
+  assignStations();
+  renderStations();
+  renderOverflow();
 }
 
 async function tick() {
@@ -328,6 +359,163 @@ function demoFail(id) {
   return true;
 }
 
+const WORKER_STATIONS = ["builder", "artist", "reviewer"];
+const STATION_KEYS = ["lead", "builder", "artist", "reviewer"];
+const CLIP_BY_KEY = { run: "work", done: "idle", bad: "blocked", warn: "idle", idle: "idle" };
+const stationLane = { builder: null, artist: null, reviewer: null };
+const laneStation = new Map();
+const sprites = {};
+const ovBtns = new Map();
+const winHooks = { open: () => {}, close: () => {} };
+let assignedOnce = false, prevPlanId = null, prevRunning = new Map();
+
+function spriteScale() { return Math.max(0.25, Math.round(k * 2 * 4) / 4); }
+function laneName(l) { return l.task || l.id; }
+function stationSub(l) {
+  const st = CAUI.status(l.health);
+  const p = l.progress || {};
+  return p.total ? st.label + " \u00b7 " + (p.done || 0) + "/" + p.total : st.label;
+}
+function holderReclaimable(id) {
+  const l = model.lanes.find((x) => x.id === id);
+  if (!l) return true;
+  if (l.running) return false;
+  if (l.result) return true;
+  return CAUI.status(l.health).key === "idle";
+}
+function assign(id, stKey) {
+  if (laneStation.has(id)) stationLane[laneStation.get(id)] = null;
+  if (stationLane[stKey]) laneStation.delete(stationLane[stKey]);
+  stationLane[stKey] = id;
+  laneStation.set(id, stKey);
+}
+function assignStations() {
+  const lanes = model.lanes;
+  if (model.plan.id !== prevPlanId) { prevPlanId = model.plan.id; prevRunning = new Map(); }
+  const alive = new Set(lanes.map((l) => l.id));
+  for (const [id, st] of [...laneStation]) if (!alive.has(id)) { laneStation.delete(id); if (stationLane[st] === id) stationLane[st] = null; }
+  if (!assignedOnce) {
+    assignedOnce = true;
+    for (const stKey of WORKER_STATIONS) {
+      if (stationLane[stKey]) continue;
+      const nm = SCENE.stations[stKey] && SCENE.stations[stKey].name;
+      const named = nm && lanes.find((l) => l.id === nm && !laneStation.has(l.id));
+      const pick = named || lanes.find((l) => l.running && !laneStation.has(l.id)) || lanes.find((l) => !laneStation.has(l.id));
+      if (pick) assign(pick.id, stKey);
+    }
+  } else {
+    for (const l of lanes) {
+      if (laneStation.has(l.id) || !l.running || prevRunning.get(l.id)) continue;
+      const victim = WORKER_STATIONS.find((stKey) => !stationLane[stKey] || holderReclaimable(stationLane[stKey]));
+      if (victim) assign(l.id, victim);
+    }
+    for (const stKey of WORKER_STATIONS) {
+      if (stationLane[stKey]) continue;
+      const pick = lanes.find((l) => !laneStation.has(l.id) && l.running) || lanes.find((l) => !laneStation.has(l.id));
+      if (pick) assign(pick.id, stKey);
+    }
+  }
+  prevRunning = new Map(lanes.map((l) => [l.id, !!l.running]));
+}
+function setStation(key, opts) {
+  const plate = $("plate-" + key);
+  const sp = sprites[key];
+  if (!opts) {
+    plate.style.display = "none";
+    if (sp) sp.el.style.display = "none";
+    return;
+  }
+  plate.style.display = "flex";
+  if (sp) sp.el.style.display = "";
+  plate.querySelector(".p-name").textContent = opts.name;
+  plate.querySelector(".p-sub").textContent = opts.sub;
+  plate.dataset.lane = opts.laneId;
+  if (sp && opts.clip) sp.setClip(opts.clip);
+}
+function renderStations() {
+  if (!model) return;
+  const p = model.plan;
+  const planKey = CAUI.status(planStatus(p, model.lanes)).key;
+  setStation("lead", { name: p.lead || "Lead", sub: "Orchestrator", laneId: "lead", clip: CLIP_BY_KEY[planKey] || "idle" });
+  for (const stKey of WORKER_STATIONS) {
+    const id = stationLane[stKey];
+    const l = id && model.lanes.find((x) => x.id === id);
+    if (!l) { setStation(stKey, null); continue; }
+    setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle" });
+  }
+}
+function renderLinks() {
+  const lead = SCENE.stations.lead.foot;
+  let d = "";
+  for (const stKey of WORKER_STATIONS) {
+    if (!stationLane[stKey]) continue;
+    const f = SCENE.stations[stKey].foot;
+    d += "M" + lead[0] * k + "," + (lead[1] + 34) * k + "H" + f[0] * k + "V" + (f[1] + 34) * k;
+  }
+  $("links").innerHTML = d ? '<path d="' + d + '" stroke-width="' + Math.max(1, 1.5 * k).toFixed(2) + '"></path>' : "";
+}
+function layoutStations() {
+  const a = PixelSprites.anchor();
+  const sc = spriteScale();
+  for (const key of STATION_KEYS) {
+    const f = SCENE.stations[key].foot;
+    const sp = sprites[key];
+    if (sp) {
+      if (sp.scale !== sc) sp.setScale(sc);
+      sp.el.style.left = f[0] * k - a[0] * sc + "px";
+      sp.el.style.top = f[1] * k - a[1] * sc + "px";
+    }
+    const plate = $("plate-" + key);
+    plate.style.left = f[0] * k + "px";
+    plate.style.top = (f[1] + 34) * k + "px";
+  }
+  renderLinks();
+}
+function renderOverflow() {
+  if (!model) return;
+  const rest = model.lanes.filter((l) => !laneStation.has(l.id));
+  const box = $("overflow");
+  for (const [id, b] of [...ovBtns]) {
+    if (!rest.some((l) => l.id === id)) { b.remove(); ovBtns.delete(id); }
+  }
+  if (!rest.length) { box.hidden = true; return; }
+  box.hidden = false;
+  $("ovTitle").textContent = "Other lanes (" + rest.length + ")";
+  for (const l of rest) {
+    let b = ovBtns.get(l.id);
+    if (!b) {
+      b = document.createElement("button");
+      b.type = "button";
+      b.className = "ov-row";
+      b.dataset.lane = l.id;
+      b.innerHTML = '<span class="ov-name"></span><span class="ov-st"></span>';
+      b.addEventListener("click", () => winHooks.open(l.id, b));
+      ovBtns.set(l.id, b);
+    }
+    b.querySelector(".ov-name").textContent = laneName(l);
+    b.querySelector(".ov-st").textContent = CAUI.status(l.health).label;
+  }
+  const want = rest.map((l) => l.id).join(",");
+  const have = [...box.querySelectorAll(".ov-row")].map((b) => b.dataset.lane).join(",");
+  if (want !== have) for (const l of rest) box.appendChild(ovBtns.get(l.id));
+}
+async function initSprites() {
+  try { await PixelSprites.load(); } catch (e) {}
+  for (const key of STATION_KEYS) {
+    const sp = PixelSprites.create(key, { scale: spriteScale(), seed: key, clip: "idle" });
+    sprites[key] = sp;
+    $("sprites").appendChild(sp.el);
+  }
+  layoutStations();
+  renderStations();
+}
+for (const key of STATION_KEYS) {
+  $("plate-" + key).addEventListener("click", () => {
+    const id = key === "lead" ? "lead" : stationLane[key];
+    if (id) winHooks.open(id, $("plate-" + key));
+  });
+}
+
 window.__office = {
   state() {
     const r = $("stage").getBoundingClientRect();
@@ -350,7 +538,7 @@ PixelSprites.onMotion(syncMotionBtn);
 syncMotionBtn();
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
-new ResizeObserver(() => { sizeStage(); }).observe($("stagewrap"));
+new ResizeObserver(() => { sizeStage(); layoutStations(); }).observe($("stagewrap"));
 (async () => {
   await loadScene();
   STAGE_W = SCENE.stage[0]; STAGE_H = SCENE.stage[1];
@@ -359,6 +547,7 @@ new ResizeObserver(() => { sizeStage(); }).observe($("stagewrap"));
   if (mode === "demo") render();
   setInterval(tick, 2000);
   if (mode !== "demo") tick();
+  initSprites();
 })();
 })();
 </script>
