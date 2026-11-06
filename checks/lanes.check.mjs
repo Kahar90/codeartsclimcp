@@ -55,6 +55,16 @@ try {
   if (pt.x != null) { await click(pt.x, pt.y); await wait(400); }
   const opened = JSON.parse(await ev('(function(){const b=document.querySelector("[data-steps]");return JSON.stringify({hash:location.hash,open:b?b.getAttribute("aria-expanded"):"",items:document.querySelectorAll(".steplist li").length});})()') || '{}');
   check('step disclosure opens without route change', opened.hash === hash0 && opened.open === 'true' && opened.items === 7, JSON.stringify(opened));
+  await ev('document.querySelector(".lane-name").click()'); await wait(900);
+  const det = JSON.parse(await ev('(function(){return JSON.stringify({hash:location.hash,back:document.querySelector(".backlink")?.getAttribute("href"),h1:document.querySelector(".idrow h1")?.innerText,metrics:document.querySelectorAll(".metrics .m").length,mtokens:document.querySelector(".metrics")?.innerText||"",segs:document.querySelectorAll(".seg").length,now:document.querySelector(".nowband")?.innerText||"",steps:document.querySelectorAll(".steprow").length,ctx:document.querySelectorAll(".ctxrow").length,sprite:document.querySelectorAll(".px-sprite:not(.px-fallback)").length});})()') || '{}');
+  check('lane detail renders identity, metrics and context', det.hash === '#/lane/demo-repo--office-layout' && det.back === '#/plan/office-polish' && det.h1 === 'office-layout' && det.metrics === 7 && det.segs === 5 && det.steps === 7 && det.ctx === 3 && det.sprite === 1, JSON.stringify(det));
+  check('metrics format thousands and n/a', /52,764 in \/ 202 out/.test(det.mtokens) && /Build/.test(det.mtokens), det.mtokens.slice(0, 120));
+  check('now band shows the current step', /Step 1/.test(det.now), det.now.slice(0, 80));
+  const cpt = JSON.parse(await ev('(function(){const b=document.querySelector("[data-ctx=gates]");if(!b)return "{}";const r=b.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()') || '{}');
+  if (cpt.x != null) { await click(cpt.x, cpt.y); await wait(200); }
+  check('lane context row expands', (await ev('(function(){const b=document.querySelector("[data-ctx=gates]");const body=b.parentElement.querySelector(".ctxbody");return b.getAttribute("aria-expanded")==="true" && body.style.display!=="none" && body.innerText.length>0;})()')) === true);
+  await ev('history.back()'); await wait(700);
+  check('history.back returns to the plan', (await ev('location.hash')) === hash0);
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }

@@ -140,10 +140,9 @@ ul.plain li:first-child { border-top: 0 }
 
 .ctxrow { border-top: 1px solid var(--border); padding: 10px 2px }
 .ctxrow > button { display: flex; width: 100%; align-items: center; gap: 10px; background: none; border: 0; color: var(--fg); font: 600 13px var(--font); cursor: pointer; padding: 0; text-align: left }
-.ctxrow .ci { color: var(--sel-ink); flex: none; width: 16px; text-align: center }
+.ctxrow .ci { color: var(--sel-ink); flex: none; width: 16px; text-align: center; font-size: 10px; transition: transform .15s }
 .ctxrow .sum { color: var(--muted); font-weight: 400; margin-left: auto; font-size: 12.5px; text-align: right; overflow-wrap: anywhere }
-.ctxrow .tri { color: var(--faint); font-size: 10px; flex: none; transition: transform .15s }
-.ctxrow > button[aria-expanded="false"] .tri { transform: rotate(-90deg) }
+.ctxrow > button[aria-expanded="false"] .ci { transform: rotate(-90deg) }
 .ctxbody { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; min-width: 0 }
 .ctxbody .small { color: var(--muted); font-size: 12.5px }
 
@@ -232,7 +231,6 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const cls = (h) => 'h-' + String(h || '').split('(')[0].trim().replace(/\s+/g, '-');
 const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new Date(t).getTime()) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : new Date(t).toLocaleDateString(); };
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -457,6 +455,8 @@ let curPlan = null;
 const waveCollapsed = new Map(); // "planId::waveIndex" -> true
 const stepsOpen = new Map(); // laneId -> true (step disclosure on the plan home)
 const stepsCache = new Map(); // laneId -> steps[] from the lane detail, fetched on first open
+const stepOpen = new Set(); // "laneId:stepN" keys for expanded truncated step rows
+const ctxOpen = new Map(); // laneId -> Set of lane-context section keys ('gates'|'files'|'steer')
 
 // ---------- sprites: placeholders in the markup, mounted after every render ----------
 const spriteMap = new Map(); // spot key -> PixelSprites handle
@@ -571,47 +571,67 @@ function pipeline(d) {
   const seen = new Set(d.phases.map((x) => x.phase)); const ph = d.result ? 'finished' : d.phase;
   const gateFail = d.gates.some((g) => !g.ok), gateOk = d.gates.length && d.gates[d.gates.length - 1].ok;
   const st = [
-    ['Build', ph === 'build' || ph === 'starting' || ph === 'restart' || ph === 'backoff' ? 'active' : seen.has('build') ? 'done' : ''],
-    ['Gates', ph === 'gate' ? 'active' : gateOk ? 'done' : gateFail ? 'fail' : ''],
-    [`Fix${d.fixes ? ' ×' + d.fixes : ''}`, ph === 'fix' ? 'active' : seen.has('fix') ? 'done' : ''],
-    ['Review', ph === 'review' ? 'active' : d.verdict ? (d.verdict === 'ready' ? 'done' : 'fail') : ''],
+    ['Build', ph === 'build' || ph === 'starting' || ph === 'restart' || ph === 'backoff' ? 'live' : seen.has('build') ? 'done' : ''],
+    ['Gates', ph === 'gate' ? 'live' : gateOk ? 'done' : gateFail ? 'fail' : ''],
+    [`Fix${d.fixes ? ' ×' + d.fixes : ''}`, ph === 'fix' ? 'live' : seen.has('fix') ? 'done' : ''],
+    ['Review', ph === 'review' ? 'live' : d.verdict ? (d.verdict === 'ready' ? 'done' : 'fail') : ''],
     [d.result ? d.result : 'Result', d.result ? (d.result === 'done' ? 'done' : 'fail') : ''],
   ];
-  return `<div class="pipe">${st.map(([n, c]) => `<span class="stage ${c}">${esc(n)}</span>`).join('')}</div>`;
+  return `<div class="pipe">${st.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="true"' : ''}>${esc(n)}</span>`).join('')}</div>`;
 }
 function renderLane(d, keep) {
   const t = d.tokens || {}; const plan = plans.find((p) => p.waves.some((w) => w.lanes.some((l) => l.id === d.id)));
-  const steps = d.steps.length ? `<ul class="plain">${d.steps.map((s) => `<li class="st-${s.state}"><span class="ic">${s.state === 'done' ? '&#10003;' : s.state === 'current' ? '&#9654;' : '&#9675;'}</span><span class="txt">${s.n}. ${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</li>`).join('')}</ul>` : '<div class="small">The brief has no numbered steps.</div>';
+  const st = CAUI.status(d.health, d.result);
+  const na = (v) => (v == null || v === '' || v === '-') ? 'n/a' : esc(v);
+  const metric = (lb, val) => `<span class="m"><span class="lb">${lb}</span><b>${val}</b></span>`;
+  const tokens = `${Number(t.input ?? 0).toLocaleString('en-US')} in / ${Number(t.output ?? 0).toLocaleString('en-US')} out`;
+  const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed))}${metric('Idle', na(d.idle))}${metric('Tokens', tokens)}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
+  const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
+  const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(d.result || st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
+  const stepRow = (s) => { const key = `${d.id}:${s.n}`, x = stepOpen.has(key); return `<div class="steprow s-${s.state}${x ? ' x' : ''}" data-step="${esc(key)}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</div>`; };
+  const steps = d.steps.length ? d.steps.map(stepRow).join('') : '<div class="small">The brief has no numbered steps.</div>';
   const extraCommits = d.commits.filter((c) => !d.steps.some((s) => s.commit === c.hash));
-  const todos = d.todos.length ? `<ul class="plain">${d.todos.map((x) => `<li class="st-${x.status === 'completed' ? 'done' : x.status === 'in_progress' ? 'current' : 'pending'}"><span class="ic">${x.status === 'completed' ? '&#10003;' : x.status === 'in_progress' ? '&#9654;' : '&#9675;'}</span><span>${esc(x.text)}</span></li>`).join('')}</ul>` : '';
-  const gates = d.gates.length ? `<ul class="plain">${d.gates.map((g) => `<li class="${g.ok ? 'st-done' : ''}"><span class="ic" style="color:${g.ok ? 'var(--ok)' : 'var(--bad)'}">${g.ok ? '&#10003;' : '&#10007;'}</span><span style="font-family:Consolas,monospace;font-size:12px">${esc(g.gate)}</span><span class="hash">${g.ms ? Math.round(g.ms / 1000) + 's' : ''}</span></li>`).join('')}</ul>` : `<div class="small">${d.checks.length ? d.checks.length + ' CHECK line(s), run when the builder finishes' : 'No CHECK lines; only the git-clean gate'}</div>`;
-  const evts = [...d.steers.map((x) => ({ at: x.at, k: 'steer', t: `[${x.by}] ${x.text}` })), ...d.interruptions.map((x) => ({ at: x.at, k: 'int', t: `${x.phase}/${x.kind}: ${x.what}` })), ...d.errors.map((x) => ({ at: x.at, k: 'err', t: x.msg })), ...d.outside.map((x) => ({ at: x.at, k: 'out', t: `outside repo: ${x.tool} ${x.path}` }))].sort((a, b) => b.at - a.at);
-  const tools = d.running && d.tools.length ? `<div class="tools">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
+  const todos = d.todos.length ? `<h4 style="margin-top:14px">Worker's own todo list</h4><ul class="plain">${d.todos.map((x) => `<li class="st-${x.status === 'completed' ? 'done' : x.status === 'in_progress' ? 'current' : 'pending'}"><span class="ic">${x.status === 'completed' ? '&#10003;' : x.status === 'in_progress' ? '&#9654;' : '&#9675;'}</span><span style="min-width:0">${esc(x.text)}</span></li>`).join('')}</ul>` : '';
+  const openCtx = (k) => (ctxOpen.get(d.id) || new Set()).has(k);
+  const gatesBody = d.gates.length ? d.gates.map((g) => `<div class="small"><span style="color:${g.ok ? 'var(--run)' : 'var(--bad)'};font-weight:700">${g.ok ? '&#10003;' : '&#10007;'}</span> ${esc(g.gate)} <span class="mute">${g.ms ? Math.round(g.ms / 1000) + 's' : ''}</span></div>`).join('') + (d.checks.length ? `<div class="small" style="margin-top:6px;color:var(--faint)">configured: ${d.checks.map((c) => esc(c)).join(' · ')}</div>` : '') : `<div class="small">${d.checks.length ? d.checks.length + ' CHECK line(s), run when the builder finishes' : 'No CHECK lines; only the git-clean gate'}</div>`;
+  const gatesSum = d.gates.length ? `${d.gates.filter((g) => g.ok).length}/${d.gates.length} ok` : `${d.checks.length} configured`;
+  const filesBody = d.files.length ? d.files.slice(-30).map((f) => `<div class="small" style="overflow-wrap:anywhere">${esc(f)}</div>`).join('') : '<div class="small">none yet</div>';
+  const evts = [...d.steers.map((x) => ({ at: x.at, t: `[${x.by}] ${x.text}`, c: 'var(--run)' })), ...d.interruptions.map((x) => ({ at: x.at, t: `${x.phase}/${x.kind}: ${x.what}`, c: 'var(--amber)' })), ...d.errors.map((x) => ({ at: x.at, t: x.msg, c: 'var(--bad)' })), ...d.outside.map((x) => ({ at: x.at, t: `outside repo: ${x.tool} ${x.path}`, c: 'var(--amber)' }))].sort((a, b) => b.at - a.at);
+  const evtsBody = evts.length ? evts.slice(0, 20).map((e) => `<div class="small"><span class="mute">${esc(clock(e.at))}</span> <span style="color:${e.c}">${esc(e.t)}</span></div>`).join('') : '<div class="small">none</div>';
+  const ctx = (k, title, sum, body) => `<div class="ctxrow"><button type="button" data-ctx="${k}" aria-expanded="${openCtx(k)}"><span class="ci">&#9654;</span>${title}<span class="sum">${sum}</span></button><div class="ctxbody" ${openCtx(k) ? '' : 'style="display:none"'}>${body}</div></div>`;
   $('view').innerHTML = `<div class="pad" style="flex:1">
-    ${plan ? `<div class="small"><a data-go="plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a></div>` : ''}
-    <div class="row" style="justify-content:flex-start;gap:10px;margin-top:4px"><h2 class="title">${d.running ? '<span class="pulse"></span>' : ''}${esc(d.task)}</h2><span class="badge ${cls(d.health)}">${esc(d.health)}</span>${d.verdict ? `<span class="badge ${d.verdict === 'ready' ? 'h-done' : 'h-needs-review'}">review: ${esc(d.verdict)}</span>` : ''}</div>
-    <div class="kv"><span>build <b>${esc(short(d.models?.build))}</b></span><span>review <b>${esc(short(d.models?.review))}</b></span><span>elapsed <b>${esc(d.elapsed)}</b></span><span>idle <b>${esc(d.idle)}</b></span><span>tokens <b>${t.input ?? 0}</b> in / <b>${t.output ?? 0}</b> out</span><span>steers <b>${d.steers.length}</b></span><span>interruptions <b>${d.interruptions.length}</b></span></div>
-    <div class="small">${esc(d.repo)}</div>
+    ${plan ? `<a class="backlink" href="#/plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a>` : ''}
+    <div class="idrow"><span class="spot" data-spot="lane:${esc(d.id)}" data-role="${d.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.875" data-work="${d.running ? 1 : 0}"></span><h1>${esc(d.task)}</h1>${CAUI.badge(st)}${d.verdict ? `<span class="ca-badge s-${d.verdict === 'ready' ? 'done' : 'warn'}">review: ${esc(d.verdict)}</span>` : ''}</div>
+    ${metrics}
+    <div class="wt">${esc(d.repo)}</div>
     ${pipeline(d)}
-    <div class="now"><b>${d.running ? 'Now:' : 'Result:'}</b><div style="min-width:0"><div>${d.running ? (d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : '') + esc(d.now) : esc(d.result) + (d.reason ? ' &middot; ' + esc(d.reason) : '')}</div>${tools}</div></div>
-    <div class="grid2">
+    <div class="nowband"><span class="lb">${d.running ? 'Now' : 'Result'}</span><div class="bd">${nowInner}${tools}</div></div>
+    <div class="grid21">
       <div class="box"><h4>Plan steps (brief) &middot; ${d.progress.done}/${d.progress.total}</h4>${steps}
-        ${extraCommits.length ? `<h4 style="margin-top:14px">Other commits</h4><ul class="plain">${extraCommits.map((c) => `<li><span class="hash" style="margin:0">${esc(c.hash)}</span><span>${esc(c.subject)}</span></li>`).join('')}</ul>` : ''}
-        ${todos ? `<h4 style="margin-top:14px">Worker's own todo list</h4>${todos}` : ''}</div>
-      <div class="box"><h4>Gates</h4>${gates}
-        <h4 style="margin-top:14px">Files touched (${d.files.length})</h4>${d.files.length ? d.files.slice(-30).map((f) => `<span class="tag">${esc(f)}</span>`).join(' ') : '<div class="small">none yet</div>'}
-        <h4 style="margin-top:14px">Steering and incidents</h4>${evts.length ? `<ul class="plain">${evts.slice(0, 20).map((e) => `<li><span class="hash" style="margin:0;min-width:48px">${clock(e.at)}</span><span style="color:${e.k === 'steer' ? 'var(--ok)' : e.k === 'err' ? 'var(--bad)' : 'var(--warn)'}">${esc(e.t)}</span></li>`).join('')}</ul>` : '<div class="small">none</div>'}</div>
+        ${extraCommits.length ? `<h4 style="margin-top:14px">Other commits</h4><ul class="plain">${extraCommits.map((c) => `<li><span style="font:11.5px var(--mono);color:var(--faint);flex:none;min-width:64px">${esc(c.hash)}</span><span style="min-width:0">${esc(c.subject)}</span></li>`).join('')}</ul>` : ''}${todos}</div>
+      <div class="box"><h4>Lane context</h4>
+        ${ctx('gates', 'Gates', gatesSum, gatesBody)}
+        ${ctx('files', 'Files touched', `${d.files.length}`, filesBody)}
+        ${ctx('steer', 'Steering and incidents', `${evts.length}`, evtsBody)}
+      </div>
     </div>
     <div class="tabs">${[['log', 'Transcript'], ['review', 'Review'], ['summary', 'Summary'], ['brief', 'Brief']].map(([k, n]) => `<span class="tab ${tab === k ? 'on' : ''}" data-tab="${k}">${n}</span>`).join('')}<span style="flex:1"></span>${tab === 'log' ? '<label class="small" style="align-self:center"><input type="checkbox" id="follow" checked> follow</label>' : ''}</div>
     <pre class="out" id="out"></pre></div>
     <div id="bar"><input id="msg" placeholder="Steer the builder: queued into its session within 2 s" ${d.running ? '' : 'disabled'}><button id="send" ${d.running ? '' : 'disabled'}>Steer</button><button id="attach" ${d.running ? '' : 'disabled'} title="Open the CodeArts TUI on this session in a new window">Open TUI</button><button id="stop" class="danger" ${d.running ? '' : 'disabled'}>Stop</button></div>`;
-  for (const c of $('view').querySelectorAll('[data-go]')) c.onclick = () => go(c.dataset.go);
+  for (const r of $('view').querySelectorAll('[data-step]')) r.onclick = () => { const k = r.dataset.step; if (stepOpen.has(k)) { stepOpen.delete(k); r.classList.remove('x'); } else { stepOpen.add(k); r.classList.add('x'); } };
+  for (const b of $('view').querySelectorAll('[data-ctx]')) b.onclick = () => {
+    const set = ctxOpen.get(d.id) || new Set(); const k = b.dataset.ctx;
+    set.has(k) ? set.delete(k) : set.add(k); ctxOpen.set(d.id, set);
+    b.setAttribute('aria-expanded', set.has(k));
+    const body = b.parentElement.querySelector('.ctxbody'); if (body) body.style.display = set.has(k) ? '' : 'none';
+  };
   for (const c of $('view').querySelectorAll('[data-tab]')) c.onclick = () => { tab = c.dataset.tab; logPos = 0; renderLane(detail); };
   if (tab === 'log') { if (!keep) { logPos = 0; logLane = d.id; pollLog(); } } else $('out').textContent = (tab === 'review' ? d.review : tab === 'summary' ? d.summary : d.brief) || '(nothing yet)';
   $('send').onclick = async () => { const text = $('msg').value.trim(); if (!text) return; const r = await post('steer', { text }); if (r.ok) $('msg').value = ''; else alert(r.error); };
   $('msg').onkeydown = (e) => { if (e.key === 'Enter') $('send').click(); };
   $('stop').onclick = async () => { if (confirm(`Stop lane ${d.task}?`)) await post('stop'); };
   $('attach').onclick = async () => { const r = await post('attach'); if (!r.ok) alert(r.error); };
+  mountSprites();
 }
 // Re-render the lane view without losing typed steering text, scroll or the transcript.
 function patchLane(d) {
