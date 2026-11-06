@@ -2,24 +2,68 @@
   "title": "Office view polish: sprites and layout",
   "goal": "Make the Office view polished and tasteful: isometric sprites, a done pose, merged lanes shown with their real results, and a layout that fits many lanes without clipping or overlap.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "office-layout lane is building; Claude verifies with screenshots when it finishes.",
+  "status": "done",
+  "now": "Done: office-layout merged (d6563b3), 8 checks pass on main, installed into the live skill.",
   "waves": [
-    { "name": "Wave 1: layout", "lanes": ["office-layout"], "note": "Sprite art, the done pose and the merged-lane fallback were done by Claude (visual work, commits 23e638e and cf51334)." }
+    {
+      "name": "Wave 1: layout",
+      "lanes": [
+        "office-layout"
+      ],
+      "note": "Sprite art, the done pose and the merged-lane fallback were done by Claude (visual work, commits 23e638e and cf51334)."
+    }
   ],
   "lanes": [
-    { "task": "office-layout", "repo": "../ca-office-wt-office-layout", "model": "maas/glm-5.3", "why": "layout math with a geometric contract check (checks/layout.check.mjs)", "files": ["runner/office.html"] }
+    {
+      "task": "office-layout",
+      "repo": "../ca-office-wt-office-layout",
+      "model": "maas/glm-5.3",
+      "why": "layout math with a geometric contract check (checks/layout.check.mjs)",
+      "files": [
+        "runner/office.html"
+      ]
+    }
   ],
   "next": [
-    { "text": "Redraw sprites isometric, done pose, plan fallback for merged lanes", "done": true },
-    { "text": "Write checks/layout.check.mjs before the brief", "done": true },
-    "Read the lane summary and verdict",
-    "Run all checks on the worktree, look at the layout screenshots (demo=big, phone, live)",
-    "Merge into main, copy into the live skill, remove the worktree"
+    {
+      "text": "Redraw sprites isometric, done pose, plan fallback for merged lanes",
+      "done": true
+    },
+    {
+      "text": "Write checks/layout.check.mjs before the brief",
+      "done": true
+    },
+    {
+      "text": "Read the lane summary and verdict",
+      "done": true
+    },
+    {
+      "text": "Run all checks on the worktree, look at the layout screenshots (demo=big, phone, live)",
+      "done": true
+    },
+    {
+      "text": "Merge into main, copy into the live skill, remove the worktree",
+      "done": true
+    },
+    "Next candidate: runner watchdog for long thinking with no tool calls"
   ],
   "decisions": [
-    { "at": "2026-11-06", "text": "Sprite art drawn by Claude, not a lane: the worker has no image input and once swapped two sprite specs." },
-    { "at": "2026-11-06", "text": "Reverted 'ready verdict marks every step done': a reviewer once marked an uncommitted step done, progress counts commits only." }
+    {
+      "at": "2026-11-06",
+      "text": "Sprite art drawn by Claude, not a lane: the worker has no image input and once swapped two sprite specs."
+    },
+    {
+      "at": "2026-11-06",
+      "text": "Reverted 'ready verdict marks every step done': a reviewer once marked an uncommitted step done, progress counts commits only."
+    },
+    {
+      "at": "2026-11-06T03:20:49.318Z",
+      "text": "Stopped office-layout after 30 min of one reasoning block with no tool calls (hand-computing layout math); brief now says measure with the check; relaunched."
+    },
+    {
+      "at": "2026-11-06T04:23:05.656Z",
+      "text": "Merged office-layout: ready, 0 fix rounds; overruled nothing (reviewer noted larger minimum sprite box, needed by the check)."
+    }
   ],
   "risks": [
     "A taller stage may break card placement or packet links; the office and motion checks cover them.",
