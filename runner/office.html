@@ -10,6 +10,9 @@ html, body { height: 100%; }
 * { box-sizing: border-box; }
 body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 .runstrip { flex: none; height: 24px; padding: 0 20px; display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; background: var(--bg); border-bottom: 1px solid var(--border); }
+body.narrow .runstrip { height: auto; min-height: 25px; flex-wrap: wrap; align-content: center; white-space: normal; overflow: visible; padding: 5px 12px; row-gap: 3px; }
+body.narrow .runstrip .ptitle { flex: 1 1 100%; white-space: normal; overflow: visible; text-overflow: clip; }
+body.narrow .runstrip .pnow { flex: 1 1 100%; white-space: normal; overflow: visible; text-overflow: clip; }
 .runstrip .ptitle { font-weight: 700; color: var(--fg); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
 .runstrip .pnow { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .runstrip .topfill { flex: 1; }
@@ -18,8 +21,9 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 #motionBtn { flex: none; height: 20px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font: 600 11px var(--font); cursor: pointer; }
 #motionBtn[aria-pressed="true"] { color: var(--fg); border-color: var(--sel); }
 #motionBtn:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
-#stagewrap { flex: 1; min-height: 0; background: var(--stage); display: flex; align-items: center; justify-content: center; }
-#stage { position: relative; overflow: hidden; background: url("/assets/workshop.png") 0 0 / 100% 100% no-repeat; image-rendering: pixelated; }
+#stagewrap { flex: 1; min-height: 420px; background: var(--stage); display: flex; align-items: center; justify-content: center; }
+#stage { position: relative; overflow: hidden; background: var(--stage); }
+#room { position: absolute; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
 #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #links path { fill: none; stroke: var(--sel); stroke-opacity: 0.75; }
 #sprites { position: absolute; inset: 0; pointer-events: none; }
@@ -78,7 +82,7 @@ body.narrow #winTail { display: none; }
 .packet { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--sel-ink); box-shadow: 0 0 8px var(--sel); }
 .checkmark { position: absolute; width: 16px; height: 16px; }
 .checkmark path { stroke: var(--run); }
-#lamp { position: absolute; left: calc(650 / 1280 * 100%); top: calc(120 / 720 * 100%); width: calc(230 / 1280 * 100%); height: calc(170 / 720 * 100%); transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(ellipse at center, rgba(255, 220, 150, 0.2), rgba(255, 220, 150, 0.07) 45%, transparent 70%); animation: lamp 4s ease-in-out infinite; }
+#lamp { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(ellipse at center, rgba(255, 220, 150, 0.2), rgba(255, 220, 150, 0.07) 45%, transparent 70%); animation: lamp 4s ease-in-out infinite; }
 @keyframes lamp { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 body.no-motion #lamp { display: none; }
 #stlist { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 20px; background: var(--bg); }
@@ -120,6 +124,7 @@ body.narrow #stagewrap { flex: none; }
 </div>
 <main id="stagewrap">
   <div id="stage">
+    <img id="room" src="/assets/workshop.png" alt="" aria-hidden="true">
     <svg id="links" aria-hidden="true"></svg>
     <div id="sprites"></div>
     <div id="fx" aria-hidden="true"><div id="lamp"></div></div>
@@ -195,7 +200,7 @@ async function loadScene() {
 }
 
 let plansArr = [], lanesArr = [], planSel = null, plansSig = "";
-let model = null, fetchErr = "", k = 1, narrow = false;
+let model = null, fetchErr = "";
 const detailCache = new Map();
 
 const DEMO_T0 = Date.now();
@@ -356,15 +361,33 @@ function liveModel() {
   };
 }
 
+let k = 1, ox = 0, oy = 0, narrow = false;
+
 function sizeStage() {
   const wrap = $("stagewrap"), stage = $("stage");
-  const w = wrap.clientWidth || 1, h = wrap.clientHeight || 1;
-  narrow = w < 700;
+  narrow = (wrap.clientWidth || 1) < 700;
   document.body.classList.toggle("narrow", narrow);
-  const sw = narrow ? w : Math.max(1, Math.min(w, h * STAGE_W / STAGE_H));
-  stage.style.width = sw + "px";
-  stage.style.height = (sw * STAGE_H / STAGE_W) + "px";
-  k = sw / STAGE_W;
+  const w = wrap.clientWidth || 1;
+  let h;
+  if (narrow) {
+    const chrome = document.querySelector(".ca-top").offsetHeight + $("runstrip").offsetHeight;
+    h = Math.max(420, window.innerHeight - chrome);
+    wrap.style.height = h + "px";
+  } else {
+    wrap.style.height = "";
+    h = wrap.clientHeight || 1;
+  }
+  stage.style.width = w + "px";
+  stage.style.height = h + "px";
+  k = Math.min(Math.max(w / STAGE_W, h / STAGE_H), w / 1020, h / 510);
+  const iw = STAGE_W * k, ih = STAGE_H * k;
+  ox = iw >= w ? Math.min(0, Math.max(w - iw, w / 2 - 680 * k)) : (w - iw) / 2;
+  oy = ih >= h ? Math.min(0, Math.max(h - ih, h / 2 - 445 * k)) : (h - ih) / 2;
+  const room = $("room");
+  room.style.left = ox + "px";
+  room.style.top = oy + "px";
+  room.style.width = iw + "px";
+  room.style.height = ih + "px";
 }
 
 function planStatus(p, lanes) {
@@ -542,20 +565,25 @@ function renderLinks() {
   for (const stKey of WORKER_STATIONS) {
     if (!stationLane[stKey]) continue;
     const f = SCENE.stations[stKey].foot;
-    d += "M" + lead[0] * k + "," + (lead[1] + 34) * k + "H" + f[0] * k + "V" + (f[1] + 34) * k;
+    d += "M" + (ox + lead[0] * k) + "," + (oy + (lead[1] + 34) * k) + "H" + (ox + f[0] * k) + "V" + (oy + (f[1] + 34) * k);
   }
   $("links").innerHTML = d ? '<path d="' + d + '" stroke-width="' + Math.max(1, 1.5 * k).toFixed(2) + '"></path>' : "";
 }
 function layoutStations() {
   const a = PixelSprites.anchor();
   const sc = spriteScale();
+  const lamp = $("lamp");
+  lamp.style.left = ox + 650 * k + "px";
+  lamp.style.top = oy + 120 * k + "px";
+  lamp.style.width = 230 * k + "px";
+  lamp.style.height = 170 * k + "px";
   for (const key of STATION_KEYS) {
     const f = SCENE.stations[key].foot;
     const sp = sprites[key];
     if (sp) {
       if (sp.scale !== sc) sp.setScale(sc);
-      sp.el.style.left = f[0] * k - a[0] * sc + "px";
-      sp.el.style.top = f[1] * k - a[1] * sc + "px";
+      sp.el.style.left = ox + f[0] * k - a[0] * sc + "px";
+      sp.el.style.top = oy + f[1] * k - a[1] * sc + "px";
     }
     const hit = hits[key];
     if (hit && sp) {
@@ -565,8 +593,8 @@ function layoutStations() {
       hit.style.height = sp.el.offsetHeight + "px";
     }
     const plate = $("plate-" + key);
-    plate.style.left = f[0] * k + "px";
-    plate.style.top = (f[1] + 34) * k + "px";
+    plate.style.left = (ox + f[0] * k) + "px";
+    plate.style.top = (oy + (f[1] + 34) * k) + "px";
   }
   renderLinks();
   if (!$("win").hidden) positionWin();
@@ -927,8 +955,8 @@ function diffCues() {
 }
 function firePacket(stKey) {
   const lead = SCENE.stations.lead.foot, f = SCENE.stations[stKey].foot;
-  const x0 = lead[0] * k, y0 = (lead[1] + 34) * k;
-  const x1 = f[0] * k, y1 = (f[1] + 34) * k;
+  const x0 = ox + lead[0] * k, y0 = oy + (lead[1] + 34) * k;
+  const x1 = ox + f[0] * k, y1 = oy + (f[1] + 34) * k;
   const dot = document.createElement("div");
   dot.className = "packet";
   $("fx").appendChild(dot);
