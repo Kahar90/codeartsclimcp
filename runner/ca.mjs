@@ -32,6 +32,9 @@
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
 //        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
 //        ca help | -h | --help             this usage
+//        Env knobs: STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
+//        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
+//        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
 //        lane, 3 missing credentials, 4 needs review, 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
