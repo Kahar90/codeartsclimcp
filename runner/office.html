@@ -739,7 +739,7 @@ function renderWinContent(keepInput) {
   $("winCont").hidden = !c0;
   if (c0) $("winCont").textContent = "Run " + (l.runs || l.continues.length + 1) + " \u00b7 continues " + (c0.task || c0.id) + " (paused at " + ((c0.progress && c0.progress.done) || 0) + "/" + ((c0.progress && c0.progress.total) || 0) + ")";
   $("winGoal").hidden = true;
-  const cur = pr.current && pr.current.text;
+  const cur = (pr.current && pr.current.text) || l.now || "";
   $("winNow").hidden = !cur;
   $("winNow").textContent = cur ? "Now: " + cur : "";
   $("winLink").hidden = false;
