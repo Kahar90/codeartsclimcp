@@ -1015,14 +1015,21 @@ function planView(r) {
   // "continues": "<task>" in a plan lane: the older lane was picked up by this one, so it reads as continued, not failed.
   for (const pl of p.lanes || []) {
     const old = pl.continues && byTask.get(pl.continues), nu = byTask.get(pl.task);
-    if (old && nu && old.result && old.result !== 'done') Object.assign(old, { health: 'continued', result: 'continued', continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
+    if (old && nu && old.result && old.result !== 'done') {
+      Object.assign(old, { health: 'continued', result: 'continued', continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
+      // One agent, one station: the successor carries the earlier run(s); views show them as history, not as another lane.
+      nu.continues = [...(old.continues || []), { id: old.id, task: old.task, reason: old.reason, commits: old.commits, progress: old.progress, elapsed: old.elapsed }];
+      nu.runs = (nu.runs || 1) + (old.runs || 1);
+      old.folded = true;
+    }
   }
   const waves = (p.waves && p.waves.length ? p.waves : [{ name: 'Lanes', lanes: planned.map((x) => x.task) }]).map((w) => {
-    const ls = (w.lanes || []).map((t) => byTask.get(t)).filter(Boolean);
-    const st = !ls.length ? 'planned' : ls.every((x) => x.result === 'continued') ? 'continued' : ls.every((x) => ['done', 'needs review', 'continued'].includes(x.result)) ? 'done' : ls.some((x) => x.running) ? 'running'
+    const all = (w.lanes || []).map((t) => byTask.get(t)).filter(Boolean);
+    const ls = all.filter((x) => !x.folded);
+    const st = !ls.length ? 'planned' : ls.every((x) => ['done', 'needs review'].includes(x.result)) ? 'done' : ls.some((x) => x.running) ? 'running'
       : ls.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : ls.some((x) => x.result === 'paused') ? 'paused' : ls.some((x) => x.result) ? 'partial' : 'planned';
-    return { name: w.name, note: w.note || w.after || '', status: st, lanes: ls };
-  });
+    return { name: w.name, note: w.note || w.after || '', status: st, lanes: ls, folded: all.length && !ls.length };
+  }).filter((w) => !w.folded).map(({ folded, ...w }) => w); // a wave whose lanes all continued elsewhere is history, not a stage
   return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', lead: p.lead || 'Claude', status: p.status || '', now: p.now || '',
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
