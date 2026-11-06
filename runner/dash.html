@@ -67,6 +67,7 @@ a { text-decoration: none }
 .lane-name { font: 700 18px/1.3 var(--font-display); color: var(--sel-ink); overflow-wrap: anywhere }
 .lane-name:hover { text-decoration: underline }
 .lane-meta { color: var(--muted); font-size: 12.5px; margin-top: 3px }
+.cont-line { color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere }
 .lane-steps { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12.5px; color: var(--muted) }
 .prog { height: 6px; flex: 1; background: var(--raise); border-radius: 3px; overflow: hidden; min-width: 60px }
 .prog > i { display: block; height: 100%; background: var(--run) }
@@ -291,6 +292,7 @@ const D_SUMMARY_CHAOS = '## Summary\n\nReworked the Lanes dashboard as Pixel Wor
 function demoLanes() {
   return [
     dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', tokens: { input: 52764, output: 202 }, session: 's-7011', startedAt: DEMO_T0 - 231000,
+      runs: 2, continues: [{ id: 'demo-repo--office-v2', task: 'office-v2', reason: 'paused by the operator for a scope change', commits: 6, progress: { done: 6, total: 8 }, elapsed: '41m 12s' }],
       progress: dAdv() ? { done: 1, total: 7, current: { n: 2, text: D_STEPS_LAYOUT[1] } } : { done: 0, total: 7, current: { n: 1, text: D_STEPS_LAYOUT[0] } }, tools: [{ tool: 'edit', input: 'runner/dash.html', since: DEMO_T0 - 9000 }] }),
     dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', tokens: { input: 21014, output: 5302 }, session: 's-7012', startedAt: DEMO_T0 - 437000,
       progress: { done: 2, total: 4, current: { n: 3, text: D_STEPS_STRINGS[2] } } }),
@@ -331,8 +333,13 @@ function demoPlans() {
       ] }] },
   ];
 }
+// The demo layer resolves lane ids exactly like the server: exact id, then task name, then substring.
+function demoResolve(id) {
+  const all = demoLanes();
+  return all.find((x) => x.id === id) || all.find((x) => x.task === id) || all.find((x) => x.id.includes(id));
+}
 function demoDetail(id) {
-  const all = demoLanes(); const l = all.find((x) => x.id === id) || all.find((x) => x.id.includes(id));
+  const l = demoResolve(id);
   if (!l) return { error: `no lane matches "${id}"` };
   const base = { ...l, steps: [], commits: [], todos: [], files: [], gates: [], interruptions: [], steers: [], permissions: [], outside: [], errors: [], phases: [l.phase], checks: [], brief: '', review: '', summary: '', config: { stall: 240, think: 480 } };
   const sets = {
@@ -372,7 +379,7 @@ function demoDetail(id) {
       verdict: 'needs fixes', review: D_REVIEW_CHAOS, summary: D_SUMMARY_CHAOS,
       brief: dBrief('chaos', 'Add motion to the Office view with reduced-motion fallbacks.', ['Motion brief', 'Intro tilt', 'Hover lift', 'Reduced motion fades'], ['node checks/office.check.mjs']) },
   };
-  return { ...base, ...(sets[id] || {}) };
+  return { ...base, ...(sets[l.id] || {}) };
 }
 const dFixedLog = (texts) => texts.map((t, i) => `${dClock(i - texts.length)} ${t}`);
 const D_LOG_DONE = dFixedLog([
@@ -398,6 +405,14 @@ const D_LOG_CHAOS = dFixedLog([
   '== review (maas/glm-5.3) session s-5201',
   'VERDICT: needs fixes',
 ]);
+const D_LOG_PRE = dFixedLog([
+  '== Lane started: brief tasks/office-layout.md',
+  '== Build session opened (maas/glm-5.3) session s-7011',
+  '~ Reading layout code',
+  '< read runner/office.html 214 lines',
+  '< read checks/layout.check.mjs 96 lines',
+  '> edit runner/office.html stage geometry',
+]);
 function demoLine(i) {
   const ts = dClock(i), k = i % 7;
   if (k === 0) return `${ts} == build (maas/glm-5.3) session s-7011; 4 CHECK lines, 7 steps`;
@@ -409,19 +424,21 @@ function demoLine(i) {
   return `${ts} ! check timed out after 120 s; retrying with a longer budget`;
 }
 function demoLog(id, from) {
-  const all = demoLanes(); const l = all.find((x) => x.id === id) || all.find((x) => x.id.includes(id));
+  const l = demoResolve(id);
   if (!l) return { size: 0, text: '', reset: true };
   if (l.running) {
-    const total = 10 + Math.floor((Date.now() - DEMO_T0) / 1500);
-    const lines = []; for (let i = from; i < total; i++) lines.push(demoLine(i));
+    const pre = l.id === 'demo-repo--office-layout' ? D_LOG_PRE : [];
+    const skip = pre.length ? 1 : 0; // the prefix already opened the build session
+    const total = pre.length + 10 + Math.floor((Date.now() - DEMO_T0) / 1500);
+    const lines = []; for (let i = from; i < total; i++) lines.push(i < pre.length ? pre[i] : demoLine(i - pre.length + skip));
     return { size: total, text: lines.length ? lines.join('\n') + '\n' : '', reset: from > total };
   }
-  const fixed = id.endsWith('chaos') ? D_LOG_CHAOS : D_LOG_DONE;
+  const fixed = l.id.endsWith('chaos') ? D_LOG_CHAOS : D_LOG_DONE;
   return { size: fixed.length, text: from < fixed.length ? fixed.slice(from).join('\n') + '\n' : '', reset: from > fixed.length };
 }
 async function demoPost(what, id, body) {
   await new Promise((r) => setTimeout(r, 400));
-  const l = demoLanes().find((x) => x.id === id);
+  const l = demoResolve(id);
   if (what === 'steer') {
     if (!body || !body.text || !body.text.trim()) return { error: 'empty' };
     return l && l.running ? { ok: true } : { error: 'lane not running' };
@@ -505,8 +522,7 @@ function renderRail() {
   const inPlan = new Set(plans.flatMap((p) => p.waves.flatMap((w) => w.lanes.map((l) => l.id))));
   const loose = lanes.filter((l) => !inPlan.has(l.id));
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
-  const dotCol = { run: 'var(--run)', done: 'var(--run)', warn: 'var(--amber)', bad: 'var(--bad)' };
-  const dot = (st) => `<span class="ca-dot" style="color:${dotCol[st.key] || 'var(--faint)'}"></span>`;
+  const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
   const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${dot(CAUI.status(l.health))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
   let h = '<div class="rail-h">Plans</div>';
   h += plans.length ? plans.map((p) => {
@@ -523,13 +539,15 @@ function renderRail() {
   for (const c of $('railBody').querySelectorAll('[data-go]')) c.onclick = () => go(c.dataset.go);
 }
 
+// A lane that continues an earlier paused run is one agent: one muted line, never a second card.
+const contLine = (l) => { const c = l?.continues?.[0]; if (!c) return ''; const p = c.progress || {}; return `<div class="cont-line">${l.runs ? `Run ${esc(l.runs)} · ` : ''}continues ${esc(c.task)} (paused at ${p.done ?? 0}/${p.total ?? 0})</div>`; };
 function curBand(l) {
   const chips = l.plan?.files?.length ? `<div class="chips">${l.plan.files.slice(0, 6).map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>` : '';
   if (l.running && l.progress?.current) return `<div class="curband"><span class="lbl">Current step ${l.progress.current.n}/${l.progress.total}</span><div class="t1">${md(l.progress.current.text)}</div>${chips}</div>`;
   if (l.running) return `<div class="curband"><span class="lbl">${esc(l.phase)}</span><div class="t1">${esc(l.now || 'running')}</div>${chips}</div>`;
-  if (l.health === 'planned') return `<div class="curband"><span class="lbl">Planned</span><div class="t2">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>${chips}</div>`;
+  if (l.health === 'planned') return `<div class="curband"><span class="lbl">${esc(CAUI.status(l.health, l.result).label)}</span><div class="t2">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>${chips}</div>`;
   const tail = [l.verdict ? 'review: ' + l.verdict : '', l.reason].filter(Boolean).join(' · ');
-  return `<div class="curband"><span class="lbl">${esc(l.result || l.health)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
+  return `<div class="curband"><span class="lbl">${esc(CAUI.status(l.health, l.result).label)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
 }
 const stepIc = (s) => s.state === 'done' ? '&#10003;' : s.state === 'current' ? '&#9654;' : '&#9675;';
 const stepLi = (s) => `<li class="st-${s.state}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}${s.commit ? ` <code>${esc(s.commit)}</code>` : ''}</span></li>`;
@@ -554,6 +572,7 @@ function renderPlan(p) {
       <div class="lane-main">
         <a class="lane-name" href="#/lane/${esc(l.id)}">${esc(l.task)}</a>
         <div class="lane-meta">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
+        ${contLine(l)}
         <div class="lane-steps"><span>${l.progress?.total ? `${l.progress.done}/${l.progress.total} steps` : 'no numbered steps'}</span>${prog(l.progress, l.result)}</div>
         ${curBand(l)}${stepsBlock(l)}
       </div></div>`;
@@ -561,8 +580,7 @@ function renderPlan(p) {
     const key = `${p.id}::${i}`, collapsed = waveCollapsed.has(key);
     const body = `<div class="wave-body">${w.note ? `<div class="small">${esc(w.note)}</div>` : ''}${w.lanes.map(laneCard).join('') || '<div class="small">no lanes listed</div>'}</div>`;
     return `<section class="wave">
-      <div class="wave-head"><h3>${esc(w.name)}</h3><span class="cnt">${w.lanes.length} lane${w.lanes.length === 1 ? '' : 's'}</span>
-        <button type="button" class="chev" data-wave="${esc(key)}" aria-expanded="${!collapsed}" aria-label="Toggle ${esc(w.name)}"><span class="tri">&#9654;</span></button></div>
+      <div class="wave-head"><button type="button" class="chev" data-wave="${esc(key)}" aria-expanded="${!collapsed}" aria-label="Toggle ${esc(w.name)}"><span class="tri">&#9654;</span></button><h3>${esc(w.name)}</h3><span class="cnt">${w.lanes.length} lane${w.lanes.length === 1 ? '' : 's'}</span></div>
       ${collapsed ? '' : body}</section>`;
   }).join('');
   const next = p.next.length ? `<ul class="plain">${p.next.map((n) => `<li class="${n.done ? 'st-done' : 'st-pending'}"><span class="ic">${n.done ? '&#10003;' : '&#9675;'}</span><span style="min-width:0">${esc(n.text)}</span></li>`).join('')}</ul>` : '<div class="small">Nothing listed</div>';
@@ -575,7 +593,7 @@ function renderPlan(p) {
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
     </div>
-    ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${esc(p.lead)} now</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
+    ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">Lead now</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
     ${waves}
     <div class="grid2">
       <div class="box"><h4>Planned next (lead)</h4>${next}${risks}</div>
@@ -603,13 +621,14 @@ function renderLane(d, keep) {
   const vtop = keep ? $('view')?.scrollTop : 0;
   const hadFocus = keep && document.activeElement?.id === 'msg';
   const t = d.tokens || {}; const plan = plans.find((p) => p.waves.some((w) => w.lanes.some((l) => l.id === d.id)));
+  const wl = plan ? plan.waves.flatMap((w) => w.lanes).find((l) => l.id === d.id) : null; // the plan wave entry carries continues/runs when the detail does not
   const st = CAUI.status(d.health, d.result);
   const na = (v) => (v == null || v === '' || v === '-') ? 'n/a' : esc(v);
   const metric = (lb, val) => `<span class="m"><span class="lb">${lb}</span><b>${val}</b></span>`;
   const tokens = `${Number(t.input ?? 0).toLocaleString('en-US')} in / ${Number(t.output ?? 0).toLocaleString('en-US')} out`;
   const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed))}${metric('Idle', na(d.idle))}${metric('Tokens', tokens)}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
   const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
-  const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(d.result || st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
+  const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
   const prevSt = prevSteps.get(d.id);
   const justDone = (s) => !!(prevSt && prevSt.get(s.n) && prevSt.get(s.n) !== 'done' && s.state === 'done' && (window.PixelSprites?.motion() ?? true));
   const stepRow = (s) => { const key = `${d.id}:${s.n}`, x = stepOpen.has(key); return `<div class="steprow s-${s.state}${x ? ' x' : ''}${justDone(s) ? ' flash' : ''}" data-step="${esc(key)}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</div>`; };
@@ -627,6 +646,7 @@ function renderLane(d, keep) {
     ${plan ? `<a class="backlink" href="#/plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a>` : ''}
     <div class="idrow"><span class="spot" data-spot="lane:${esc(d.id)}" data-role="${d.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.875" data-work="${d.running ? 1 : 0}"></span><h1>${esc(d.task)}</h1>${CAUI.badge(st)}${d.verdict ? `<span class="ca-badge s-${d.verdict === 'ready' ? 'done' : 'warn'}">review: ${esc(d.verdict)}</span>` : ''}</div>
     ${metrics}
+    ${contLine(d.continues ? d : wl)}
     <div class="wt">${esc(d.repo)}</div>
     ${pipeline(d)}
     <div class="nowband"><span class="lb">${d.running ? 'Now' : 'Result'}</span><div class="bd">${nowInner}${tools}</div></div>

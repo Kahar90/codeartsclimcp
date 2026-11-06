@@ -81,6 +81,17 @@ try {
   await size(1586, 992); await send('Page.navigate', { url: base + '/?demo=1#/lane/demo-repo--office-layout' }); await wait(1500);
   const bar = JSON.parse(await ev('(function(){const b=document.getElementById("bar"),p=document.querySelector(".pad.has-bar"),v=document.getElementById("view");if(!b)return "{}";const r=b.getBoundingClientRect();const cs=getComputedStyle(b);return JSON.stringify({pos:cs.position,bg:cs.backgroundColor,top:Math.round(r.top),bottom:Math.round(r.bottom),ih:window.innerHeight,pad:p?getComputedStyle(p).paddingBottom:"",vpad:getComputedStyle(v).paddingBottom});})()') || '{}');
   check('desktop action bar pins to the scrollport bottom', bar.pos === 'sticky' && bar.bottom === bar.ih && bar.pad === '80px' && bar.vpad === '0px' && bar.bg !== 'rgba(0, 0, 0, 0)', JSON.stringify(bar));
+  // demo lookups: the short task name resolves like the server; transcript prefix; continues line
+  await send('Page.navigate', { url: base + '/?demo=1#/lane/office-layout' }); await wait(1300);
+  const sn = JSON.parse(await ev('(function(){const o=document.getElementById("out");const t=o?o.innerText:"";const ls=t.split("\\n").filter(Boolean);return JSON.stringify({h1:document.querySelector(".idrow h1")?.innerText||"",steps:document.querySelectorAll(".steprow").length,cont:document.querySelector(".cont-line")?.innerText||"",lines:ls.length,head:ls[0]||""});})()') || '{}');
+  check('short task name resolves the lane and its steps', sn.h1 === 'office-layout' && sn.steps === 7, JSON.stringify(sn));
+  check('lane detail shows the continues line under the metrics', sn.cont === 'Run 2 · continues office-v2 (paused at 6/8)', sn.cont);
+  check('transcript starts with the lane history prefix', sn.lines >= 16 && /Lane started/.test(sn.head), `${sn.lines} lines; head: ${sn.head.slice(0, 50)}`);
+  await send('Page.navigate', { url: base + '/?demo=1#/plan/office-polish' }); await wait(1200);
+  const ph = JSON.parse(await ev('(function(){const h=document.querySelector(".wave-head");return JSON.stringify({chevFirst:!!h&&h.firstElementChild===h.querySelector(".chev"),cont:document.querySelector(".lane-card .cont-line")?.innerText||"",who:document.querySelector(".leadband .who")?.innerText||""});})()') || '{}');
+  check('wave chevron sits left of the wave title', ph.chevFirst === true, JSON.stringify(ph));
+  check('wave lane card shows the continues line under the model line', ph.cont === 'Run 2 · continues office-v2 (paused at 6/8)', ph.cont);
+  check('lead band is labelled Lead now', ph.who === 'Lead now', ph.who);
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
