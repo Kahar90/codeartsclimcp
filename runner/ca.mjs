@@ -309,9 +309,10 @@ async function runLane(repoArg, task) {
         break;
       }
       case 'message.part.delta': {
-        const p = parts.get(pr.partID) || { type: 'text', text: '' }; if (pr.field === 'text') p.text = (p.text || '') + (pr.delta || '');
+        const known = parts.has(pr.partID); const p = parts.get(pr.partID) || { type: 'text', text: '' }; if (pr.field === 'text') p.text = (p.text || '') + (pr.delta || '');
         parts.set(pr.partID, p); if (sid === S.activeSession && !sx(sid).tools.size) S.activity = p.type === 'reasoning' ? 'thinking' : 'writing reply';
-        if (sid === S.activeSession && p.type === 'text') S.lastTextAt = now();
+        // only a part already announced as text counts as progress: an unannounced delta may be reasoning
+        if (sid === S.activeSession && known && p.type === 'text') S.lastTextAt = now();
         break;
       }
       case 'message.part.updated': {
