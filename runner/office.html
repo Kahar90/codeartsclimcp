@@ -198,7 +198,7 @@ const EASE_OUT = "cubic-bezier(.2,.8,.2,1)";
 const EASE_SPRING = "cubic-bezier(.34,1.56,.64,1)";
 const EASE_IN = "cubic-bezier(.4,0,1,1)";
 
-const HUES = { lead: 265, builder: 160, reviewer: 42, fixer: 16, idle: 222 };
+const HUES = { lead: 265, builder: 160, reviewer: 42, fixer: 16, done: 145, idle: 222 };
 const healthKey = (h) => {
   const k = String(h || "").split("(")[0].trim();
   if (k === "running" || k === "running tool") return "run";
@@ -210,7 +210,7 @@ const healthKey = (h) => {
 };
 const healthText = (h) => String(h || "").split("(")[0].trim() || "planned";
 const isWorking = (n) => n.kind === "lane" && healthKey(n.health) === "run";
-const roleOf = (n) => n.kind === "lead" ? "lead" : (n.health === "planned" || n.phase === "planned") ? "idle" : n.phase === "review" ? "reviewer" : n.phase === "fix" ? "fixer" : "builder";
+const roleOf = (n) => n.kind === "lead" ? "lead" : (n.health === "planned" || n.phase === "planned") ? "idle" : healthKey(n.health) === "done" ? "done" : n.phase === "review" ? "reviewer" : n.phase === "fix" ? "fixer" : "builder";
 const tokStr = (t) => { const n = t ? (t.input || 0) + (t.output || 0) + (t.reasoning || 0) : 0; return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "K tok" : n + " tok"; };
 const durStr = (sec) => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; if (h) return `${h}h ${m}m`; if (m) return s ? `${m}m ${s}s` : `${m}m`; return `${s}s`; };
 const commitsOf = (l) => parseInt(String(l.commits || "0").split("/")[0], 10) || 0;

@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var ROLES = ['lead', 'builder', 'reviewer', 'fixer', 'idle'];
+  var ROLES = ['lead', 'builder', 'reviewer', 'fixer', 'done', 'idle'];
   var OX = 82;
   var OY = 186;
   var K = 1.3; // art scale about the foot anchor (80, 186)
@@ -61,6 +61,7 @@
     builder: { skin: '#f1c9a8', skinSh: '#dba886', hair: '#3b2a22', style: 'phones' },
     reviewer: { skin: '#8a5a3f', skinSh: '#71472f', hair: '#2a2130', style: 'bun' },
     fixer: { skin: '#e0ad86', skinSh: '#c58f69', hair: '#7a4a2a', style: 'cap' },
+    done: { skin: '#f1c9a8', skinSh: '#dba886', hair: '#3b2a22', style: 'part' },
     idle: { skin: '#e0ad86', skinSh: '#c58f69', hair: '#3b2a22', style: 'part' }
   };
 
@@ -124,8 +125,10 @@
           }
     // face, turned toward the viewer's left
     var ey = hy + 0.8;
-    s += '<ellipse cx="' + (hx - 6.1) + '" cy="' + ey + '" rx="1.25" ry="1.6" fill="' + c.ink + '"/>'
-      + '<ellipse cx="' + (hx + 0.3) + '" cy="' + ey + '" rx="1.25" ry="1.6" fill="' + c.ink + '"/>'
+    s += (o.happy
+      ? '<path d="M ' + (hx - 7.6) + ' ' + (ey + 0.6) + ' q 1.5 -1.8 3 0 M ' + (hx - 1.2) + ' ' + (ey + 0.6) + ' q 1.5 -1.8 3 0" stroke="' + c.ink + '" stroke-width="1.1" stroke-linecap="round" fill="none"/>'
+      : '<ellipse cx="' + (hx - 6.1) + '" cy="' + ey + '" rx="1.25" ry="1.6" fill="' + c.ink + '"/>'
+      + '<ellipse cx="' + (hx + 0.3) + '" cy="' + ey + '" rx="1.25" ry="1.6" fill="' + c.ink + '"/>')
       + '<circle cx="' + (hx - 8.3) + '" cy="' + (ey + 3.4) + '" r="1.9" fill="#ff7b6b" opacity=".25"/>'
       + '<path d="M ' + (hx - 4.6) + ' ' + (hy + 6) + ' q 1.7 1.3 3.4 0" stroke="' + c.ink + '" stroke-width="1" stroke-linecap="round" fill="none" opacity=".8"/>'
       + '<ellipse cx="' + (hx + 8.6) + '" cy="' + (hy + 1.2) + '" rx="2.1" ry="2.7" fill="' + c.skinSh + '"/>';
@@ -392,14 +395,35 @@
     return wrap(c, '', b);
   }
 
+  // Finished lane: the worker leans back, hands behind the head, laptop shut, a check badge over the desk. Static.
+  function spriteDone(c) {
+    var lean = '<g transform="rotate(7 0 0)">'
+      + path3([[-11, -27], [-18, -44], [-7, -51]], 6.2, c.top) + path3([[10, -27], [16, -45], [5, -52]], 6.2, c.topSh)
+      + torso(c, c.top, c.topSh) + '<path d="M -5.5 -31 L -1 -25 L 3.5 -31 Z" fill="' + c.topHi + '"/>'
+      + head(c, { happy: true }) + '</g>';
+    var badge = '<g transform="' + planeY(-50, -12, 74) + '">'
+      + '<circle cx="11" cy="11" r="13" fill="' + c.glow + '" opacity=".1"/>'
+      + '<circle cx="11" cy="11" r="9.5" fill="url(#' + c.p + 'gl)" stroke="' + c.glow + '" stroke-width="1"/>'
+      + '<path d="M 6.6 11.2 L 9.8 14.4 L 15.6 7.6" stroke="' + c.glowHi + '" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>';
+    var b = shadow(c, -4, -2, 34, 0.9)
+      + officeChair(c, -4, -21, c.dark)
+      + at(-4, -19, 19, lean)
+      + deskBack(c, -34, -6, 46, 20) + deskFront(c, -34, -6, 46, 20)
+      + closedLaptop(c, -15, -1, 25)
+      + mug(c, 4, 6, 25, false)
+      + plant(c, -29, -1, 25)
+      + badge;
+    return wrap(c, '', b);
+  }
+
   // Portrait crops (viewBox x, y, size) around each character's head and shoulders, for small avatars.
-  var PORTRAIT = { lead: [70, 66, 50], builder: [74, 72, 50], fixer: [74, 72, 50], reviewer: [68, 84, 50], idle: [22, 92, 90] };
+  var PORTRAIT = { lead: [70, 66, 50], builder: [74, 72, 50], fixer: [74, 72, 50], reviewer: [68, 84, 50], done: [76, 62, 52], idle: [22, 92, 90] };
 
   function draw(role, opts) {
     var r = ROLES.indexOf(role) < 0 ? 'idle' : role;
     var c = ctx(r, opts);
     var svg = r === 'lead' ? spriteLead(c) : r === 'builder' ? spriteBuilder(c) : r === 'fixer' ? spriteFixer(c)
-      : r === 'reviewer' ? spriteReviewer(c) : spriteIdle(c);
+      : r === 'reviewer' ? spriteReviewer(c) : r === 'done' ? spriteDone(c) : spriteIdle(c);
     if (opts && opts.portrait) {
       var v = PORTRAIT[r];
       svg = svg.replace('viewBox="0 0 160 200" width="160" height="200"', 'viewBox="' + v[0] + ' ' + v[1] + ' ' + v[2] + ' ' + v[2] + '" width="' + v[2] + '" height="' + v[2] + '"');

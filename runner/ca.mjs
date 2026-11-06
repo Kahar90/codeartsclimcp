@@ -243,7 +243,9 @@ async function runLane(repoArg, task) {
   };
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
-  const save = (force) => { if (!force && now() - lastWrite < 1000) return; lastWrite = now(); S.updatedAt = now(); try { fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(S, null, 2)); } catch {} };
+  const save = (force) => { if (!force && now() - lastWrite < 1000) return; lastWrite = now(); S.updatedAt = now(); try { fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(S, null, 2)); } catch {}
+    // finished lanes also keep a copy in the registry, so merged and removed worktrees stay visible
+    if (S.result) try { fs.mkdirSync(path.join(REG, 'final'), { recursive: true }); fs.writeFileSync(path.join(REG, 'final', `${id}.json`), JSON.stringify(S, null, 2)); } catch {} };
   const phase = (p, activity) => { if (S.phase !== p) S.phases.push({ phase: p, at: now() }); S.phase = p; if (activity) S.activity = activity; save(true); };
   const syncCommits = () => {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
@@ -617,7 +619,7 @@ function cmdDetach(repoArg, task) {
 // ---------- control commands ----------
 function lanes() {
   let files = []; try { files = fs.readdirSync(REG).filter((f) => f.endsWith('.json')); } catch {}
-  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r) return null; const s = readJSON(path.join(r.dir, 'state.json')); return s ? { ...r, s } : null; }).filter(Boolean)
+  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r) return null; const s = readJSON(path.join(r.dir, 'state.json')) || readJSON(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
     .sort((a, b) => (b.s.startedAt || 0) - (a.s.startedAt || 0));
 }
 function health(s) {
@@ -720,7 +722,7 @@ function cmdStop(args) {
   console.log(`stop requested for ${l.id}; the supervisor aborts the session and writes the summary within a few seconds`);
 }
 function cmdGc() {
-  for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
+  for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); fs.rmSync(path.join(REG, 'final', `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
 }
 
 // ---------- engineer workflow: setup, wait, summary, init, doctor ----------
@@ -931,13 +933,31 @@ function laneView(l) {
     reason: s.reason || '', running: !s.result && alive(s.pid), result: s.result || '', progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0 };
 }
+// A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
+// that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
+function laneFromLog(file, ref, briefFile) {
+  let txt = ''; try { txt = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const head = [...txt.matchAll(/^=== lane \S+: ([A-Z ]+?)(?: \([^)]*\))? in (\S+) ===\r?$/gm)].pop(); if (!head) return null;
+  const tail = txt.slice(head.index);
+  const result = head[1].trim().toLowerCase();
+  const commitLog = [...tail.matchAll(/^([0-9a-f]{7,40}) (.+?)\r?$/gm)].map((m) => ({ hash: m[1], subject: m[2] })).reverse();
+  let stepList = []; try { stepList = [...fs.readFileSync(briefFile, 'utf8').matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) })); } catch {}
+  const tk = tail.match(/tokens in (\d+) out (\d+)/); const vd = tail.match(/^VERDICT: (.+?)\r?$/m);
+  let mt = 0; try { mt = fs.statSync(file).mtimeMs; } catch {}
+  const secs = [...head[2].matchAll(/(\d+)([hms])/g)].reduce((a, m) => a + Number(m[1]) * { h: 3600, m: 60, s: 1 }[m[2]], 0);
+  const s = { result, phase: 'finished', activity: result, verdict: vd && vd[1] !== 'none' ? vd[1] : null, commitLog, commits: commitLog.length, stepList, steps: stepList.length,
+    tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [] };
+  return { ...ref, s };
+}
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
   const planned = (p.lanes || []).map((pl) => {
     const repo = path.resolve(base, pl.repo || '.'); const id = laneId(repo, pl.task); const l = reg.get(id);
-    const bf = path.join(repo, 'tasks', `${pl.task}.md`);
-    const v = l ? laneView(l) : { id, task: pl.task, repo, health: 'planned', phase: 'planned', running: false, result: '',
+    let bf = path.join(repo, 'tasks', `${pl.task}.md`);
+    if (!fs.existsSync(bf)) bf = path.join(base, 'tasks', `${pl.task}.md`);
+    const old = l ? null : laneFromLog(path.join(base, 'tasks', `${pl.task}.lane.log`), { id, task: pl.task, repo, dir: path.join(repo, 'tasks', `${pl.task}.lane`) }, bf);
+    const v = l ? laneView(l) : old ? { ...laneView(old), archived: true } : { id, task: pl.task, repo, health: 'planned', phase: 'planned', running: false, result: '',
       progress: { done: 0, total: briefSteps(bf).length, current: null } };
     return { ...v, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
   });
