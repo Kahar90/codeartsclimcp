@@ -873,14 +873,13 @@ function positionCard() {
   if (!n || !layout || card.hidden) return;
   const L = layout, r = $("stage").getBoundingClientRect();
   const p = sceneToClient(n.x, n.y);
-  const scale = Math.min(r.width / L.vb.w, r.height / L.vb.h);
   const cw = card.offsetWidth, chh = card.offsetHeight;
-  let left = p.x - r.left + L.RX * scale + 16;
-  let tail = "tail-left";
-  if (left + cw > r.width - 6) { left = p.x - r.left - L.RX * scale - 16 - cw; tail = "tail-right"; }
+  let left = p.x - r.left + L.RX * L.scale + 16;
+  if (left + cw > r.width - 6) left = p.x - r.left - L.RX * L.scale - 16 - cw;
   left = Math.max(6, Math.min(left, Math.max(6, r.width - cw - 6)));
   let top = p.y - r.top - 34;
   top = Math.max(6, Math.min(top, Math.max(6, r.height - chh - 6)));
+  const tail = p.x - r.left < left + cw / 2 ? "tail-left" : "tail-right";
   card.style.left = Math.round(left) + "px";
   card.style.top = Math.round(top) + "px";
   card.className = "card " + tail;
