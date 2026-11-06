@@ -1,0 +1,28 @@
+{
+  "title": "Office view polish: sprites and layout",
+  "goal": "Make the Office view polished and tasteful: isometric sprites, a done pose, merged lanes shown with their real results, and a layout that fits many lanes without clipping or overlap.",
+  "lead": "Claude Opus 5.5",
+  "status": "running",
+  "now": "office-layout lane is building; Claude verifies with screenshots when it finishes.",
+  "waves": [
+    { "name": "Wave 1: layout", "lanes": ["office-layout"], "note": "Sprite art, the done pose and the merged-lane fallback were done by Claude (visual work, commits 23e638e and cf51334)." }
+  ],
+  "lanes": [
+    { "task": "office-layout", "repo": "../ca-office-wt-office-layout", "model": "maas/glm-5.3", "why": "layout math with a geometric contract check (checks/layout.check.mjs)", "files": ["runner/office.html"] }
+  ],
+  "next": [
+    { "text": "Redraw sprites isometric, done pose, plan fallback for merged lanes", "done": true },
+    { "text": "Write checks/layout.check.mjs before the brief", "done": true },
+    "Read the lane summary and verdict",
+    "Run all checks on the worktree, look at the layout screenshots (demo=big, phone, live)",
+    "Merge into main, copy into the live skill, remove the worktree"
+  ],
+  "decisions": [
+    { "at": "2026-11-06", "text": "Sprite art drawn by Claude, not a lane: the worker has no image input and once swapped two sprite specs." },
+    { "at": "2026-11-06", "text": "Reverted 'ready verdict marks every step done': a reviewer once marked an uncommitted step done, progress counts commits only." }
+  ],
+  "risks": [
+    "A taller stage may break card placement or packet links; the office and motion checks cover them.",
+    "The art box measure uses the sprite's top-level <g>; a sprite change can shift it."
+  ]
+}
