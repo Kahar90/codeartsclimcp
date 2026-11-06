@@ -1,0 +1,106 @@
+{
+  "backplate": "workshop.png",
+  "stageSize": [
+    1280,
+    720
+  ],
+  "stations": {
+    "lead": {
+      "name": "Claude Opus 5.5",
+      "foot": [
+        292,
+        356
+      ],
+      "color": "#dca5ff"
+    },
+    "builder": {
+      "name": "office-scene",
+      "foot": [
+        626,
+        354
+      ],
+      "color": "#94fff2"
+    },
+    "artist": {
+      "name": "office-sprites",
+      "foot": [
+        759,
+        601
+      ],
+      "color": "#ffd591"
+    },
+    "reviewer": {
+      "name": "office-review",
+      "foot": [
+        1036,
+        350
+      ],
+      "color": "#b0fcb6"
+    }
+  },
+  "coordinates": "Foot anchors in stage pixels, relative to the artwork top-left",
+  "fixture": {
+    "initial": {
+      "lead": "Running",
+      "builder": "Waiting",
+      "artist": "Waiting",
+      "reviewer": "Running"
+    },
+    "events": [
+      {
+        "atMs": 1300,
+        "type": "assignment",
+        "from": "lead",
+        "to": "builder"
+      },
+      {
+        "atMs": 2000,
+        "type": "status",
+        "lane": "builder",
+        "status": "Running"
+      },
+      {
+        "atMs": 3300,
+        "type": "press",
+        "lane": "builder"
+      },
+      {
+        "atMs": 5250,
+        "type": "stepComplete",
+        "lane": "builder",
+        "step": "Data layer",
+        "progress": [
+          3,
+          4
+        ]
+      },
+      {
+        "atMs": 7200,
+        "type": "handoff",
+        "from": "lead",
+        "to": "artist"
+      },
+      {
+        "atMs": 7900,
+        "type": "status",
+        "lane": "artist",
+        "status": "Running"
+      },
+      {
+        "atMs": 9500,
+        "type": "press",
+        "lane": "artist"
+      },
+      {
+        "atMs": 11500,
+        "type": "status",
+        "lane": "artist",
+        "status": "Done"
+      },
+      {
+        "atMs": 13400,
+        "type": "escape"
+      }
+    ]
+  }
+}

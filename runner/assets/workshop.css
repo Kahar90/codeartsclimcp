@@ -1,0 +1,72 @@
+/* Pixel Workshop shared tokens and shell for /office and the Lanes dashboard (/).
+   Shell markup both pages use:
+   <header class="ca-top">
+     <a class="ca-brand" href="/">CodeArts</a><span class="ca-sep"></span>
+     <nav class="ca-tabs" aria-label="Views">
+       <a class="ca-tab" href="/office" aria-current="page"><svg class="ca-ico">..grid..</svg>Office</a>
+       <a class="ca-tab" href="/"><svg class="ca-ico">..layers..</svg>Lanes</a>
+     </nav>
+     <span class="ca-top-fill"></span><span class="ca-counts">2 plans · 14 lanes</span>
+   </header>
+   Status badges: <span class="ca-badge s-run|s-done|s-warn|s-bad|s-idle">Running</span> (CAUI.badge). */
+:root {
+  color-scheme: dark;
+  --stage: #171320;
+  --bg: #15111c;
+  --top: #1d1726;
+  --panel: #231d2c;
+  --panel-2: #2a2335;
+  --raise: #31283d;
+  --border: #403448;
+  --border-2: #54455f;
+  --fg: #fbf3ff;
+  --muted: #c9bdd5;
+  --faint: #9a8ca8;
+  --sel: #bc8ce7;
+  --sel-bg: rgba(188, 140, 231, 0.16);
+  --sel-ink: #e6ccff;
+  --run: #83f2cf;
+  --amber: #ffd591;
+  --bad: #ff9c9c;
+  --lead: #dca5ff;
+  --builder: #94fff2;
+  --artist: #ffd591;
+  --reviewer: #b0fcb6;
+  --code-bg: #1a1522;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+}
+html, body { background: var(--bg); color: var(--fg); }
+body { font: 14px/1.45 var(--font); }
+a { color: var(--sel-ink); }
+:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; border-radius: 6px; }
+
+.ca-top { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 0 20px; background: var(--top); border-bottom: 1px solid var(--border); position: relative; z-index: 20; }
+.ca-brand { font: 700 20px/1 var(--font-display); color: var(--fg); text-decoration: none; letter-spacing: 0.01em; white-space: nowrap; }
+.ca-sep { width: 1px; height: 24px; background: var(--border); }
+.ca-tabs { display: flex; gap: 8px; }
+.ca-tab { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-2); color: var(--muted); text-decoration: none; font-weight: 600; font-size: 15px; background: transparent; }
+.ca-tab:hover { color: var(--fg); border-color: var(--sel); }
+.ca-tab[aria-current="page"] { background: #7a4fae; border-color: #9b6dd0; color: #fff; }
+.ca-ico { width: 18px; height: 18px; flex: none; }
+.ca-top-fill { flex: 1; }
+.ca-counts { color: var(--muted); font-size: 15px; white-space: nowrap; }
+
+.ca-badge { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; border: 1.5px solid currentColor; font-size: 12px; font-weight: 650; white-space: nowrap; line-height: 1; }
+.s-run { color: var(--run); } .s-done { color: var(--run); } .s-warn { color: var(--amber); } .s-bad { color: var(--bad); } .s-idle { color: var(--muted); }
+.ca-badge.s-done { background: rgba(131, 242, 207, 0.08); }
+.ca-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; flex: none; }
+
+.px-sprite { image-rendering: pixelated; background-repeat: no-repeat; pointer-events: none; }
+
+@media (max-width: 640px) {
+  .ca-top { padding: 0 12px; gap: 10px; min-height: 52px; }
+  .ca-brand { font-size: 17px; }
+  .ca-sep { display: none; }
+  .ca-tab { padding: 0 10px; height: 34px; font-size: 14px; }
+  .ca-counts { font-size: 12.5px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; animation-duration: 0s !important; } }
