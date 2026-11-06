@@ -236,7 +236,7 @@ async function runLane(repoArg, task) {
   const S = {
     v: 1, id, task, repo, dir, pid: process.pid, startedAt: T0, updatedAt: T0, phase: 'starting', attempt: 0, fixes: 0,
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
-    lastEventAt: T0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
+    lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
     config: { stall: CFG.stall, toolStall: CFG.toolStall, retries: CFG.retries, fixes: CFG.fixes },
     tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, steps: 0 }, commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
@@ -305,6 +305,7 @@ async function runLane(repoArg, task) {
       case 'message.part.delta': {
         const p = parts.get(pr.partID) || { type: 'text', text: '' }; if (pr.field === 'text') p.text = (p.text || '') + (pr.delta || '');
         parts.set(pr.partID, p); if (sid === S.activeSession && !sx(sid).tools.size) S.activity = p.type === 'reasoning' ? 'thinking' : 'writing reply';
+        if (sid === S.activeSession && p.type === 'text') S.lastTextAt = now();
         break;
       }
       case 'message.part.updated': {
@@ -317,6 +318,7 @@ async function runLane(repoArg, task) {
           const p = parts.get(part.id) || { type: part.type, text: '' }; p.type = part.type; if (typeof part.text === 'string' && part.text.length >= (p.text || '').length) p.text = part.text;
           parts.set(part.id, p); if (part.time?.end) flushPart(part.id);
           if (sid === S.activeSession && !sx(sid).tools.size) S.activity = part.type === 'reasoning' ? 'thinking' : 'writing reply';
+          if (sid === S.activeSession && part.type === 'text') S.lastTextAt = now();
         } else if (part.type === 'tool') {
           const s = sid ? sx(sid) : null; const st = part.state || {}; const key = part.callID || part.id;
           if (st.status === 'running' && s && !s.tools.has(key)) {
@@ -328,11 +330,13 @@ async function runLane(repoArg, task) {
             if (typeof fp === 'string' && path.isAbsolute(fp) && !insideRepo(fp)) {
               S.outside.push({ at: now(), tool: part.tool, path: fp }); L(`  ! outside the repo: ${part.tool} ${fp}`);
             }
+            if (sid === S.activeSession) S.lastToolAt = now();
           } else if ((st.status === 'completed' || st.status === 'error') && s) {
             const t = s.tools.get(key); s.tools.delete(key);
             const took = t ? ` (${dur(now() - t.since)})` : '';
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
+            if (sid === S.activeSession) S.lastToolAt = now();
           }
           if (sid === S.activeSession && s) { const t = [...s.tools.values()][0]; S.activity = t ? `tool ${t.tool}: ${oneLine(t.input, 80)}` : 'thinking'; S.tools = [...s.tools.values()].map((x) => ({ tool: x.tool, input: oneLine(x.input, 120), since: x.since })); }
         } else if (part.type === 'step-finish') {
@@ -376,6 +380,7 @@ async function runLane(repoArg, task) {
   const send = async (sid, text, model, agent) => {
     sent.add(text.trim()); const s = sx(sid); s.error = null; s.sawBusy = false; s.lastAct = now(); s.sentAt = now();
     S.activeSession = sid; S.busy = true;
+    S.turnStartAt = now(); S.lastToolAt = 0; S.lastTextAt = 0;
     await server.api('POST', `/session/${sid}/prompt_async`, { model: splitModel(model), ...(agent ? { agent } : {}), parts: [{ type: 'text', text }] });
   };
   const abort = async (sid) => {
