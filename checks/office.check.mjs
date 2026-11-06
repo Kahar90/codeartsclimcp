@@ -155,7 +155,9 @@ try {
   s = await st();
   check('narrow mode below 700 px', (await ev('document.body.classList.contains("narrow")')) === true);
   check('stage fills the width at 390x844', near(s.stage.w, 390), `${s.stage.w}x${s.stage.h}`);
-  check('stage reaches the bottom at 390x844', near(s.stage.y + s.stage.h, 844), `bottom ${s.stage.y + s.stage.h}`);
+  check('narrow stage shows the whole room at 16:9', near(s.stage.h, (s.stage.w * 720) / 1280), `${s.stage.w}x${s.stage.h}`);
+  const listTop = await ev('Math.round(document.getElementById("stlist").getBoundingClientRect().top)');
+  check('station list starts right below the narrow stage', Math.abs(listTop - (s.stage.y + s.stage.h)) < 24, `list ${listTop} stage bottom ${s.stage.y + s.stage.h}`);
   check('nameplates hidden when narrow', s.stations.every((x) => x.plate.w === 0));
   const rows = await ev('document.querySelectorAll("#stlist .st-row").length');
   check('station list shows lead and workers when narrow', rows === 4, String(rows));
