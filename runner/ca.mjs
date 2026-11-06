@@ -644,6 +644,10 @@ function health(s) {
   if (!s.busy) return 'running';
   if (s.tools?.length) return 'running tool';
   if (idle > (s.config?.stall || 240) * 1000) return 'STALLED';
+  if (s.turnStartAt || s.lastToolAt || s.lastTextAt) {
+    const age = progressAge({ turnStartAt: s.turnStartAt, lastToolAt: s.lastToolAt, lastTextAt: s.lastTextAt, now: now() });
+    if (age > (s.config?.think ?? 480) * 1000) return `thinking (${dur(age)}, no tool call)`;
+  }
   if (idle > 60000) return 'quiet';
   return 'running';
 }
