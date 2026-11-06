@@ -51,9 +51,11 @@ const dash = spawn(process.execPath, [CA, 'dash', String(port)], { stdio: 'ignor
 try {
   let plans = null; for (let i = 0; i < 40 && !plans; i++) { await new Promise((x) => setTimeout(x, 250)); try { plans = await (await fetch(`http://127.0.0.1:${port}/api/plans`)).json(); } catch {} }
   const p = (plans || []).find((x) => x.title === 'p');
-  const first = p && p.waves[0].lanes[0];
-  check('continued lane shows continued', first && first.health === 'continued' && first.result === 'continued' && /second/.test(first.continuedBy || ''), JSON.stringify(first && { h: first.health, r: first.result, by: first.continuedBy }));
-  check('wave of continued lanes is continued, not attention', p && p.waves[0].status === 'continued', p && p.waves[0].status);
+  const tasks = p ? p.waves.flatMap((w) => w.lanes.map((l) => l.task)) : [];
+  const second = p && p.waves.flatMap((w) => w.lanes).find((l) => l.task === 'second');
+  check('continued lane is folded into its successor (one station)', p && !tasks.includes('first') && tasks.includes('second'), JSON.stringify(tasks));
+  check('a wave whose lanes all continued is dropped', p && p.waves.length === 1 && p.waves[0].name === 'W2', p && p.waves.map((w) => w.name).join(','));
+  check('successor carries the earlier run', second && second.continues && second.continues[0].task === 'first' && second.runs === 2, JSON.stringify(second && { c: second.continues, runs: second.runs }));
 } finally { dash.kill(); }
 
 // shared UI labels
