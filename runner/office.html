@@ -23,6 +23,7 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #links path { fill: none; stroke: var(--sel); stroke-opacity: 0.75; }
 #sprites { position: absolute; inset: 0; pointer-events: none; }
+#sprites .px-sprite { position: absolute; }
 #plates { position: absolute; inset: 0; pointer-events: none; }
 .plate { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 10px; background: var(--panel-2); border: 2px solid var(--border-2); border-radius: 8px; font: 11px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: center; white-space: nowrap; }
 .plate .p-name { font-weight: 700; }
