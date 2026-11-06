@@ -3,6 +3,8 @@ You are working in a git repo (current directory). Goal: the Office view (`runne
 
 Facts about the sprites (`runner/office-sprites.js`, do not edit it): each sprite is an SVG with viewBox 160x200 drawn into a box of CW x CH (CW = RX * 1.15, CH = CW * 1.25). The feet anchor is at y = 186 of 200 (feetFrac 0.93), placed at the platform center plus footOff. The visible art spans roughly x 15 to 150 and y 22 to 200 of the viewBox (floating panels and badges reach the top). So the art rises about (186 - 22) / 200 * CH above the anchor.
 
+Work in small edits and measure, do not calculate: do not work out layout numbers by hand in your head for more than a minute. Make a change, run `node checks/layout.check.mjs` (it prints the measured sprite, plate and stage boxes in client px for every case), read the FAIL lines, adjust, repeat. Step 1 is only the fixture: write it and commit it within your first few tool calls.
+
 Do the steps in order. After each step that works, run its checks, then
 `git add -A && git commit -m "step N: <summary>"` (N = the step number; the dashboard tracks
 progress from it). Do not ask questions; decide and keep going.
