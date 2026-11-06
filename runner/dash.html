@@ -23,6 +23,8 @@ body { margin: 0; overflow: hidden; display: flex; flex-direction: column; }
 .rail-card { border: 2px solid var(--border); background: var(--panel); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; cursor: pointer }
 .rail-card:hover { border-color: var(--border-2) }
 .rail-card.sel { border-color: var(--sel); background: var(--sel-bg) }
+.rail-card.closed:not(.sel) { opacity: .62 }
+.rail-card.closed:not(.sel):hover { opacity: 1 }
 .rail-row { display: flex; align-items: center; gap: 8px; min-width: 0 }
 .rail-title { font-weight: 650; font-size: 13.5px; flex: 1; min-width: 0; overflow-wrap: anywhere }
 .rail-sub { color: var(--muted); font-size: 12px; margin-top: 5px }
@@ -520,6 +522,8 @@ function mountSprites() {
   });
 }
 
+const planState = (p) => p.state || (() => { const ls = p.waves.flatMap((w) => w.lanes); return ls.some((l) => l.running) ? 'running' : ls.length && ls.every((l) => ['done', 'needs review'].includes(l.result)) ? 'done' : p.status || 'planned'; })();
+const planSummary = (p) => p.summary || (() => { const ls = p.waves.flatMap((w) => w.lanes); return `${ls.filter((l) => ['done', 'needs review'].includes(l.result)).length}/${ls.length} lanes done`; })();
 function renderRail() {
   const inPlan = new Set(plans.flatMap((p) => p.waves.flatMap((w) => w.lanes.flatMap((l) => [l.id, ...(l.continues || []).map((c) => c.id)]))));
   const loose = lanes.filter((l) => !inPlan.has(l.id));
@@ -528,10 +532,10 @@ function renderRail() {
   const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${dot(CAUI.status(l.health))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
   let h = '<div class="rail-h">Plans</div>';
   h += plans.length ? plans.map((p) => {
-    const all = p.waves.flatMap((w) => w.lanes); const done = all.filter((l) => ['done', 'needs review'].includes(l.result)).length;
-    return `<div class="rail-card${sel('plan', p.id)}" data-go="plan/${esc(p.id)}">
-      <div class="rail-row">${dot(CAUI.status(p.status))}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(CAUI.status(p.status))}</div>
-      <div class="rail-sub">${done}/${all.length} lanes done</div></div>`;
+    const st = CAUI.status(planState(p));
+    return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
+      <div class="rail-row">${dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}</div>
+      <div class="rail-sub">${esc(planSummary(p))}</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
   h += '<div class="rail-div"></div><div class="rail-h">' + (plans.length ? 'Other lanes' : 'Lanes') + '</div>';
@@ -547,6 +551,7 @@ function curBand(l) {
   const chips = l.plan?.files?.length ? `<div class="chips">${l.plan.files.slice(0, 6).map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>` : '';
   if (l.running && l.progress?.current) return `<div class="curband"><span class="lbl">Current step ${l.progress.current.n}/${l.progress.total}</span><div class="t1">${md(l.progress.current.text)}</div>${chips}</div>`;
   if (l.running) return `<div class="curband"><span class="lbl">${esc(l.phase)}</span><div class="t1">${esc(l.now || 'running')}</div>${chips}</div>`;
+  if (l.health === 'dropped') return `<div class="curband"><span class="lbl">Dropped</span><div class="t2">${esc(l.reason || 'never started')}</div>${chips}</div>`;
   if (l.health === 'planned') return `<div class="curband"><span class="lbl">${esc(CAUI.status(l.health, l.result).label)}</span><div class="t2">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>${chips}</div>`;
   const tail = [l.verdict ? 'review: ' + l.verdict : '', l.reason].filter(Boolean).join(' · ');
   return `<div class="curband"><span class="lbl">${esc(CAUI.status(l.health, l.result).label)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
@@ -591,11 +596,12 @@ function renderPlan(p) {
   $('view').innerHTML = `<div class="pad">
     <div class="plan-head">
       <h1>${esc(p.title)}</h1>
-      <div class="plan-sub">plan by ${esc(p.lead)} · updated ${ago(p.updatedAt)}</div>
+      <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(p.lead)} · updated ${ago(p.updatedAt)}</div>
+      ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
     </div>
-    ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">Lead now</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
+    ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${p.closed ? 'Outcome' : 'Lead now'}</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
     ${waves}
     <div class="grid2">
       <div class="box"><h4>Planned next (lead)</h4>${next}${risks}</div>

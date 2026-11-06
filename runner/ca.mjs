@@ -33,6 +33,7 @@
 //        ca dash [port]                    local web dashboard of all lanes (default 4777)
 //        ca gc                             forget lanes finished more than 3 days ago
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
+//        ca plan list | close [id] [--reason t] | rm <id>   plan state; close drops unstarted lanes
 //        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
 //        ca help | -h | --help             this usage
 //        Env knobs: STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
@@ -946,7 +947,28 @@ function plans() {
   return files.map((f) => readJSON(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
     .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
 }
+// ca plan [file] registers; ca plan list | close [id] [--reason t] | rm <id> manage registered plans.
+const findPlan = (q) => { const all = plans(); return q ? all.find((x) => x.id === q) || all.find((x) => x.id.includes(q)) : all[0]; };
 async function cmdPlan(args) {
+  const sub = args[0];
+  if (sub === 'list' || sub === 'ls') {
+    const all = plans().map(planView); if (!all.length) return console.log('no plan registered (ca plan <repo>/tasks/plan.json)');
+    for (const p of all) console.log(`${p.id.padEnd(24)} ${p.state.padEnd(10)} ${p.title}  (${p.summary})`);
+    return;
+  }
+  if (sub === 'close' || sub === 'rm') {
+    const ri = args.indexOf('--reason'); const reason = ri >= 0 ? args.slice(ri + 1).join(' ').trim() : '';
+    const q = args.slice(1, ri >= 0 ? ri : undefined).find((a) => !a.startsWith('--'));
+    const r = findPlan(q); if (!r) die(`no registered plan matches ${q || '(latest)'}; ca plan list`, 2);
+    if (sub === 'rm') { fs.rmSync(path.join(PLANS, `${r.id}.json`), { force: true }); return console.log(`plan ${r.id} unregistered (its plan.json is kept: ${r.file})`); }
+    const v = planView(r); if (v.waves.some((w) => w.lanes.some((l) => l.running))) die(`plan ${r.id} still has a running lane; ca stop it first`, 1);
+    const p = readJSON(r.file) || {}; const unstarted = new Set(v.waves.flatMap((w) => w.lanes).filter((l) => l.health === 'planned').map((l) => l.task));
+    for (const pl of p.lanes || []) if (unstarted.has(pl.task)) pl.dropped = true;
+    p.status = 'done'; p.now = reason ? `Closed: ${reason}` : 'Plan closed by the lead.';
+    (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Plan closed${reason ? ': ' + reason : ''}${unstarted.size ? `. Dropped, never started: ${[...unstarted].join(', ')}` : ''}.` });
+    fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n');
+    return console.log(`plan ${r.id} closed${unstarted.size ? `; dropped ${[...unstarted].join(', ')}` : ''}`);
+  }
   const f = path.resolve(args[0] || path.join('tasks', 'plan.json'));
   const p = readJSON(f); if (!p) die(`cannot read plan JSON at ${f}`, 2);
   fs.mkdirSync(PLANS, { recursive: true }); const id = planId(f);
@@ -1009,7 +1031,9 @@ function planView(r) {
     const old = l ? null : laneFromLog(path.join(base, 'tasks', `${pl.task}.lane.log`), { id, task: pl.task, repo, dir: path.join(repo, 'tasks', `${pl.task}.lane`) }, bf);
     const v = l ? laneView(l) : old ? { ...laneView(old), archived: true } : { id, task: pl.task, repo, health: 'planned', phase: 'planned', running: false, result: '',
       progress: { done: 0, total: briefSteps(bf).length, current: null } };
-    return { ...v, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
+    // "dropped": true marks a planned lane the lead decided not to run; it never counts as open work.
+    const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
+    return { ...v, ...d, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
   });
   const byTask = new Map(planned.map((x) => [x.task, x]));
   // "continues": "<task>" in a plan lane: the older lane was picked up by this one, so it reads as continued, not failed.
@@ -1025,12 +1049,31 @@ function planView(r) {
   }
   const waves = (p.waves && p.waves.length ? p.waves : [{ name: 'Lanes', lanes: planned.map((x) => x.task) }]).map((w) => {
     const all = (w.lanes || []).map((t) => byTask.get(t)).filter(Boolean);
-    const ls = all.filter((x) => !x.folded);
-    const st = !ls.length ? 'planned' : ls.every((x) => ['done', 'needs review'].includes(x.result)) ? 'done' : ls.some((x) => x.running) ? 'running'
-      : ls.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : ls.some((x) => x.result === 'paused') ? 'paused' : ls.some((x) => x.result) ? 'partial' : 'planned';
+    const ls = all.filter((x) => !x.folded); const act = ls.filter((x) => x.result !== 'dropped');
+    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => ['done', 'needs review'].includes(x.result)) ? 'done' : act.some((x) => x.running) ? 'running'
+      : act.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : act.some((x) => x.result === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
     return { name: w.name, note: w.note || w.after || '', status: st, lanes: ls, folded: all.length && !ls.length };
   }).filter((w) => !w.folded).map(({ folded, ...w }) => w); // a wave whose lanes all continued elsewhere is history, not a stage
+  // The plan badge comes from what the lanes really do, never only from the hand-written status: a plan whose
+  // lead said "running" but has no running lane reads as waiting (with how long), so it never looks stuck.
+  const allL = waves.flatMap((w) => w.lanes); const live = allL.filter((x) => x.result !== 'dropped');
+  const fin = (x) => ['done', 'needs review'].includes(x.result);
+  const counts = { total: live.length, done: live.filter(fin).length, running: live.filter((x) => x.running).length,
+    notStarted: live.filter((x) => x.health === 'planned').length, dropped: allL.length - live.length };
+  const ts = (t) => { const n = typeof t === 'number' ? t : new Date(t || 0).getTime(); return Number.isFinite(n) ? n : 0; };
+  const lastActivity = Math.max(r.mtime || 0, ...allL.map((x) => Math.max(ts(x.finishedAt), ts(x.startedAt))));
+  const closed = /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || '');
+  const state = counts.running ? 'running' : closed ? (counts.done === counts.total ? 'done' : 'closed')
+    : live.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : live.some((x) => x.result === 'paused') ? 'paused'
+    : counts.total && counts.done === counts.total ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
+  const idle = Date.now() - lastActivity; const dur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
+  const bits = [`${counts.done}/${counts.total} lanes done`];
+  if (counts.running) bits.push(`${counts.running} running`);
+  if (counts.notStarted && state !== 'running') bits.push(`${counts.notStarted} not started`);
+  if (counts.dropped) bits.push(`${counts.dropped} dropped`);
+  if (state === 'waiting' || state === 'attention' || state === 'paused') bits.push(`idle ${dur(idle)}`);
   return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', lead: p.lead || 'Claude', status: p.status || '', now: p.now || '',
+    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed',
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
 }
@@ -1074,7 +1117,7 @@ function cmdDash(args) {
         return json({ version: Math.max(0, ...files.map((f) => { try { return Math.round(fs.statSync(f).mtimeMs); } catch { return 0; } })) });
       }
       if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
-      if (u.pathname === '/api/plans') return json(plans().map(planView));
+      if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach)$/);
       if (m) {

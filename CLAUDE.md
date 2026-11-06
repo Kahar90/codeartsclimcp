@@ -8,6 +8,7 @@ Checks:
 - `node --check runner/ca.mjs`
 - `node checks/assets.check.mjs` (kit files and the /assets route)
 - `node checks/resume.check.mjs` (paused lanes, --resume, plan continues folding)
+- `node checks/planstate.check.mjs` (plan state from lanes, ca plan close/rm)
 - `node checks/lanes.check.mjs` (Lanes dashboard over CDP, `?demo=1`)
 - `node checks/office.check.mjs [outDir]` (starts `ca dash` on a free port, headless Chrome over CDP, screenshots in `checks/out`)
 

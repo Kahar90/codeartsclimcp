@@ -396,6 +396,8 @@ function sizeStage() {
 }
 
 function planStatus(p, lanes) {
+  if (p.state) return p.state; // derived on the server from real lane state
+  if (lanes.some((l) => l.running)) return "running";
   if (p.status) return p.status;
   if (lanes.some((l) => l.running)) return "running";
   if (lanes.length && lanes.every((l) => l.result === "done" || l.result === "needs review")) return "done";

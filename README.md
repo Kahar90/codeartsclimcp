@@ -88,6 +88,7 @@ Change course mid-run with `ca steer <lane> "also handle HEAD requests"`; stop w
 | `ca stop <lane>` | abort the session and end the lane |
 | `ca dash [port]` | dashboard (starts on demand) |
 | `ca plan [plan.json]`, `ca note [--now] <text>` | show the lead plan and decisions on the dashboard |
+| `ca plan list`, `ca plan close [id] [--reason t]`, `ca plan rm <id>` | plan state from real lanes (Running, Waiting with idle time, Done, Closed); close marks never-started lanes Dropped; rm unregisters |
 | `ca mcp` | MCP stdio server |
 | `ca gc` | forget lanes finished more than 3 days ago |
 
