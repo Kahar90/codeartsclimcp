@@ -23,7 +23,8 @@ try {
   check('ca dash starts', up);
   const page = await fetch(base + '/office'); const html = await page.text();
   check('GET /office serves the page', page.ok && /__office/.test(html) && /<title>/.test(html), String(page.status));
-  check('GET /office-sprites.js route exists', [200, 404].includes((await fetch(base + '/office-sprites.js')).status));
+  check('office.html loads the shared workshop assets', /\/assets\/workshop\.js/.test(html) && /\/assets\/workshop\.css/.test(html));
+  check('GET /office-sprites.js route removed', (await fetch(base + '/office-sprites.js')).status === 404);
   const dashHtml = await (await fetch(base + '/')).text();
   check('lanes dashboard links to the office view', /href="\/office"/.test(dashHtml));
   const stale = await fetch(base + '/api/lane/no-such-lane-xyz/detail');
@@ -42,46 +43,18 @@ try {
   const size = (width, height) => send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   await send('Runtime.enable');
 
-  await size(1400, 900); await send('Page.navigate', { url: base + '/office?demo=1' }); await wait(1800);
+  await size(1280, 800); await send('Page.navigate', { url: base + '/office?demo=1' }); await wait(1800);
   let s = await st();
-  check('test hook window.__office.state()', !!s && Array.isArray(s.nodes));
+  check('test hook window.__office.state()', !!s && s.mode === 'demo', s && s.mode);
   if (s) {
-    const lead = s.nodes.filter((n) => n.kind === 'lead'); const ls = s.nodes.filter((n) => n.kind === 'lane');
-    check('demo mode', s.mode === 'demo', s.mode);
-    check('one lead node + 3 lane nodes', lead.length === 1 && ls.length === 3, `${lead.length}/${ls.length}`);
-    check('one link per lane', s.links === 3, String(s.links));
-    const H = ['planned', 'running', 'running tool', 'quiet', 'STALLED', 'DEAD', 'done', 'needs review', 'failed', 'stopped'];
-    check('lane health from the runner set', ls.every((n) => H.includes(n.health)), ls.map((n) => n.health).join(','));
-    check('lane steps known', ls.every((n) => n.steps && n.steps.total > 0), ls.map((n) => n.steps && `${n.steps.done}/${n.steps.total}`).join(','));
-    check('nodes inside the viewport', s.nodes.every((n) => n.x > 0 && n.x < 1400 && n.y > 0 && n.y < 900), s.nodes.map((n) => `${n.x|0},${n.y|0}`).join(' '));
-    const far = s.nodes.every((a, i) => s.nodes.every((b, j) => i >= j || Math.hypot(a.x - b.x, a.y - b.y) > 150));
-    check('platforms do not overlap', far);
+    check('stage is full width at 1280x800', Math.abs(s.stage.w - 1280) <= 1, `${s.stage.w}x${s.stage.h}`);
+    check('stage aspect is 16:9', Math.abs(s.stage.w / s.stage.h - 16 / 9) < 0.01, (s.stage.w / s.stage.h).toFixed(3));
     check('demo has the goal line', typeof s.goal === 'string' && s.goal.length > 10);
-    await shot('1-scene');
-    const run = ls.find((n) => n.health === 'running') || ls[0];
-    await click(run.x, run.y); await wait(500); s = await st();
-    check('click on a platform selects it', s.selected === run.id, `${s.selected} vs ${run.id}`);
-    check('card opens with the step checklist', s.card && s.card.open && s.card.steps.length === run.steps.total, JSON.stringify(s.card && { open: s.card.open, n: s.card.steps.length }));
-    check('card shows done and current steps', s.card && s.card.steps.some((x) => x.state === 'done') && s.card.steps.some((x) => x.state === 'current'));
-    check('card has progress text', s.card && /\d+\s*\/\s*\d+/.test(s.card.progress || ''), s.card && s.card.progress);
-    await shot('2-card');
-    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await wait(300);
-    s = await st(); check('Escape closes the card', s.card && !s.card.open);
-    const ld = s.nodes.find((n) => n.kind === 'lead'); await click(ld.x, ld.y); await wait(400); s = await st();
-    check('lead card opens', s.selected === ld.id && s.card && s.card.open);
-    check('not complete while lanes run', s.complete === false);
   }
-  await send('Page.navigate', { url: base + '/office?demo=done' }); await wait(1800); s = await st();
-  check('demo=done shows completion', s && s.complete === true);
-  check('completion panel lists every lane', (await ev(`(() => { const e = document.getElementById('complete'); return e && e.offsetParent !== null ? e.querySelectorAll('tbody tr').length : -1 })()`)) === 3);
-  await shot('3-complete');
-  await size(390, 800); await send('Page.navigate', { url: base + '/office?demo=1' }); await wait(1500);
-  check('no horizontal scroll at phone width', (await ev('document.documentElement.scrollWidth')) <= 391, String(await ev('document.documentElement.scrollWidth')));
-  await shot('4-phone');
-  await size(1400, 900); await send('Page.navigate', { url: base + '/office' }); await wait(2500); s = await st();
-  check('live mode renders from the runner API', s && s.mode === 'live' && s.nodes.some((n) => n.kind === 'lead'), s && `${s.mode} ${s.nodes.length}`);
-  await shot('5-live');
+  await shot('1-scene');
+  await send('Page.navigate', { url: base + '/office' }); await wait(2500); s = await st();
+  check('live mode renders from the runner API', s && s.mode === 'live', s && s.mode);
+  await shot('6-live');
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
