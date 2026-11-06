@@ -61,7 +61,8 @@ body.narrow #winTail { display: none; }
 #winGoal { color: var(--fg); }
 #winNow { color: var(--muted); }
 #winSteps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
-#winSteps li { display: flex; gap: 7px; align-items: baseline; }
+#winSteps li { display: flex; gap: 7px; align-items: baseline; min-width: 0; }
+#winSteps .st-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #winSteps .mark { flex: none; width: 12px; text-align: center; font-size: 10px; }
 #winSteps .st-done { color: var(--muted); }
 #winSteps .st-done .mark { color: var(--run); }
@@ -703,7 +704,11 @@ function renderChecklist(steps) {
   $("winSteps").innerHTML = (steps || []).map((s) => {
     const st = s.state || "pending";
     const mark = st === "done" ? "\u2713" : st === "current" ? "\u25cf" : "\u25cb";
-    return '<li class="st-' + st + '"><span class="mark">' + mark + '</span><span>' + CAUI.esc(s.text) + '</span></li>';
+    // Brief steps are paragraphs: show the step title (text before the first ": " or ". "), the full text on hover.
+    const full = String(s.text || "");
+    const m = full.match(/^(.{4,80}?)(?::\s|\.\s|$)/);
+    const short = m ? m[1] : full.slice(0, 80);
+    return '<li class="st-' + st + '" title="' + CAUI.esc(full) + '"><span class="mark">' + mark + '</span><span class="st-text">' + CAUI.esc(short) + '</span></li>';
   }).join("");
 }
 function syncComposer(l) {
