@@ -36,6 +36,36 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 .ov-title { padding: 0 2px 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
 .ov-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 8px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px; font: 11px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: left; white-space: nowrap; }
 .ov-row .ov-st { color: var(--muted); font-size: 10px; }
+.hit { position: absolute; pointer-events: auto; cursor: pointer; }
+#win { position: absolute; left: 0; top: 0; width: 320px; z-index: 10; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+#win[hidden] { display: none; }
+#win [hidden] { display: none !important; }
+.win-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+#winTitle { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#winBadge { flex: none; }
+#winX { margin-left: auto; flex: none; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 12px var(--font); cursor: pointer; padding: 0; }
+#winBody { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+#winMeta { color: var(--muted); }
+#winGoal { color: var(--fg); }
+#winNow { color: var(--muted); }
+#winSteps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+#winSteps li { display: flex; gap: 7px; align-items: baseline; }
+#winSteps .mark { flex: none; width: 12px; text-align: center; font-size: 10px; }
+#winSteps .st-done { color: var(--muted); }
+#winSteps .st-done .mark { color: var(--run); }
+#winSteps .st-current { font-weight: 700; }
+#winSteps .st-current .mark { color: var(--sel); }
+#winSteps .st-pending .mark { color: var(--faint); }
+#winLink { font-size: 12px; }
+#winForm { display: flex; gap: 6px; padding: 0 12px 12px; }
+#winInput { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--code-bg); color: var(--fg); font: 12px var(--font); }
+#winSend { flex: none; height: 26px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 12px var(--font); cursor: pointer; }
+#winSend:disabled, #winInput:disabled { opacity: 0.55; cursor: default; }
+#winErr { padding: 0 12px 10px; color: var(--bad); font-size: 11px; }
+@keyframes win-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes win-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
+#win.win-in { animation: win-in 140ms ease-out; }
+#win.win-out { animation: win-out 100ms ease-in forwards; }
 body.narrow { height: auto; min-height: 100%; overflow-y: auto; }
 body.narrow #stagewrap { flex: none; }
 </style>
@@ -63,13 +93,32 @@ body.narrow #stagewrap { flex: none; }
     <svg id="links" aria-hidden="true"></svg>
     <div id="sprites"></div>
     <div id="plates">
-      <button type="button" class="plate" id="plate-lead" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
-      <button type="button" class="plate" id="plate-builder" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
-      <button type="button" class="plate" id="plate-artist" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
-      <button type="button" class="plate" id="plate-reviewer" style="display: none"><b class="p-name"></b><span class="p-sub"></span></button>
+      <button type="button" class="plate" id="plate-lead" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span></button>
+      <button type="button" class="plate" id="plate-builder" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span></button>
+      <button type="button" class="plate" id="plate-artist" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span></button>
+      <button type="button" class="plate" id="plate-reviewer" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span></button>
     </div>
     <div id="overflow" hidden>
       <div class="ov-title" id="ovTitle"></div>
+    </div>
+    <div id="win" role="dialog" aria-labelledby="winTitle" hidden>
+      <div class="win-head">
+        <b id="winTitle"></b>
+        <span id="winBadge"></span>
+        <button id="winX" type="button" aria-label="Close">&#x2715;</button>
+      </div>
+      <div id="winBody">
+        <div id="winMeta"></div>
+        <div id="winGoal" hidden></div>
+        <div id="winNow" hidden></div>
+        <ul id="winSteps"></ul>
+        <a id="winLink" hidden>Open in Lanes</a>
+      </div>
+      <form id="winForm" hidden>
+        <input id="winInput" placeholder="Steer this lane" aria-label="Steer this lane">
+        <button id="winSend" type="submit">Send</button>
+      </form>
+      <div id="winErr" hidden></div>
     </div>
   </div>
 </main>
@@ -314,6 +363,7 @@ function render() {
   assignStations();
   renderStations();
   renderOverflow();
+  updateWin();
 }
 
 async function tick() {
@@ -465,11 +515,19 @@ function layoutStations() {
       sp.el.style.left = f[0] * k - a[0] * sc + "px";
       sp.el.style.top = f[1] * k - a[1] * sc + "px";
     }
+    const hit = hits[key];
+    if (hit && sp) {
+      hit.style.left = sp.el.style.left;
+      hit.style.top = sp.el.style.top;
+      hit.style.width = sp.el.offsetWidth + "px";
+      hit.style.height = sp.el.offsetHeight + "px";
+    }
     const plate = $("plate-" + key);
     plate.style.left = f[0] * k + "px";
     plate.style.top = (f[1] + 34) * k + "px";
   }
   renderLinks();
+  if (!$("win").hidden) positionWin();
 }
 function renderOverflow() {
   if (!model) return;
@@ -489,7 +547,9 @@ function renderOverflow() {
       b.className = "ov-row";
       b.dataset.lane = l.id;
       b.innerHTML = '<span class="ov-name"></span><span class="ov-st"></span>';
-      b.addEventListener("click", () => winHooks.open(l.id, b));
+      b.setAttribute("aria-controls", "win");
+      b.setAttribute("aria-expanded", "false");
+      b.addEventListener("click", (ev) => winHooks.open(l.id, b, ev.detail === 0));
       ovBtns.set(l.id, b);
     }
     b.querySelector(".ov-name").textContent = laneName(l);
@@ -505,16 +565,235 @@ async function initSprites() {
     const sp = PixelSprites.create(key, { scale: spriteScale(), seed: key, clip: "idle" });
     sprites[key] = sp;
     $("sprites").appendChild(sp.el);
+    const hit = document.createElement("div");
+    hit.className = "hit";
+    hit.setAttribute("aria-hidden", "true");
+    hit.addEventListener("click", (ev) => {
+      const id = key === "lead" ? "lead" : stationLane[key];
+      if (id) winHooks.open(id, $("plate-" + key), ev.detail === 0);
+    });
+    hits[key] = hit;
+    $("sprites").appendChild(hit);
   }
   layoutStations();
   renderStations();
 }
 for (const key of STATION_KEYS) {
-  $("plate-" + key).addEventListener("click", () => {
+  $("plate-" + key).addEventListener("click", (ev) => {
     const id = key === "lead" ? "lead" : stationLane[key];
-    if (id) winHooks.open(id, $("plate-" + key));
+    if (id) winHooks.open(id, $("plate-" + key), ev.detail === 0);
   });
 }
+
+const drafts = new Map();
+const errs = new Map();
+const hits = {};
+let winFor = null, winAnchor = null, winCloseTimer = 0, sendInFlight = false;
+
+function winInstant() { return !PixelSprites.motion(); }
+function setTriggerAria(el, on) { if (el && el.setAttribute) el.setAttribute("aria-expanded", on ? "true" : "false"); }
+function renderChecklist(steps) {
+  $("winSteps").innerHTML = (steps || []).map((s) => {
+    const st = s.state || "pending";
+    const mark = st === "done" ? "\u2713" : st === "current" ? "\u25cf" : "\u25cb";
+    return '<li class="st-' + st + '"><span class="mark">' + mark + '</span><span>' + CAUI.esc(s.text) + '</span></li>';
+  }).join("");
+}
+function syncComposer(l) {
+  const run = !!(l && l.running);
+  $("winInput").disabled = !run;
+  $("winSend").disabled = !run || sendInFlight;
+}
+function renderWinContent(keepInput) {
+  if (winFor === "lead") {
+    const p = model.plan;
+    $("winTitle").textContent = p.lead || "Lead";
+    $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+    $("winMeta").textContent = "Orchestrator";
+    $("winGoal").hidden = !p.goal;
+    $("winGoal").textContent = p.goal || "";
+    $("winNow").hidden = !p.now;
+    $("winNow").textContent = p.now ? "Now: " + p.now : "";
+    renderChecklist((p.next || []).map((x) => ({ text: x.text, state: x.done ? "done" : "pending" })));
+    $("winLink").hidden = true;
+    $("winForm").hidden = true;
+    $("winErr").hidden = true;
+    return;
+  }
+  const l = model.lanes.find((x) => x.id === winFor);
+  if (!l) return;
+  const pr = l.progress || {};
+  $("winTitle").textContent = laneName(l);
+  $("winBadge").innerHTML = CAUI.badge(CAUI.status(l.health));
+  const mm = l.models && (l.models.build || Object.values(l.models)[0]);
+  $("winMeta").textContent = [mm ? CAUI.shortModel(mm) : "", pr.total ? pr.done + " / " + pr.total + " steps" : ""].filter(Boolean).join(" \u00b7 ");
+  $("winGoal").hidden = true;
+  const cur = pr.current && pr.current.text;
+  $("winNow").hidden = !cur;
+  $("winNow").textContent = cur ? "Now: " + cur : "";
+  $("winLink").hidden = false;
+  $("winLink").href = "/#/lane/" + encodeURIComponent(l.id);
+  $("winForm").hidden = false;
+  const err = errs.get(l.id);
+  $("winErr").hidden = !err;
+  $("winErr").textContent = err || "";
+  if (!keepInput) $("winInput").value = drafts.get(l.id) || "";
+  syncComposer(l);
+  const c = detailCache.get(l.id);
+  renderChecklist(mode === "demo" ? (l.steps || []) : ((c && c.v && c.v.steps) || (l.steps || [])));
+}
+async function fetchDetail(id) {
+  const c = detailCache.get(id);
+  if (c && Date.now() - c.at < 2000) return c.v;
+  try {
+    const r = await fetch("/api/lane/" + encodeURIComponent(id) + "/detail");
+    if (!r.ok) throw new Error(r.status);
+    const v = await r.json();
+    detailCache.set(id, { at: Date.now(), v });
+    return v;
+  } catch (e) { return c ? c.v : null; }
+}
+function positionWin() {
+  const win = $("win"), stage = $("stage");
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const w = win.offsetWidth, h = win.offsetHeight;
+  const sr = stage.getBoundingClientRect();
+  let a = { left: sw / 2 - 1, top: sh / 2 - 1, right: sw / 2 + 1, bottom: sh / 2 + 1, cx: sw / 2, cy: sh / 2 };
+  if (winAnchor && winAnchor.isConnected) {
+    const ar = winAnchor.getBoundingClientRect();
+    a = { left: ar.left - sr.left, top: ar.top - sr.top, right: ar.right - sr.left, bottom: ar.bottom - sr.top, cx: ar.left - sr.left + ar.width / 2, cy: ar.top - sr.top + ar.height / 2 };
+  }
+  const G = 10, I = 10;
+  const cands = [
+    { x: a.right + G, y: a.cy - h / 2 },
+    { x: a.left - G - w, y: a.cy - h / 2 },
+    { x: a.cx - w / 2, y: a.bottom + G },
+    { x: a.cx - w / 2, y: a.top - G - h },
+  ];
+  const inside = (c) => c.x >= I && c.y >= I && c.x + w <= sw - I && c.y + h <= sh - I;
+  let pick = cands.find(inside);
+  if (!pick) {
+    const plates = [...document.querySelectorAll("#plates .plate")].filter((p) => p !== winAnchor && p.getBoundingClientRect().width > 0).map((p) => {
+      const r = p.getBoundingClientRect();
+      return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height };
+    });
+    const overlap = (c) => {
+      let s = 0;
+      for (const p of plates) {
+        const ix = Math.min(c.x + w, p.x + p.w) - Math.max(c.x, p.x);
+        const iy = Math.min(c.y + h, p.y + p.h) - Math.max(c.y, p.y);
+        if (ix > 0 && iy > 0) s += ix * iy;
+      }
+      return s;
+    };
+    pick = cands.map((c) => ({ c, o: overlap(c) })).sort((p, q) => p.o - q.o)[0].c;
+  }
+  pick = { x: Math.min(Math.max(pick.x, I), Math.max(I, sw - I - w)), y: Math.min(Math.max(pick.y, I), Math.max(I, sh - I - h)) };
+  win.style.left = pick.x + "px";
+  win.style.top = pick.y + "px";
+}
+function openWin(id, anchor, kb) {
+  clearTimeout(winCloseTimer);
+  const win = $("win");
+  const wasOpen = !win.hidden;
+  setTriggerAria(winAnchor, false);
+  winFor = id;
+  winAnchor = anchor || null;
+  setTriggerAria(winAnchor, true);
+  renderWinContent(false);
+  win.hidden = false;
+  positionWin();
+  win.classList.remove("win-in", "win-out");
+  if (!wasOpen && !winInstant()) { void win.offsetWidth; win.classList.add("win-in"); }
+  if (kb) $("winX").focus();
+  if (mode !== "demo" && id !== "lead") fetchDetail(id).then((d) => { if (winFor === id && !$("win").hidden && d && d.steps) renderChecklist(d.steps); });
+}
+function closeWin(toFocus) {
+  const win = $("win");
+  if (win.hidden || !winFor) return;
+  const anchor = winAnchor;
+  setTriggerAria(anchor, false);
+  winFor = null;
+  winAnchor = null;
+  if (winInstant()) { win.hidden = true; win.classList.remove("win-in", "win-out"); }
+  else {
+    win.classList.remove("win-in");
+    win.classList.add("win-out");
+    winCloseTimer = setTimeout(() => { win.hidden = true; win.classList.remove("win-out"); }, 100);
+  }
+  if (toFocus && anchor && anchor.isConnected) anchor.focus();
+}
+function focusFallback() {
+  const box = $("overflow");
+  const first = box.hidden ? null : box.querySelector(".ov-row");
+  if (first) first.focus();
+  else $("plate-lead").focus();
+}
+function updateWin() {
+  const win = $("win");
+  if (win.hidden || !winFor || !model) return;
+  if (winFor === "lead") { renderWinContent(true); return; }
+  const l = model.lanes.find((x) => x.id === winFor);
+  if (!l) { closeWin(false); focusFallback(); return; }
+  renderWinContent(true);
+  if (mode !== "demo") fetchDetail(winFor).then((d) => { if (winFor && !$("win").hidden && d && d.steps) renderChecklist(d.steps); });
+}
+winHooks.open = (id, anchor, kb) => {
+  if (winFor === id && !$("win").hidden) { closeWin(false); return; }
+  openWin(id, anchor, kb);
+};
+winHooks.close = () => closeWin(false);
+demoHooks.press = (id) => {
+  let anchor = null;
+  for (const stKey of WORKER_STATIONS) if (stationLane[stKey] === id) anchor = $("plate-" + stKey);
+  if (!anchor) anchor = ovBtns.get(id) || null;
+  winHooks.open(id, anchor, false);
+};
+demoHooks.escape = () => winHooks.close();
+$("winX").addEventListener("click", () => closeWin(true));
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && !$("win").hidden) { ev.preventDefault(); closeWin(true); }
+});
+document.addEventListener("pointerdown", (ev) => {
+  if ($("win").hidden) return;
+  const t = ev.target;
+  if ($("win").contains(t) || (winAnchor && winAnchor.contains(t))) return;
+  if (t.closest && t.closest(".plate, .ov-row, .hit")) return;
+  closeWin(false);
+});
+$("winInput").addEventListener("input", () => { if (winFor && winFor !== "lead") drafts.set(winFor, $("winInput").value); });
+$("winForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (sendInFlight || !winFor || winFor === "lead") return;
+  const id = winFor;
+  const l = model.lanes.find((x) => x.id === id);
+  if (!l || !l.running) return;
+  const sent = $("winInput").value.trim();
+  if (!sent) return;
+  sendInFlight = true;
+  syncComposer(l);
+  let ok = mode === "demo";
+  if (!ok) {
+    try {
+      const r = await fetch("/api/lane/" + encodeURIComponent(id) + "/steer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: sent }) });
+      ok = r.ok;
+    } catch (e) { ok = false; }
+  }
+  sendInFlight = false;
+  if (ok) {
+    const cur = drafts.get(id) || "";
+    if (cur === sent || cur.startsWith(sent)) drafts.set(id, cur.slice(sent.length));
+    errs.delete(id);
+  } else {
+    errs.set(id, "steer failed, try again");
+  }
+  if (winFor === id) {
+    $("winInput").value = drafts.get(id) || "";
+    $("winErr").hidden = !errs.get(id);
+    $("winErr").textContent = errs.get(id) || "";
+    syncComposer(model.lanes.find((x) => x.id === id));
+  }
+});
 
 window.__office = {
   state() {
