@@ -381,14 +381,16 @@ function computeLayout() {
   const CW = Math.round(RX * 1.15), CH = Math.round(CW * 1.25);
   const WALL = 14;
   const PLATE_Y = RY + WALL + 4, PLATE_H = small ? 22 : 26;
-  const colP = RX * 2 + (small ? 56 : 64);
-  const rowP = RY * 2 + (small ? 150 : 170);
+  const footOff = Math.round(RY * 0.3), feetFrac = 0.93;
+  const artRise = (186 - 22) / 200 * CH;
+  const artW = (150 - 15) / 160 * CW;
+  const colP = Math.max(RX * 2 + 24, artW + 24);
+  const rowP = artRise + PLATE_Y + PLATE_H + 10 - footOff;
   const leadX = RX + 34, leadY = CH + RY + 26;
   for (const n of nodes) {
     if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
     else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
   }
-  const footOff = Math.round(RY * 0.3), feetFrac = 0.93;
   let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
   for (const n of nodes) {
     x0 = Math.min(x0, n.x - RX); x1 = Math.max(x1, n.x + RX);
@@ -396,7 +398,7 @@ function computeLayout() {
     y1 = Math.max(y1, n.y + PLATE_Y + PLATE_H);
   }
   const pad = 28;
-  return { small, RX, RY, CW, CH, WALL, PLATE_Y, PLATE_H, footOff, feetFrac, trunkX: leadX + RX + 26,
+  return { small, RX, RY, CW, CH, WALL, PLATE_Y, PLATE_H, footOff, feetFrac, trunkX: leadX + colP / 2,
     vb: { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 } };
 }
 
