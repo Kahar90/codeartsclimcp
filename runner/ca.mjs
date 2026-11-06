@@ -11,8 +11,9 @@
 //
 // Reliability: a watchdog aborts and resumes a session after STALL_S without model activity
 // (or TOOL_STALL_S on one tool call, or THINK_S of reasoning with no tool call), permission
-// prompts are answered by policy so nothing waits forever, retries continue the SAME session (context kept), the runner itself runs
-// the brief's CHECK: lines and the git-clean gate, and feeds failures back to the builder.
+// prompts are answered by policy so nothing waits forever, retries continue the SAME session
+// (context kept), the runner itself runs the brief's CHECK: lines and the git-clean gate,
+// and feeds failures back to the builder.
 //
 // usage: ca lane <repo> <task> [--detach]  run a lane (foreground; --detach: background with a log)
 //        ca status [--json] [--all]        table of lanes (--json adds id, task, repo, result, progress)
@@ -648,8 +649,9 @@ function health(s) {
   if (s.tools?.length) return 'running tool';
   if (idle > (s.config?.stall || 240) * 1000) return 'STALLED';
   if (s.turnStartAt || s.lastToolAt || s.lastTextAt) {
+    const thinkS = s.config?.think ?? 480;
     const age = progressAge({ turnStartAt: s.turnStartAt, lastToolAt: s.lastToolAt, lastTextAt: s.lastTextAt, now: now() });
-    if (age > (s.config?.think ?? 480) * 1000) return `thinking (${dur(age)}, no tool call)`;
+    if (thinkS > 0 && age > thinkS * 1000) return `thinking (${dur(age)}, no tool call)`;
   }
   if (idle > 60000) return 'quiet';
   return 'running';
