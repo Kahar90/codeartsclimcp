@@ -79,6 +79,214 @@ const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new D
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const short = (m) => String(m || '').replace(/^huaweicloud-maas\//, 'codearts/');
+
+// ---------- demo fixture (?demo=1): one fetch-layer swap used for every /api call ----------
+const DEMO = new URLSearchParams(location.search).has('demo');
+const DEMO_T0 = Date.now();
+const dIso = (m) => new Date(DEMO_T0 - m * 60000).toISOString();
+const dClock = (i) => { const t = new Date(DEMO_T0 + i * 1500); return [t.getHours(), t.getMinutes(), t.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); };
+const D_REPO = 'D:\\Coding\\demo-repo';
+const D_HASHES = ['e3f1c2a', 'b7d94ce', 'c5a83f1', 'd9274ab', 'a6b5e90'];
+function dLane(id, task, o) {
+  return Object.assign({ lane: id, id, task, repo: D_REPO, health: 'planned', phase: 'planned', elapsed: '', idle: '-', commits: '0/0',
+    steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
+    session: '', reason: '', running: false, result: '', progress: { done: 0, total: 0, current: null },
+    startedAt: DEMO_T0 - 600000, finishedAt: null, fixes: 0 }, o);
+}
+const dSteps = (texts, done, cur, open) => texts.map((t, i) => ({ n: i + 1, text: t, state: i < done ? 'done' : i + 1 === cur ? 'current' : open ? 'open' : 'pending', commit: i < done ? D_HASHES[i % D_HASHES.length] : '' }));
+const D_STEPS_LAYOUT = [
+  'Demo fixture: set up `?demo=1` in-page fixture data so the page renders without real lanes',
+  'Row and column spacing: derive the wave card pitch from the sprite art size',
+  'ViewBox bounds: include the sprite art rise and art width in the viewBox',
+  'Stage size: grow the stage so sprites stay legible at 1280x800',
+  'Card placement: clamp the inspector card into the grown stage',
+  'Test hook: expose `window.__lanes.state()` for the check harness',
+  'Self check: run every CHECK line and fix every FAIL',
+];
+const D_STEPS_STRINGS = [
+  'String templates: write `fmt` helpers for the sandbox',
+  'Path joins: implement `joinPath` with Windows separators',
+  'Escape edge cases: handle `null`, `undefined` and empty input in `joinPath`',
+  'Docs: note the string utils in the README',
+];
+const D_STEPS_PJOIN = [
+  'Read the sandbox call sites: list every `join` misuse',
+  'Implement `joinPath`: normalize separators and drop double slashes',
+  'Tests: cover `joinPath` with absolute and relative parts',
+  'Self check: run the sandbox check and commit',
+];
+const D_CHECKS_FULL = ['node --check runner/ca.mjs', 'node checks/assets.check.mjs', 'node checks/lanes.check.mjs', 'node checks/onboard.check.mjs'];
+const dBrief = (task, goal, steps, checks) => `# ${task}\n\n${goal}\n\n## Steps\n\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n## Checks\n\n${checks.map((c) => `- CHECK: ${c}`).join('\n')}\n\nWork in the worktree, commit per step with "step N" in the subject and run every CHECK line before you report back.\n`;
+const D_REVIEW_CHAOS = '## Review\n\nVerdict: needs fixes\n\nThe layout work landed but two things block the verdict:\n\n- The evidence panel overlaps the sticky action bar at 390 px; add the 80 px bottom padding the brief asks for.\n- `checks/lanes.check.mjs` never asserts the phone-width counts, so the clip regressed silently.\n\nEverything else matches the brief: waves are full width, the step disclosure stays put across polls and the transcript keeps its position with Follow live off.';
+const D_SUMMARY_CHAOS = '## Summary\n\nReworked the Lanes dashboard as Pixel Workshop Lanes: plum shell, persistent plans rail, plan homescreen with full-width waves and a full-page lane detail.\n\nKept every route, data call and action. The demo fixture renders both routes without real lanes; steer, stop and open TUI answer through the same handlers.';
+function demoLanes() {
+  return [
+    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: '0/7', now: 'Thinking', tokens: { input: 52764, output: 202 }, session: 's-7011', startedAt: DEMO_T0 - 231000,
+      progress: { done: 0, total: 7, current: { n: 1, text: D_STEPS_LAYOUT[0] } }, tools: [{ tool: 'edit', input: 'runner/dash.html', since: DEMO_T0 - 9000 }] }),
+    dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', tokens: { input: 21014, output: 5302 }, session: 's-7012', startedAt: DEMO_T0 - 437000,
+      progress: { done: 2, total: 4, current: { n: 3, text: D_STEPS_STRINGS[2] } } }),
+    dLane('demo-repo--path-join', 'path-join', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', tokens: { input: 12050, output: 3211 }, finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
+    dLane('demo-repo--cli-dx', 'cli-dx', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '41m 10s', commits: '8/8', tokens: { input: 8600, output: 12300 }, finishedAt: DEMO_T0 - 1800000, progress: { done: 8, total: 8, current: null } }),
+    dLane('demo-repo--office-scene', 'office-scene', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '46m 03s', commits: '6/6', tokens: { input: 12100, output: 21400 }, finishedAt: DEMO_T0 - 2600000, progress: { done: 6, total: 6, current: null } }),
+    dLane('demo-repo--stall', 'stall', { health: 'failed', phase: 'finished', result: 'failed', reason: 'no progress for 20 minutes', elapsed: '22m 41s', commits: '1/5', tokens: { input: 4300, output: 690 }, finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 5, current: null } }),
+    dLane('demo-repo--orphan', 'orphan', { health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', tokens: { input: 900, output: 80 }, finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
+    dLane('demo-repo--chaos', 'chaos', { health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', tokens: { input: 7300, output: 1060 }, finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
+  ];
+}
+function demoPlans() {
+  const by = Object.fromEntries(demoLanes().map((l) => [l.id, l]));
+  const wp = (id, plan) => ({ ...by[id], plan });
+  return [
+    { id: 'office-polish', file: 'D:/Coding/demo-repo/tasks/plan.json', updatedAt: dIso(4), title: 'Office view polish: sprites and layout',
+      goal: 'Polish the Office view: sprite-driven layout, tight spacing and a check harness that screenshots both routes without real lanes.',
+      lead: 'Claude Opus 5.5', status: 'running',
+      now: 'Wave 1 is laying out the stage; the fixture lane renders the new home for the check.',
+      next: [{ text: 'Merge the office-layout worktree into main', done: true }, { text: 'Run the lanes check on both routes and read the screenshots', done: false }, { text: 'Copy the finished runner into the live skill folder', done: false }],
+      risks: ['The sprite atlas doubles if we add a fifth role', 'Check runtime grows past 120 s when every assertion waits on a poll'],
+      decisions: [
+        { at: dIso(58), text: 'The fixture lives behind one fetch-layer swap so every route uses the same code path.' },
+        { at: dIso(41), text: 'Wave cards go full width; the old horizontal scroll clipped long titles.' },
+        { at: dIso(12), text: 'The step disclosure never navigates; only the lane name link opens the detail route.' },
+      ],
+      waves: [{ name: 'Wave 1 · Layout', note: 'Stage geometry and the check hook', status: 'running', lanes: [wp('demo-repo--office-layout', { model: 'maas/glm-5.3', why: 'Owns the layout rework end to end', files: ['runner/dash.html', 'checks/lanes.check.mjs'], briefExists: true })] }] },
+    { id: 'string-utils', file: 'D:/Coding/demo-repo/tasks/strings.json', updatedAt: dIso(2), title: 'String utils for sandbox',
+      goal: 'Give the sandbox string helpers: formatting, path joins and escaping, each covered by a check.',
+      lead: 'Claude Opus 5.5', status: 'running',
+      now: 'The first lane is in review-ready shape; the second is still building.',
+      next: [{ text: 'Read the path-join verdict', done: true }, { text: 'Land string-utils once its check passes', done: false }],
+      risks: ['Escaping rules differ between cmd and bash'],
+      decisions: [{ at: dIso(90), text: 'Split the work: one lane per helper family so review stays small.' }],
+      waves: [{ name: 'Wave 1 · Helpers', note: '', status: 'running', lanes: [
+        wp('demo-repo--string-utils', { model: 'maas/glm-5.3', why: 'Formatting and escaping helpers', files: ['runner/sandbox.mjs'], briefExists: true }),
+        wp('demo-repo--path-join', { model: 'maas/qwen3-coder', why: 'Small surface, quick win', files: ['runner/sandbox.mjs'], briefExists: true }),
+      ] }] },
+  ];
+}
+function demoDetail(id) {
+  const all = demoLanes(); const l = all.find((x) => x.id === id) || all.find((x) => x.id.includes(id));
+  if (!l) return { error: `no lane matches "${id}"` };
+  const base = { ...l, steps: [], commits: [], todos: [], files: [], gates: [], interruptions: [], steers: [], permissions: [], outside: [], errors: [], phases: [l.phase], checks: [], brief: '', review: '', summary: '', config: { stall: 240, think: 480 } };
+  const sets = {
+    'demo-repo--office-layout': { steps: dSteps(D_STEPS_LAYOUT, 0, 1), todos: [{ status: 'in_progress', text: 'Render the CURRENT STEP band with chips' }, { status: 'pending', text: 'Wire the step disclosure' }], files: ['runner/dash.html', 'checks/lanes.check.mjs'], checks: D_CHECKS_FULL,
+      brief: dBrief('office-layout', 'Rework `runner/dash.html` so waves render full width, the step disclosure never navigates and the check harness can screenshot both routes from `?demo=1` fixture data.', D_STEPS_LAYOUT, D_CHECKS_FULL) },
+    'demo-repo--string-utils': { steps: dSteps(D_STEPS_STRINGS, 2, 3), files: ['runner/sandbox.mjs'], checks: ['node checks/sandbox.check.mjs'],
+      commits: [{ hash: 'e3f1c2a', subject: 'step 1 string templates' }, { hash: 'b7d94ce', subject: 'step 2 path joins' }],
+      brief: dBrief('string-utils', 'Write the formatting and escaping helpers for the sandbox with a check per helper.', D_STEPS_STRINGS, ['node checks/sandbox.check.mjs']) },
+    'demo-repo--path-join': { steps: dSteps(D_STEPS_PJOIN, 4, 0, true), files: ['runner/sandbox.mjs'], checks: ['node checks/sandbox.check.mjs'],
+      commits: D_STEPS_PJOIN.map((t, i) => ({ hash: D_HASHES[i], subject: `step ${i + 1} ${t.split(':')[0].toLowerCase()}` })),
+      gates: [{ at: dIso(6), gate: 'git clean', ok: true, ms: 900 }, { at: dIso(6), gate: 'node checks/sandbox.check.mjs', ok: true, ms: 4200 }],
+      verdict: 'ready', review: '## Review\n\nVerdict: ready\n\n`joinPath` handles absolute and relative parts, the tests cover the empty-string edge case and the check is green.', summary: '## Summary\n\nAdded `joinPath` to the sandbox with separator normalisation and tests. All checks pass.',
+      brief: dBrief('path-join', 'Implement `joinPath` for the sandbox and cover it with tests.', D_STEPS_PJOIN, ['node checks/sandbox.check.mjs']) },
+    'demo-repo--cli-dx': { steps: dSteps(['Split ca.mjs commands', 'Harness-neutral arg parsing', 'Help text for every command', 'Exit codes and stderr', 'CLI contract check'], 5, 0, true), files: ['runner/ca.mjs'], checks: ['node checks/cli.check.mjs'],
+      commits: [{ hash: 'c5a83f1', subject: 'step 3 help text' }], gates: [{ at: dIso(30), gate: 'git clean', ok: true, ms: 700 }],
+      verdict: 'ready', summary: '## Summary\n\nSplit the CLI into subcommands with shared arg parsing and per-command help.',
+      brief: dBrief('cli-dx', 'Split the CLI into subcommands with shared arg parsing.', ['Split ca.mjs commands', 'Harness-neutral arg parsing', 'Help text for every command', 'Exit codes and stderr', 'CLI contract check'], ['node checks/cli.check.mjs']) },
+    'demo-repo--office-scene': { steps: dSteps(['Routes in ca.mjs', 'Page shell with the goal box', 'Data layer with demo mode', 'Scene, cards and completion'], 4, 0, true), files: ['runner/office.html'], checks: ['node checks/office.check.mjs'],
+      commits: [{ hash: 'd9274ab', subject: 'step 2 page shell' }], gates: [{ at: dIso(44), gate: 'git clean', ok: true, ms: 800 }],
+      verdict: 'ready', summary: '## Summary\n\nBuilt the Office view scene, cards and completion panel on the runner API.',
+      brief: dBrief('office-scene', 'Build the Office view scene, cards and completion panel.', ['Routes in ca.mjs', 'Page shell with the goal box', 'Data layer with demo mode', 'Scene, cards and completion'], ['node checks/office.check.mjs']) },
+    'demo-repo--stall': { steps: dSteps(['Read the watchdog brief', 'Pure progressAge helper', 'Wire the nudge resume', 'Watchdog contract check', 'Docs'], 1, 0, true), files: ['runner/watchdog.mjs'], checks: ['node checks/think.check.mjs'],
+      commits: [{ hash: 'a6b5e90', subject: 'step 1 pure helpers' }],
+      errors: [{ at: dIso(23), msg: 'no tool call for 20 minutes; watchdog aborted the turn' }],
+      interruptions: [{ at: dIso(23), phase: 'build', kind: 'think', what: 'watchdog aborted and resumed with a nudge' }],
+      brief: dBrief('stall', 'Add the think watchdog to the runner.', ['Read the watchdog brief', 'Pure progressAge helper', 'Wire the nudge resume', 'Watchdog contract check', 'Docs'], ['node checks/think.check.mjs']) },
+    'demo-repo--orphan': { steps: dSteps(['Find the owner of the lane', 'Reattach or archive', 'Note the decision'], 0, 0, true), files: [], checks: [],
+      interruptions: [{ at: dIso(53), phase: 'build', kind: 'stop', what: 'operator wrote STOP' }],
+      brief: dBrief('orphan', 'Figure out what to do with the orphaned lane.', ['Find the owner of the lane', 'Reattach or archive', 'Note the decision'], []) },
+    'demo-repo--chaos': { steps: dSteps(['Motion brief', 'Intro tilt', 'Hover lift', 'Reduced motion fades'], 3, 0, true), files: ['runner/office.html', 'runner/office-sprites.js', 'checks/motion.check.mjs'], checks: ['node checks/office.check.mjs'],
+      commits: [{ hash: 'e3f1c2a', subject: 'step 1 motion brief' }, { hash: 'b7d94ce', subject: 'step 2 intro tilt' }, { hash: 'c5a83f1', subject: 'step 3 hover lift' }],
+      gates: [{ at: dIso(10), gate: 'git clean', ok: true, ms: 1200 }, { at: dIso(10), gate: 'node checks/office.check.mjs', ok: false, ms: 96400 }],
+      steers: [{ at: dIso(9), by: 'operator', text: 'keep the counts inside the viewport at 390 px' }],
+      interruptions: [{ at: dIso(11), phase: 'fix', kind: 'manual', what: 'operator interrupted a hanging check' }],
+      errors: [{ at: dIso(10), msg: 'check timed out after 120 s' }],
+      outside: [{ at: dIso(12), tool: 'edit', path: 'C:/elsewhere/notes.txt' }],
+      verdict: 'needs fixes', review: D_REVIEW_CHAOS, summary: D_SUMMARY_CHAOS,
+      brief: dBrief('chaos', 'Add motion to the Office view with reduced-motion fallbacks.', ['Motion brief', 'Intro tilt', 'Hover lift', 'Reduced motion fades'], ['node checks/office.check.mjs']) },
+  };
+  return { ...base, ...(sets[id] || {}) };
+}
+const dFixedLog = (texts) => texts.map((t, i) => `${dClock(i - texts.length)} ${t}`);
+const D_LOG_DONE = dFixedLog([
+  '== build (maas/glm-5.3) session s-4100; 2 CHECK lines, 4 steps',
+  '> edit runner/sandbox.mjs joinPath helper',
+  '< read runner/sandbox.mjs 120 lines',
+  'ran the checks: all green',
+  '== gate git clean: ok',
+  '== gate node checks/sandbox.check.mjs: ok (4.2s)',
+  '== review (maas/glm-5.3) session s-4101',
+  'VERDICT: ready',
+]);
+const D_LOG_CHAOS = dFixedLog([
+  '== build (maas/glm-5.3) session s-5200; 1 CHECK line, 4 steps',
+  '> edit runner/office.html motion brief',
+  '~ thinking about the reduced motion fallbacks',
+  '>> operator: keep the counts inside the viewport at 390 px',
+  '! check timed out after 120 s',
+  '== gate git clean: ok',
+  '== gate node checks/office.check.mjs: FAIL (96.4s)',
+  '== fix round 1: retry the hanging check',
+  '! check timed out after 120 s again',
+  '== review (maas/glm-5.3) session s-5201',
+  'VERDICT: needs fixes',
+]);
+function demoLine(i) {
+  const ts = dClock(i), k = i % 7;
+  if (k === 0) return `${ts} == build (maas/glm-5.3) session s-7011; 4 CHECK lines, 7 steps`;
+  if (k === 1) return `${ts} > edit runner/dash.html wave card header`;
+  if (k === 2) return `${ts} ~ thinking about the collapse chevron`;
+  if (k === 3) return `${ts} wrote the wave header row with the chevron button`;
+  if (k === 4) return `${ts} < read runner/assets/workshop.css 72 lines`;
+  if (k === 5) return `${ts} >> operator: keep the counts inside the viewport`;
+  return `${ts} ! check timed out after 120 s; retrying with a longer budget`;
+}
+function demoLog(id, from) {
+  const all = demoLanes(); const l = all.find((x) => x.id === id) || all.find((x) => x.id.includes(id));
+  if (!l) return { size: 0, text: '', reset: true };
+  if (l.running) {
+    const total = 10 + Math.floor((Date.now() - DEMO_T0) / 1500);
+    const lines = []; for (let i = from; i < total; i++) lines.push(demoLine(i));
+    return { size: total, text: lines.length ? lines.join('\n') + '\n' : '', reset: from > total };
+  }
+  const fixed = id.endsWith('chaos') ? D_LOG_CHAOS : D_LOG_DONE;
+  return { size: fixed.length, text: from < fixed.length ? fixed.slice(from).join('\n') + '\n' : '', reset: from > fixed.length };
+}
+async function demoPost(what, id, body) {
+  await new Promise((r) => setTimeout(r, 400));
+  const l = demoLanes().find((x) => x.id === id);
+  if (what === 'steer') {
+    if (!body || !body.text || !body.text.trim()) return { error: 'empty' };
+    return l && l.running ? { ok: true } : { error: 'lane not running' };
+  }
+  return { ok: true };
+}
+function demoDoctor() {
+  return { checks: [
+    { name: 'credentials', status: 'ok', detail: 'CODEARTS_CLI_AK and CODEARTS_CLI_SK present' },
+    { name: 'git', status: 'ok', detail: 'demo repo' },
+    { name: 'chrome', status: 'warn', detail: 'not found (optional, used by browser checks)' },
+  ] };
+}
+async function demoApi(path, opts) {
+  const u = new URL(path, 'http://x');
+  if (u.pathname === '/api/plans') return demoPlans();
+  if (u.pathname === '/api/lanes') return demoLanes();
+  if (u.pathname === '/api/doctor') return demoDoctor();
+  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach)$/);
+  if (m) {
+    const id = decodeURIComponent(m[1]);
+    if (m[2] === 'detail') return demoDetail(id);
+    if (m[2] === 'log') return demoLog(id, Number(u.searchParams.get('from') || 0));
+    if (opts && opts.method === 'POST') return demoPost(m[2], id, opts.body ? JSON.parse(opts.body) : {});
+  }
+  return { error: `demo fixture has no ${u.pathname}` };
+}
+// The one function every /api call goes through; ?demo=1 swaps it to the in-page fixture.
+async function api(path, opts) {
+  if (DEMO) return demoApi(path, opts);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
 let plans = [], lanes = [], detail = null, route = { kind: '', id: '' }, tab = 'log', logPos = 0, logLane = null;
 
 function prog(p, res) {
@@ -207,7 +415,7 @@ function lineClass(l) {
 async function pollLog() {
   if (route.kind !== 'lane' || tab !== 'log' || !$('out')) return; const id = route.id;
   try {
-    const r = await (await fetch(`/api/lane/${encodeURIComponent(id)}/log?from=${logPos}`)).json();
+    const r = await api(`/api/lane/${encodeURIComponent(id)}/log?from=${logPos}`);
     if (id !== route.id || tab !== 'log' || !$('out')) return;
     if (r.reset || logPos === 0) $('out').innerHTML = '';
     if (r.text) {
@@ -217,7 +425,7 @@ async function pollLog() {
     logPos = savedPos = r.size;
   } catch {}
 }
-async function post(what, body) { const r = await fetch(`/api/lane/${encodeURIComponent(route.id)}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); return r.json(); }
+async function post(what, body) { return api(`/api/lane/${encodeURIComponent(route.id)}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); }
 
 // First-run onboarding panel: shown only while there are no plans and no lanes yet.
 // /api/doctor is cached for 30 s (the poll runs every 2.5 s) and concurrent calls share one request.
@@ -225,7 +433,7 @@ let doctorCache = null, doctorAt = 0, doctorPromise = null;
 async function fetchDoctor() {
   if (doctorCache && Date.now() - doctorAt < 30000) return doctorCache;
   if (!doctorPromise) doctorPromise = (async () => {
-    try { doctorCache = await (await fetch('/api/doctor')).json(); } catch {}
+    try { doctorCache = await api('/api/doctor'); } catch {}
     doctorAt = Date.now(); doctorPromise = null;
   })();
   await doctorPromise;
@@ -266,7 +474,7 @@ async function renderOnboard() {
 function go(h) { location.hash = h; }
 function parseRoute() { const [k, ...r] = location.hash.slice(1).split('/'); return { kind: k, id: decodeURIComponent(r.join('/')) }; }
 async function refresh(full) {
-  try { [plans, lanes] = await Promise.all([(await fetch('/api/plans')).json(), (await fetch('/api/lanes')).json()]); }
+  try { [plans, lanes] = await Promise.all([api('/api/plans'), api('/api/lanes')]); }
   catch { $('meta').textContent = 'dashboard server not reachable'; return; }
   const run = lanes.filter((l) => l.running).length;
   $('meta').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${run} running · ${lanes.length} lanes · ${new Date().toLocaleTimeString()}`;
@@ -274,7 +482,7 @@ async function refresh(full) {
   renderSide();
   if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) renderPlan(p); else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
   else if (route.kind === 'lane') {
-    try { const d = await (await fetch(`/api/lane/${encodeURIComponent(route.id)}/detail`)).json(); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
+    try { const d = await api(`/api/lane/${encodeURIComponent(route.id)}/detail`); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
     catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }   else if (!plans.length && !lanes.length) await renderOnboard();
 }
