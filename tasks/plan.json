@@ -3,25 +3,122 @@
   "goal": "Redo the Office visualizer and the Lanes dashboard from the CodeArts Pixel Workshop kit: full-width pixel room with atlas sprites and a floating agent window, plus the plum Lanes shell, plan home and lane detail.",
   "lead": "Claude Opus 5.5",
   "status": "running",
-  "now": "Foundation merged (assets, /assets route, shared sprite player, tokens). Two lanes building in parallel.",
+  "now": "Wave 2 running (office-v2b, lanes-v2b). Lead waits for them, then checks screenshots and merges.",
   "waves": [
-    { "name": "Wave 1 · Surfaces", "lanes": ["office-v2", "lanes-v2"], "note": "Separate files: office.html vs dash.html; shared assets are frozen." }
+    {
+      "name": "Wave 1 · Surfaces",
+      "lanes": [
+        "office-v2",
+        "lanes-v2"
+      ],
+      "note": "Paused at the 90 min time limit after step 6 of 8; wave 2 picks up the same worktrees."
+    },
+    {
+      "name": "Wave 2 · Fixes and checks",
+      "lanes": [
+        "office-v2b",
+        "lanes-v2b"
+      ],
+      "note": "Same worktrees. Bugs from the lead screenshots, then test hooks, browser checks and self check. Timeout 2 h."
+    }
   ],
   "lanes": [
-    { "task": "office-v2", "repo": "../ca-office-wt-office-v2", "model": "maas/glm-5.3", "why": "Office v2 stage, stations, floating window, one-shot cues", "files": ["runner/office.html", "checks/office.check.mjs"] },
-    { "task": "lanes-v2", "repo": "../ca-office-wt-lanes-v2", "model": "maas/glm-5.3", "why": "Lanes shell, rail, plan home, lane detail, evidence tabs", "files": ["runner/dash.html", "checks/lanes.check.mjs"] }
+    {
+      "task": "office-v2",
+      "repo": "../ca-office-wt-office-v2",
+      "model": "maas/glm-5.3",
+      "why": "Office v2 stage, stations, floating window, one-shot cues",
+      "files": [
+        "runner/office.html",
+        "checks/office.check.mjs"
+      ]
+    },
+    {
+      "task": "lanes-v2",
+      "repo": "../ca-office-wt-lanes-v2",
+      "model": "maas/glm-5.3",
+      "why": "Lanes shell, rail, plan home, lane detail, evidence tabs",
+      "files": [
+        "runner/dash.html",
+        "checks/lanes.check.mjs"
+      ]
+    },
+    {
+      "task": "office-v2b",
+      "repo": "../ca-office-wt-office-v2",
+      "model": "maas/glm-5.3",
+      "why": "Window anchoring, narrow run strip, __office test hook and office.check",
+      "files": [
+        "runner/office.html",
+        "checks/office.check.mjs"
+      ],
+      "continues": "office-v2"
+    },
+    {
+      "task": "lanes-v2b",
+      "repo": "../ca-office-wt-lanes-v2",
+      "model": "maas/glm-5.3",
+      "why": "Narrow rail, sticky action bar, demo lookups, __lanes test hook and lanes.check",
+      "files": [
+        "runner/dash.html",
+        "checks/lanes.check.mjs"
+      ],
+      "continues": "lanes-v2"
+    }
   ],
   "next": [
-    { "text": "Foundation: kit assets, /assets route, workshop.js sprite player, workshop.css tokens", "done": true },
-    "Read lane summaries and verdicts",
+    {
+      "text": "Foundation: kit assets, /assets route, workshop.js sprite player, workshop.css tokens",
+      "done": true
+    },
+    {
+      "text": "Wave 1: read summaries; fixed sprite positioning myself; relaunched as wave 2",
+      "done": true
+    },
+    {
+      "text": "After merge: confirm both new pages render continues/runs, paused and continued labels via CAUI, and the /api/ui self-reload",
+      "done": false
+    },
+    {
+      "text": "Merge both lanes, rerun all checks on master",
+      "done": false
+    },
     "Run checks and look at screenshots of both surfaces",
-    "Merge both lanes, rerun all checks on master",
     "Copy runner/ and checks/ to the live skill, update README and SKILL"
   ],
   "decisions": [
-    { "at": "2026-11-06T13:30:00", "text": "Claude wrote the shared sprite player and tokens so both lanes animate and label states the same way." },
-    { "at": "2026-11-06T13:31:00", "text": "Worker stations get the role of the station (builder, artist, reviewer); assignment is sticky by lane id with an overflow list." },
-    { "at": "2026-11-06T13:32:00", "text": "Old SVG sprite system and its layout/motion/sprite checks are retired with Office v2." }
+    {
+      "at": "2026-11-06T13:30:00",
+      "text": "Claude wrote the shared sprite player and tokens so both lanes animate and label states the same way."
+    },
+    {
+      "at": "2026-11-06T13:31:00",
+      "text": "Worker stations get the role of the station (builder, artist, reviewer); assignment is sticky by lane id with an overflow list."
+    },
+    {
+      "at": "2026-11-06T13:32:00",
+      "text": "Old SVG sprite system and its layout/motion/sprite checks are retired with Office v2."
+    },
+    {
+      "at": "2026-11-06T08:06:48.862Z",
+      "text": "Both lanes timed out at 90 min after step 6/8. Claude fixed sprite positioning (missing position:absolute) and relaunched continuation lanes office-v2b and lanes-v2b with screenshot bugs + test hook + self check, LANE_TIMEOUT 7200."
+    },
+    {
+      "at": "2026-11-06T08:14:36.340Z",
+      "text": "A time limit is a safeguard, not a failure: lanes that hit LANE_TIMEOUT now end Paused (exit 5) and `ca lane --resume` continues them in place; plan lanes can say continues:<task>."
+    },
+    {
+      "at": "2026-11-06T08:19:00.274Z",
+      "text": "Continued lanes fold into their successor (one agent, one station); open tabs self-reload via /api/ui so deployed fixes show without a manual refresh."
+    },
+    {
+      "at": "2026-11-06T08:20:37.688Z",
+      "text": "Office stage fills the whole page below the header at any aspect (cover fit that keeps every station visible); steered office-v2b."
+    },
+    {
+      "at": "2026-11-06T09:07:27.063Z",
+      "text": "office-v2b: gates green; reviewer's 3 findings overruled (they contradict the lead's two steers: cover-fit stage, continuation line). Claude fixed the narrow stage height and its check."
+    }
   ],
   "risks": [
     "GLM has no image input: Claude judges the screenshots against the mockups.",

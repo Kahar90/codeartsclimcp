@@ -521,7 +521,7 @@ function mountSprites() {
 }
 
 function renderRail() {
-  const inPlan = new Set(plans.flatMap((p) => p.waves.flatMap((w) => w.lanes.map((l) => l.id))));
+  const inPlan = new Set(plans.flatMap((p) => p.waves.flatMap((w) => w.lanes.flatMap((l) => [l.id, ...(l.continues || []).map((c) => c.id)]))));
   const loose = lanes.filter((l) => !inPlan.has(l.id));
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
   const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
@@ -844,7 +844,7 @@ async function renderOnboard() {
 
 // Test hook for the check harness: one call snapshots route, rail, plan, lane and sprite state.
 window.__lanes = { state: () => {
-  const inPlan = new Set(plans.flatMap((p) => p.waves.flatMap((w) => w.lanes.map((l) => l.id))));
+  const inPlan = new Set(plans.flatMap((p) => p.waves.flatMap((w) => w.lanes.flatMap((l) => [l.id, ...(l.continues || []).map((c) => c.id)]))));
   return {
     route: { kind: route.kind, id: route.id },
     rail: { plans: plans.map((p) => ({ id: p.id, selected: route.kind === 'plan' && route.id === p.id })), finished: lanes.filter((l) => !inPlan.has(l.id) && !l.running).map((l) => l.id) },
