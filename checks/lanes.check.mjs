@@ -77,6 +77,10 @@ try {
   let sawFlash = false; for (let i = 0; i < 24; i++) { await wait(500); if ((await ev('document.querySelectorAll(".steprow.flash").length')) > 0) { sawFlash = true; break; } }
   check('reduced motion skips the flash', !sawFlash);
   await ev('localStorage.removeItem("ca-motion")');
+  // desktop action bar: sticky at the scrollport bottom, opaque, 80 px of pad above it
+  await size(1586, 992); await send('Page.navigate', { url: base + '/?demo=1#/lane/demo-repo--office-layout' }); await wait(1500);
+  const bar = JSON.parse(await ev('(function(){const b=document.getElementById("bar"),p=document.querySelector(".pad.has-bar"),v=document.getElementById("view");if(!b)return "{}";const r=b.getBoundingClientRect();const cs=getComputedStyle(b);return JSON.stringify({pos:cs.position,bg:cs.backgroundColor,top:Math.round(r.top),bottom:Math.round(r.bottom),ih:window.innerHeight,pad:p?getComputedStyle(p).paddingBottom:"",vpad:getComputedStyle(v).paddingBottom});})()') || '{}');
+  check('desktop action bar pins to the scrollport bottom', bar.pos === 'sticky' && bar.bottom === bar.ih && bar.pad === '80px' && bar.vpad === '0px' && bar.bg !== 'rgba(0, 0, 0, 0)', JSON.stringify(bar));
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
