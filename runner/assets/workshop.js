@@ -131,5 +131,20 @@
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function badge(st) { return '<span class="ca-badge s-' + st.key + '">' + esc(st.label) + '</span>'; }
+  // Reload this tab when the dashboard's pages or assets change on disk (checked every 10 s, skipped in demo mode
+  // and while the user is typing so a draft is never lost).
+  var uiVersion = null;
+  function watchUi() {
+    if (/[?&]demo=/.test(location.search)) return;
+    setInterval(function () {
+      fetch('/api/ui', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j || !j.version) return;
+        if (uiVersion === null) { uiVersion = j.version; return; }
+        var a = document.activeElement, typing = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.value;
+        if (j.version !== uiVersion && !typing) location.reload();
+      }).catch(function () {});
+    }, 10000);
+  }
+  if (typeof location !== 'undefined' && typeof setInterval === 'function') watchUi();
   window.CAUI = { status: status, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); } };
 })();

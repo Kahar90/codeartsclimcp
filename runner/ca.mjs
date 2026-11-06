@@ -1068,6 +1068,12 @@ function cmdDash(args) {
         if (!type || !f.startsWith(root + path.sep) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return json({ error: 'not found' }, 404);
         res.writeHead(200, { 'content-type': type, 'cache-control': type.startsWith('image/') ? 'max-age=3600' : 'no-store' }); return res.end(fs.readFileSync(f));
       }
+      if (u.pathname === '/api/ui') {
+        // UI version: newest mtime of the pages and shared assets. Open tabs poll it and reload when it changes,
+        // so a deployed fix never keeps running stale page code.
+        const files = ['dash.html', 'office.html', 'assets/workshop.js', 'assets/workshop.css'].map((f) => path.join(HERE, f));
+        return json({ version: Math.max(0, ...files.map((f) => { try { return Math.round(fs.statSync(f).mtimeMs); } catch { return 0; } })) });
+      }
       if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
       if (u.pathname === '/api/plans') return json(plans().map(planView));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
