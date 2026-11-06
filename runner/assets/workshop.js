@@ -121,6 +121,9 @@
     if (lower === 'done') return { key: 'done', label: 'Done', raw: h };
     if (lower === 'thinking' || lower === 'quiet') return { key: 'warn', label: h.charAt(0).toUpperCase() + h.slice(1), raw: h };
     if (lower === 'needs review') return { key: 'warn', label: 'Needs review', raw: h };
+    // paused: the lane hit its time limit (a safeguard, resumable); continued: a later lane picked it up.
+    if (lower === 'paused') return { key: 'warn', label: 'Paused', raw: h };
+    if (lower === 'continued') return { key: 'idle', label: 'Continued', raw: h };
     if (lower === 'stopped' || lower === 'killed' || lower === 'attention' || lower === 'partial') return { key: 'warn', label: h.charAt(0).toUpperCase() + h.slice(1), raw: h };
     if (h === 'STALLED' || h === 'DEAD' || lower === 'failed') return { key: 'bad', label: lower === 'failed' ? 'Failed' : h.charAt(0) + h.slice(1).toLowerCase(), raw: h };
     if (lower === 'planned' || lower === 'waiting') return { key: 'idle', label: lower === 'waiting' ? 'Waiting' : 'Planned', raw: h };
