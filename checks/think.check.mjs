@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
@@ -76,8 +77,19 @@ check('watchdog.mjs is shipped by package.json', (() => { try { const p = JSON.p
 
 // ---- 4. dashboards ----
 const office = fs.readFileSync(path.join(ROOT, 'runner', 'office.html'), 'utf8');
-const warnList = office.match(/if \(\[([^\]]*)\]\.includes\(k\)\) return "warn"/);
-check('office.html maps "thinking" to the warn colour', !!warnList && /"thinking"/.test(warnList[1]), warnList && warnList[1]);
+check('office.html loads /assets/workshop.js', /<script src="\/assets\/workshop\.js">/.test(office));
+const sandbox = {
+  window: {},
+  document: { hidden: true, addEventListener: () => {} },
+  localStorage: { getItem: () => null, setItem: () => {} },
+  matchMedia: () => ({ matches: false, addEventListener: () => {} }),
+  Image: function () {}, fetch: () => Promise.reject(new Error('offline')),
+  performance: { now: () => 0 }, requestAnimationFrame: () => 0,
+};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(path.join(ROOT, 'runner', 'assets', 'workshop.js'), 'utf8'), sandbox, { filename: 'workshop.js' });
+const thinking = sandbox.window.CAUI && sandbox.window.CAUI.status('thinking');
+check('CAUI.status("thinking").key === "warn"', !!thinking && thinking.key === 'warn', thinking && thinking.key);
 const dash = fs.readFileSync(path.join(ROOT, 'runner', 'dash.html'), 'utf8');
 check('dash.html styles "thinking" as a warning', /thinking/.test(dash));
 

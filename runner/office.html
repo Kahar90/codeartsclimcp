@@ -4,238 +4,61 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CodeArts Office</title>
+<link rel="stylesheet" href="/assets/workshop.css">
 <style>
-:root{--ease-out:cubic-bezier(.2,.8,.2,1);--ease-spring:cubic-bezier(.34,1.56,.64,1);--ease-in:cubic-bezier(.4,0,1,1);--dur-micro:150ms;--dur-hover:180ms;--dur-ui:300ms;--dur-card:260ms;--dur-close:160ms}
-*{box-sizing:border-box}
-html,body{margin:0}
-body{min-height:100vh;background:linear-gradient(155deg,#2a1650 0%,#4a2a86 55%,#6b46b8 100%);color:#e8eaf2;font:14px/1.45 system-ui,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px;overflow-x:hidden}
-.wrap{width:min(1240px,100%);display:flex;flex-direction:column;gap:14px}
-.panel{background:#161618;border:1px solid #2b2b33;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.5);overflow:hidden}
-.topbar{padding:12px 16px 14px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #26262e}
-.toprow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.seg{display:inline-flex;border:1px solid #3a3a46;border-radius:9px;overflow:hidden}
-.seg span,.seg a{padding:5px 14px;font-size:13px;color:#a6abbd;text-decoration:none;display:inline-block}
-.seg .on{background:#33334a;color:#fff;font-weight:600}
-.seg a:hover{background:#23232e;color:#fff}
-#planSel{background:#22222b;color:#e8eaf2;border:1px solid #3a3a46;border-radius:8px;padding:5px 8px;font:12.5px system-ui,"Segoe UI",sans-serif;max-width:280px}
-.goalbox{background:#222;border:1px solid #333;border-radius:10px;padding:10px 12px}
-.goalline{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.pmark{color:#8f7bd8;font-weight:700;flex:0 0 auto}
-.goaltext{flex:1 1 240px;min-width:0;font-weight:600;overflow-wrap:anywhere}
-.chip{font-size:11.5px;padding:2px 10px;border-radius:999px;background:#2c2c38;border:1px solid #454553;color:#cfd3e0;white-space:nowrap}
-.nowline{margin-top:7px;color:#9aa0b4;font-size:12.5px}
-.nowline b{color:#c6cad8;font-weight:600}
-.stage{position:relative;height:clamp(420px,calc(100vh - 320px),640px);overflow:hidden;background:#0d0d12}
-#tilt{position:absolute;inset:0}
-#grid{position:absolute;inset:-80px;background-color:#0d0d12;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='76' height='38'%3E%3Cpath d='M0 19 L38 0 L76 19 L38 38 Z' fill='none' stroke='rgba(255,255,255,0.05)' stroke-width='1'/%3E%3C/svg%3E");background-size:76px 38px;will-change:transform;animation:drift 26s linear infinite}
-@keyframes drift{to{transform:translate(76px,38px)}}
-#floorglow{position:absolute;inset:0;background:radial-gradient(ellipse 80% 65% at 50% 42%,rgba(124,92,191,.16),rgba(124,92,191,0) 70%)}
-#floor{position:absolute;inset:0;width:100%;height:100%;display:block}
-#actors{position:absolute;inset:0;pointer-events:none}
-.char{position:absolute;pointer-events:none;transition:transform var(--dur-hover) var(--ease-out);will-change:transform}
-.char.hover{transform:translateY(-6px)}
-.cfloat{position:absolute;inset:0}
-.cfloat svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible}
-.char.working .cfloat svg{animation:bob 1.7s ease-in-out infinite}
-@keyframes bob{50%{transform:translateY(-3px)}}
-.char.floaty .cfloat{animation:floaty var(--fdur,3.8s) ease-in-out infinite;animation-delay:var(--fdel,0s);will-change:transform}
-@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
-#floor .link{stroke:#98a0b4;stroke-opacity:.38;stroke-width:1.6;fill:none;stroke-linejoin:round;stroke-linecap:round}
-#floor .node{cursor:pointer}
-#floor .node .lift{transition:transform var(--dur-hover) var(--ease-out);will-change:transform}
-#floor .node.hover .lift{transform:translateY(-6px)}
-#floor .node.hover .glow{opacity:.95!important}
-#floor .node .spot{opacity:0;transform:scale(.8);transform-box:fill-box;transform-origin:center;transition:opacity var(--dur-ui) var(--ease-out),transform var(--dur-ui) var(--ease-out)}
-#floor .node.sel .spot{opacity:1;transform:scale(1)}
-#floor .node:focus{outline:none}
-#floor .node:focus .rim{filter:drop-shadow(0 0 3px rgba(255,255,255,.55))}
-.wall{fill:url(#wallg)}
-.rim{fill:none;stroke-width:3;stroke-opacity:.85}
-.front{fill:none;stroke-width:2.5;stroke-opacity:.95;stroke-linecap:round}
-.h-plan .rim{stroke-dasharray:9 7}
-.h-run .rim,.h-run .front{stroke:url(#rim-run)}
-.h-warn .rim,.h-warn .front{stroke:url(#rim-warn)}
-.h-bad .rim,.h-bad .front{stroke:url(#rim-bad)}
-.h-done .rim,.h-done .front{stroke:url(#rim-done)}
-.h-plan .rim,.h-plan .front{stroke:url(#rim-plan)}
-.h-lead .rim,.h-lead .front{stroke:url(#rim-lead)}
-.glowgrp{transition:opacity .4s var(--ease-out)}
-.glow{opacity:.8}
-.glow .garc{fill:none;stroke-linecap:round}
-.glow .g1{stroke-width:3;stroke-opacity:.9}
-.glow .g2{stroke-width:8;stroke-opacity:.3}
-.glow .g3{stroke-width:15;stroke-opacity:.12}
-.glow.g-run .garc{stroke:url(#rim-run)}
-.glow.g-warn .garc{stroke:url(#rim-warn)}
-.glow.g-bad .garc{stroke:url(#rim-bad)}
-.glow.g-done .garc{stroke:url(#rim-done)}
-.glow.g-plan .garc{stroke:url(#rim-plan)}
-.glow.g-lead .garc{stroke:url(#rim-lead)}
-.node .glow{animation:breathe 2.6s ease-in-out infinite;animation-delay:var(--gdel,0s)}
-.h-warn .glow{animation-duration:4.6s}
-.h-bad .glow{animation-name:flicker;animation-duration:3.4s}
-.h-lead .glow{animation-duration:3.6s}
-.h-done .glow,.h-plan .glow{animation:none}
-@keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
-@keyframes flicker{0%,84%,100%{opacity:.5}88%{opacity:1}92%{opacity:.55}96%{opacity:.95}}
-.pkt{pointer-events:none}
-.phalo{fill:#2dd4a0;opacity:.16}
-.phead{fill:#d7ffe9;opacity:.95}
-.ptrail{fill:#2dd4a0;opacity:.5}
-.fx .ripple{fill:none;stroke:#7de8c0;stroke-width:2.5;transform-box:fill-box;transform-origin:center}
-.burst line{stroke:#8fe6b8;stroke-width:2.5;stroke-linecap:round}
-@keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-5px)}30%{transform:translateX(5px)}45%{transform:translateX(-5px)}60%{transform:translateX(5px)}75%{transform:translateX(-4px)}90%{transform:translateX(4px)}}
-.lift.shake,.char.shake{animation:shake .3s linear}
-.platetxt{fill:#c6cad8;font-size:12px;font-variant:small-caps;letter-spacing:.05em}
-.card{position:absolute;width:300px;max-width:calc(100% - 12px);max-height:calc(100% - 12px);overflow:auto;background:#1d1d24;border:1px solid #3d3d49;border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:12px;z-index:6}
-.card.tail-left::before,.card.tail-right::before{content:"";position:absolute;top:22px;width:12px;height:12px;background:#1d1d24;border-left:1px solid #3d3d49;border-bottom:1px solid #3d3d49}
-.card.tail-left::before{left:-7px;transform:rotate(45deg)}
-.card.tail-right::before{right:-7px;transform:rotate(225deg)}
-.card.tail-left{transform-origin:left center}
-.card.tail-right{transform-origin:right center}
-.chead{display:flex;gap:10px;align-items:center}
-.avatar{width:40px;height:40px;flex:0 0 40px;background:radial-gradient(circle at 50% 35%,#262633,#141419);border:1px solid #33333f;border-radius:10px;overflow:hidden}
-.avatar svg{width:100%;height:100%;display:block}
-.ctitle{font-weight:650;font-size:14.5px;overflow-wrap:anywhere}
-.csub{color:#98a0b4;font-size:12px;margin-top:1px}
-.cdiv{border:0;border-top:1px solid #32323e;margin:10px 0}
-.clabel{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:#8a90a4;margin:8px 0 3px}
-.cnow{background:#232330;border:1px solid #363644;border-radius:8px;padding:7px 9px;font-size:12.5px;color:#c6cad8;margin:2px 0 4px}
-.cnow b{color:#fff}
-.steps{list-style:none;margin:0;padding:0}
-.steps li{display:flex;gap:9px;align-items:flex-start;padding:4px 0;font-size:12.5px}
-.stepic{width:16px;height:16px;flex:0 0 16px;border-radius:50%;margin-top:1px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;border:1.5px solid #4a4a58;color:transparent}
-.stepic svg{width:100%;height:100%;display:block;opacity:0}
-.s-done .stepic{border-color:#4cc27e;color:#4cc27e}
-.s-done .stepic svg{opacity:1}
-.s-done .stepic .ck{stroke:#4cc27e;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:15;animation:ckdraw .45s var(--ease-out)}
-@keyframes ckdraw{from{stroke-dashoffset:15}to{stroke-dashoffset:0}}
-.s-current .stepic{border-color:#33333f;border-top-color:#2dd4a0;animation:spin 1s linear infinite}
-.s-pending .stepic{border-color:#4a4a58}
-@keyframes spin{to{transform:rotate(360deg)}}
-.s-done .txt{color:#7f8698}
-.s-current .txt{color:#fff;font-weight:600}
-.s-pending .txt,.s-open .txt{color:#a8aeba}
-.pbar{height:6px;background:#232330;border-radius:4px;overflow:hidden;margin:8px 0 2px}
-.pfill{height:100%;background:linear-gradient(90deg,#2dd4a0,#4cc27e);transform:scaleX(0);transform-origin:left center;transition:transform .45s var(--ease-out)}
-.cempty{color:#8a90a4;font-size:12.5px;padding:4px 0}
-.dec{list-style:none;margin:0;padding:0}
-.dec li{padding:3px 0;font-size:12px;color:#b6bbc9;border-top:1px solid #2a2a34}
-.dec li:first-child{border-top:0}
-.cfoot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:12.5px;color:#c6cad8}
-.ctok{color:#98a0b4}
-.badge{font-size:11px;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid currentColor;white-space:nowrap}
-.h-run{color:#2dd4a0}.h-warn{color:#e3b341}.h-bad{color:#f07a7a}.h-done{color:#4cc27e}.h-plan{color:#9aa0b4}.h-lead{color:#b18cf8}
-.laneslink{display:inline-block;margin-top:10px;color:#8f9dff;text-decoration:none;font-size:12.5px}
-.laneslink:hover{text-decoration:underline}
-.steer{display:flex;gap:6px;margin-top:9px;align-items:center}
-.steer input{flex:1;min-width:0;background:#141419;border:1px solid #363644;border-radius:7px;color:#e8eaf2;font:12.5px system-ui,"Segoe UI",sans-serif;padding:6px 8px}
-.steer input:focus{outline:none;border-color:#5a5af0}
-.steer button{background:#33334a;border:1px solid #4a4a5c;border-radius:7px;color:#fff;font:12.5px system-ui,"Segoe UI",sans-serif;padding:6px 10px;cursor:pointer}
-.steer button:hover{background:#41415c}
-.steer button:disabled{opacity:.5;cursor:default}
-#complete{background:#161618;border:1px solid #2b2b33;border-radius:16px;padding:16px 18px;animation:riseup .45s var(--ease-out)}
-@keyframes riseup{from{transform:translateY(16px);opacity:0}}
-#complete tbody tr{animation:rowin .4s var(--ease-out) backwards}
-@keyframes rowin{from{opacity:0;transform:translateY(8px)}}
-#complete h2{display:flex;align-items:center;gap:10px;color:#4cc27e;margin:0 0 6px;font-size:18px}
-.okball{width:26px;height:26px;flex:0 0 26px;border-radius:50%;background:#4cc27e;color:#0b2a17;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:15px}
-.csum{color:#b6bbc9;margin:0 0 4px;font-size:13.5px}
-#complete .num{color:#fff;font-weight:700}
-#complete table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
-#complete th,#complete td{padding:7px 10px;text-align:left;border-bottom:1px solid #26262e}
-#complete th{color:#8a90a4;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em}
-#complete td{color:#d6dae6}
-body.reduced #grid,body.reduced .node .glow,body.reduced .char .cfloat,body.reduced .char .cfloat svg,body.reduced .s-current .stepic,body.reduced #complete,body.reduced #complete tbody tr,body.reduced .s-done .stepic .ck{animation:none!important}
-body.reduced .glowgrp{transition-duration:.15s}
-@media (max-width:700px){
-  body{padding:10px}
-  .wrap{gap:10px}
-  .stage{height:clamp(380px,calc(100vh - 280px),560px)}
-  #planSel{max-width:170px}
-  .goaltext{flex-basis:100%}
-  #complete{padding:12px}
-  #complete th,#complete td{padding:5px 6px;font-size:12px}
-}
+html, body { height: 100%; }
+* { box-sizing: border-box; }
+body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
+.runstrip { flex: none; height: 24px; padding: 0 20px; display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; background: var(--bg); border-bottom: 1px solid var(--border); }
+.runstrip .ptitle { font-weight: 700; color: var(--fg); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+.runstrip .pnow { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.runstrip .topfill { flex: 1; }
+.chip { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border-2); color: var(--muted); white-space: nowrap; }
+#planSel { height: 20px; background: var(--panel); color: var(--fg); border: 1px solid var(--border-2); border-radius: 6px; font: 11px var(--font); max-width: 200px; }
+#motionBtn { flex: none; height: 20px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font: 600 11px var(--font); cursor: pointer; }
+#motionBtn[aria-pressed="true"] { color: var(--fg); border-color: var(--sel); }
+#motionBtn:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
+#stagewrap { flex: 1; min-height: 0; background: var(--stage); display: flex; align-items: center; justify-content: center; }
+#stage { position: relative; overflow: hidden; background: url("/assets/workshop.png") 0 0 / 100% 100% no-repeat; image-rendering: pixelated; }
+body.narrow { height: auto; min-height: 100%; overflow-y: auto; }
+body.narrow #stagewrap { flex: none; }
 </style>
 </head>
 <body>
-<main class="wrap">
-  <section class="panel">
-    <header class="topbar">
-      <div class="toprow">
-        <nav class="seg" aria-label="views"><span class="on">Office</span><a href="/">Lanes</a></nav>
-        <select id="planSel" hidden aria-label="plan"></select>
-      </div>
-      <div class="goalbox">
-        <div class="goalline"><span class="pmark">&#10095;</span><span class="goaltext" id="goal"></span><span class="chip" id="leadChip" hidden></span><span class="chip" id="statusChip" hidden></span></div>
-        <div class="nowline" id="nowline" hidden><b>now:</b> <span id="nowText"></span></div>
-      </div>
-    </header>
-    <div class="stage" id="stage">
-      <div id="tilt">
-        <div id="grid"></div>
-        <div id="floorglow"></div>
-        <svg id="floor" preserveAspectRatio="xMidYMid meet"></svg>
-        <div id="actors"></div>
-      </div>
-      <div id="card" class="card tail-left" hidden></div>
-    </div>
-  </section>
-  <section id="complete" hidden></section>
+<header class="ca-top">
+  <a class="ca-brand" href="/">CodeArts</a><span class="ca-sep"></span>
+  <nav class="ca-tabs" aria-label="Views">
+    <a class="ca-tab" href="/office" aria-current="page"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 2h5v5H2zM11 2h5v5h-5zM2 11h5v5H2zM11 11h5v5h-5z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Office</a>
+    <a class="ca-tab" href="/"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2 16 6 9 10 2 6ZM2 10.5l7 4 7-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Lanes</a>
+  </nav>
+  <span class="ca-top-fill"></span><span class="ca-counts" id="counts"></span>
+</header>
+<div class="runstrip" id="runstrip">
+  <span class="ptitle" id="planTitle"></span>
+  <span class="pnow" id="nowLine" hidden></span>
+  <span class="chip" id="leadChip" hidden></span>
+  <span id="statusBadge"></span>
+  <span class="topfill"></span>
+  <select id="planSel" hidden aria-label="plan"></select>
+  <button id="motionBtn" type="button" aria-pressed="true">Motion</button>
+</div>
+<main id="stagewrap">
+  <div id="stage"></div>
 </main>
-<script src="/office-sprites.js"></script>
+<script src="/assets/workshop.js"></script>
 <script>
 "use strict";
 (() => {
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const q = new URLSearchParams(location.search);
 const demoBig = q.get("demo") === "big";
 const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const mode = q.has("demo") ? "demo" : "live";
-const NS = "http://www.w3.org/2000/svg";
-const EASE_OUT = "cubic-bezier(.2,.8,.2,1)";
-const EASE_SPRING = "cubic-bezier(.34,1.56,.64,1)";
-const EASE_IN = "cubic-bezier(.4,0,1,1)";
-
-const HUES = { lead: 265, builder: 160, reviewer: 42, fixer: 16, done: 145, idle: 222 };
-const healthKey = (h) => {
-  const k = String(h || "").split("(")[0].trim();
-  if (k === "running" || k === "running tool") return "run";
-  if (["quiet", "thinking", "needs review", "stopped", "killed", "attention", "partial"].includes(k)) return "warn";
-  if (["STALLED", "DEAD", "failed"].includes(k)) return "bad";
-  if (k === "done") return "done";
-  if (k === "planned") return "plan";
-  return "run";
-};
-const healthText = (h) => String(h || "").split("(")[0].trim() || "planned";
-const isWorking = (n) => n.kind === "lane" && healthKey(n.health) === "run";
-const roleOf = (n) => n.kind === "lead" ? "lead" : (n.health === "planned" || n.phase === "planned") ? "idle" : healthKey(n.health) === "done" ? "done" : n.phase === "review" ? "reviewer" : n.phase === "fix" ? "fixer" : "builder";
-const tokStr = (t) => { const n = t ? (t.input || 0) + (t.output || 0) + (t.reasoning || 0) : 0; return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "K tok" : n + " tok"; };
-const durStr = (sec) => { sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; if (h) return `${h}h ${m}m`; if (m) return s ? `${m}m ${s}s` : `${m}m`; return `${s}s`; };
-const commitsOf = (l) => parseInt(String(l.commits || "0").split("/")[0], 10) || 0;
-const shortModel = (m) => String(m || "").replace(/^huaweicloud-maas\//, "codearts/");
-function hash(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 9973; return h; }
+const STAGE_W = 1280, STAGE_H = 720;
 
 let plansArr = [], lanesArr = [], planSel = null, plansSig = "";
-let model = null, nodes = [], layout = null, linkCount = 0;
-let selected = null, hovered = null;
-let cardInfo = { title: "", steps: [], progress: "" };
-let ticks = 0, fetchErr = "";
+let model = null, fetchErr = "", k = 1;
 const detailCache = new Map();
-
-const animState = { intro: "done", card: "closed", effects: [], lastEffect: "", reducedMotion: false };
-const mqReduce = matchMedia("(prefers-reduced-motion: reduce)");
-animState.reducedMotion = mqReduce.matches;
-
-const nodeEls = new Map();
-const charEls = new Map();
-const linkEls = new Map();
-const prevById = new Map();
-let sceneBuilt = false, prevInit = false, completeSig = "", countGen = 0;
-let introPlayed = false, introTimer = null, cardTimer = null;
-let cardReq = 0, crefs = null, cardCloseAnim = null;
 
 const DEMO_T0 = Date.now();
 const DEMO_BASE = {
@@ -362,864 +185,49 @@ function liveModel() {
   };
 }
 
-function buildNodes(m) {
-  const p = m.plan;
-  const lead = { id: "lead", kind: "lead", task: p.lead || "Lead", health: "lead", phase: "", running: false, lane: null, wave: -1, row: -1,
-    steps: { done: (p.next || []).filter((x) => x.done).length, total: (p.next || []).length } };
-  const lanes = [];
-  (m.waves || []).forEach((w, wi) => (w.lanes || []).forEach((l, li) => lanes.push({
-    id: l.id, kind: "lane", task: l.task || l.id, health: l.health || "planned", phase: l.phase || "", running: !!l.running, lane: l, wave: wi, row: li,
-    steps: { done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 },
-  })));
-  return [lead, ...lanes];
+function sizeStage() {
+  const wrap = $("stagewrap"), stage = $("stage");
+  const w = wrap.clientWidth || 1, h = wrap.clientHeight || 1;
+  const sw = Math.max(1, Math.min(w, h * STAGE_W / STAGE_H));
+  stage.style.width = sw + "px";
+  stage.style.height = (sw * STAGE_H / STAGE_W) + "px";
+  k = sw / STAGE_W;
 }
 
-function computeLayout() {
-  const stage = $("stage");
-  const w = stage.clientWidth || 800;
-  const small = w < 700;
-  const RX = small ? 92 : 148, RY = small ? 34 : 54;
-  const CW = Math.round(RX * 1.15), CH = Math.round(CW * 1.25);
-  const WALL = 14;
-  const PLATE_Y = RY + WALL + 4, PLATE_H = small ? 22 : 26;
-  const footOff = Math.round(RY * 0.3), feetFrac = 0.93;
-  const RISE_F = (186 - 22) / 200, HL_F = (80 - 15) / 160, HR_F = (150 - 80) / 160;
-  const artMin = small ? 45 : 90;
-  const boxMin = Math.max(small ? 52 : 105, Math.ceil((artMin + 3) / 0.77));
-  stage.style.height = "";
-  const baseH = stage.clientHeight || 420;
-  const leadX = RX + 34, leadY = CH + RY + 26;
-  let boxW = CW, scale = 1, H = baseH, colP = 0, rowP = 0, vb = null;
-  for (let i = 0; i < 6; i++) {
-    const boxH = boxW * CH / CW;
-    const rise = RISE_F * boxH, hl = HL_F * boxW, hr = HR_F * boxW;
-    rowP = rise + PLATE_Y + PLATE_H + Math.max(10, 12 / scale) - footOff;
-    colP = Math.max(RX * 2 + 24, hl + hr + Math.max(24, 10 / scale));
-    for (const n of nodes) {
-      if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
-      else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
-    }
-    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-    for (const n of nodes) {
-      x0 = Math.min(x0, n.x - Math.max(RX, hl)); x1 = Math.max(x1, n.x + Math.max(RX, hr));
-      y0 = Math.min(y0, n.y + footOff - rise);
-      y1 = Math.max(y1, n.y + PLATE_Y + PLATE_H);
-    }
-    const pad = 28;
-    vb = { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
-    const fit = boxMin / CW;
-    const scaleW = w / vb.w;
-    H = scaleW >= fit ? Math.min(2400, Math.max(baseH, vb.h * fit)) : baseH;
-    const ns = Math.min(scaleW, H / vb.h);
-    const nb = Math.max(CW * ns, boxMin) / ns;
-    const settled = Math.abs(nb - boxW) < 0.5 && Math.abs(ns - scale) < 0.001;
-    scale = ns; boxW = nb;
-    if (settled) break;
-  }
-  const boxCW = Math.round(Math.max(CW * scale, boxMin));
-  const boxCH = Math.round(boxCW * CH / CW);
-  if (H > baseH) stage.style.height = Math.round(H) + "px";
-  return { small, RX, RY, CW, CH, WALL, PLATE_Y, PLATE_H, footOff, feetFrac, colP, rowP, boxCW, boxCH, scale,
-    trunkX: leadX + colP / 2, vb };
-}
-
-function plateName(t) { return t.length > 24 ? t.slice(0, 23) + "\u2026" : t; }
-function plateWidth(name, L) { return Math.min(L.RX * 1.9, Math.max(84, name.length * 7.8 + 20)); }
-function wallD() { const L = layout; return `M ${-L.RX} 0 A ${L.RX} ${L.RY} 0 0 0 ${L.RX} 0 L ${L.RX} ${L.WALL} A ${L.RX} ${L.RY} 0 0 1 ${-L.RX} ${L.WALL} Z`; }
-function frontArcD() { const L = layout; return `M ${-L.RX} ${L.WALL} A ${L.RX} ${L.RY} 0 0 0 ${L.RX} ${L.WALL}`; }
-function geoSig() { const L = layout; return `${L.small}|${L.RX}|${L.RY}|${L.CW}|${L.CH}|${L.WALL}|${L.PLATE_Y}|${L.PLATE_H}`; }
-function bakeNodeGeometry(g, name) {
-  const L = layout;
-  const front = frontArcD(), wall = wallD();
-  const pw = Math.round(plateWidth(name, L));
-  const spot = g.querySelector(".spot");
-  spot.setAttribute("rx", L.RX * 1.5);
-  spot.setAttribute("ry", L.RY * 1.9);
-  g.querySelector(".wall").setAttribute("d", wall);
-  const top = g.querySelector(".plat-top");
-  top.setAttribute("rx", L.RX);
-  top.setAttribute("ry", L.RY);
-  const inner = g.querySelector(".inner");
-  inner.setAttribute("rx", Math.round(L.RX * 0.55));
-  inner.setAttribute("ry", Math.round(L.RY * 0.55));
-  for (const arc of g.querySelectorAll(".garc")) arc.setAttribute("d", front);
-  const rim = g.querySelector(".rim");
-  rim.setAttribute("rx", L.RX);
-  rim.setAttribute("ry", L.RY);
-  g.querySelector(".front").setAttribute("d", front);
-  const plate = g.querySelector(".plate");
-  plate.setAttribute("transform", `translate(0 ${L.PLATE_Y})`);
-  const rect = plate.querySelector("rect");
-  rect.setAttribute("width", pw);
-  rect.setAttribute("x", -pw / 2);
-  rect.setAttribute("height", L.PLATE_H);
-  plate.querySelector(".platetxt").setAttribute("y", L.PLATE_H - 8);
-}
-
-function buildSceneSkeleton() {
-  $("floor").innerHTML = `<defs>
-    <linearGradient id="rim-run" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2dd4a0"/><stop offset="1" stop-color="#157a58"/></linearGradient>
-    <linearGradient id="rim-warn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e6b95c"/><stop offset="1" stop-color="#8a6317"/></linearGradient>
-    <linearGradient id="rim-bad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2706c"/><stop offset="1" stop-color="#8e211b"/></linearGradient>
-    <linearGradient id="rim-done" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4cc27e"/><stop offset="1" stop-color="#1d7a45"/></linearGradient>
-    <linearGradient id="rim-plan" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9298a6"/><stop offset="1" stop-color="#4b5160"/></linearGradient>
-    <linearGradient id="rim-lead" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b18cf8"/><stop offset="1" stop-color="#5b3aa8"/></linearGradient>
-    <radialGradient id="topg"><stop offset="0" stop-color="#1d1d25"/><stop offset="1" stop-color="#0a0a0e"/></radialGradient>
-    <radialGradient id="spotg"><stop offset="0" stop-color="#5fa8ff" stop-opacity=".4"/><stop offset="1" stop-color="#5fa8ff" stop-opacity="0"/></radialGradient>
-    <linearGradient id="wallg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#23232c"/><stop offset="1" stop-color="#07070b"/></linearGradient>
-  </defs><g id="links"></g><g id="nodes"></g>`;
-}
-
-function nodeSvg(n) {
-  const L = layout, hk = n.kind === "lead" ? "lead" : healthKey(n.health);
-  const name = plateName(n.task);
-  const pw = Math.round(plateWidth(name, L));
-  const wall = wallD(), front = frontArcD();
-  const glowInner = `<g class="glow g-${hk}"><path class="garc g3" d="${front}"/><path class="garc g2" d="${front}"/><path class="garc g1" d="${front}"/></g>`;
-  return `<g class="node h-${hk}" data-node="${esc(n.id)}" transform="translate(${n.x} ${n.y})" tabindex="0" role="button" aria-label="${esc(n.task)}">`
-    + `<ellipse class="spot" rx="${L.RX * 1.5}" ry="${L.RY * 1.9}" fill="url(#spotg)"/>`
-    + `<g class="lift">`
-    + `<path class="wall" d="${wall}"/>`
-    + `<ellipse class="top plat-top" rx="${L.RX}" ry="${L.RY}" fill="url(#topg)"/>`
-    + `<ellipse class="inner" rx="${Math.round(L.RX * 0.55)}" ry="${Math.round(L.RY * 0.55)}" fill="none" stroke="#ffffff" stroke-opacity=".06"/>`
-    + `<g class="glowgrp ga">${glowInner}</g>`
-    + `<g class="glowgrp gb" style="opacity:0">${glowInner}</g>`
-    + `<ellipse class="rim" rx="${L.RX}" ry="${L.RY}"/>`
-    + `<path class="front" d="${front}"/>`
-    + `<g class="plate" transform="translate(0 ${L.PLATE_Y})"><g transform="skewX(-16)"><rect x="${-pw / 2}" y="0" width="${pw}" height="${L.PLATE_H}" rx="5" fill="#101015" stroke="#34343f"/><text x="0" y="${L.PLATE_H - 8}" text-anchor="middle" class="platetxt">${esc(name)}</text></g></g>`
-    + `<g class="fx"></g>`
-    + `</g></g>`;
-}
-
-function createNode(n) {
-  const layer = $("nodes");
-  layer.insertAdjacentHTML("beforeend", nodeSvg(n));
-  const g = layer.lastElementChild;
-  const hk = n.kind === "lead" ? "lead" : healthKey(n.health);
-  g.__x = n.x; g.__y = n.y; g.__hk = hk; g.__task = n.task; g.__name = plateName(n.task); g.__geo = geoSig(); g.__glowSide = "a";
-  g.style.setProperty("--gdel", "-" + (hash(n.id) % 2400) + "ms");
-  nodeEls.set(n.id, g);
-  if (prevInit && !animState.reducedMotion) {
-    g.querySelector(".lift").animate([{ transform: "translateY(30px) scale(.6)", opacity: 0 }, { transform: "translateY(0px) scale(1)", opacity: 1 }], { duration: 420, easing: EASE_SPRING, fill: "backwards" });
-    g.querySelector(".plate").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 220, easing: EASE_OUT, fill: "backwards" });
-  }
-  return g;
-}
-
-function updateNode(n, g) {
-  const hk = n.kind === "lead" ? "lead" : healthKey(n.health);
-  if (g.__x !== n.x || g.__y !== n.y) { g.__x = n.x; g.__y = n.y; g.setAttribute("transform", `translate(${n.x} ${n.y})`); }
-  if (g.__hk !== hk) {
-    g.__hk = hk;
-    for (const k of ["run", "warn", "bad", "done", "plan", "lead"]) g.classList.toggle("h-" + k, k === hk);
-    crossfadeGlow(g, hk);
-  }
-  if (g.__task !== n.task) { g.__task = n.task; g.setAttribute("aria-label", n.task); }
-  const name = plateName(n.task);
-  if (g.__name !== name) {
-    g.__name = name;
-    const pw = Math.round(plateWidth(name, layout));
-    const txt = g.querySelector(".platetxt");
-    if (txt.textContent !== name) txt.textContent = name;
-    const rect = g.querySelector(".plate rect");
-    rect.setAttribute("width", pw);
-    rect.setAttribute("x", -pw / 2);
-  }
-  const geo = geoSig();
-  if (g.__geo !== geo) { g.__geo = geo; bakeNodeGeometry(g, name); }
-}
-
-function removeNode(id) {
-  const g = nodeEls.get(id);
-  nodeEls.delete(id);
-  prevById.delete(id);
-  if (g) fadeOutRemove(g);
-  const st = linkEls.get(id);
-  if (st) { linkEls.delete(id); killPackets(st); fadeOutRemove(st.g); }
-}
-
-function linkPoints(n) {
-  const L = layout, lead = nodes[0];
-  return [
-    { x: lead.x + L.RX - 8, y: lead.y },
-    { x: L.trunkX, y: lead.y },
-    { x: L.trunkX, y: n.y },
-    { x: n.x - L.RX + 8, y: n.y },
-  ];
-}
-function linkD(n) { const p = linkPoints(n); return `M ${p[0].x} ${p[0].y} L ${p[1].x} ${p[1].y} L ${p[2].x} ${p[2].y} L ${p[3].x} ${p[3].y}`; }
-
-function killPackets(st) {
-  for (const a of st.pktAnims) a.cancel();
-  for (const e of st.pktEls) e.remove();
-  st.pktAnims.length = 0;
-  st.pktEls.length = 0;
-}
-
-function samplePath(path, count) {
-  let len = 0;
-  try { len = path.getTotalLength(); } catch (e) { return []; }
-  const pts = [];
-  for (let i = 0; i < count; i++) {
-    const p = path.getPointAtLength((len * i) / (count - 1));
-    pts.push({ x: p.x, y: p.y });
-  }
-  return pts;
-}
-
-function spawnPackets(n, st) {
-  const pts = samplePath(st.path, 22);
-  if (pts.length < 2) return;
-  const dur = 2600 + n.row * 450 + n.wave * 300;
-  const kf = pts.map((p, i) => ({ transform: `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`, offset: i / (pts.length - 1) }));
-  const specs = [
-    { r: 8, cls: "phalo", del: 0, op: "" },
-    { r: 3.4, cls: "phead", del: 0, op: "" },
-    { r: 2.6, cls: "ptrail", del: 140, op: ".55" },
-    { r: 2, cls: "ptrail", del: 280, op: ".38" },
-    { r: 1.5, cls: "ptrail", del: 420, op: ".22" },
-  ];
-  for (const sp of specs) {
-    const c = document.createElementNS(NS, "circle");
-    c.setAttribute("r", sp.r);
-    c.setAttribute("class", "pkt " + sp.cls);
-    if (sp.op) c.style.opacity = sp.op;
-    c.setAttribute("transform", `translate(${pts[0].x} ${pts[0].y})`);
-    st.g.appendChild(c);
-    st.pktEls.push(c);
-    st.pktAnims.push(c.animate(kf, { duration: dur, delay: sp.del, iterations: Infinity, easing: "linear" }));
-  }
-}
-
-function ensurePackets() {
-  if (animState.intro === "running") return;
-  for (const n of nodes) {
-    if (n.kind !== "lane") continue;
-    const st = linkEls.get(n.id);
-    if (!st) continue;
-    const want = isWorking(n) && !animState.reducedMotion;
-    if (want === !!st.pktOn) continue;
-    if (want) { st.pktOn = true; spawnPackets(n, st); }
-    else { st.pktOn = false; killPackets(st); }
-  }
-}
-
-function syncLinks() {
-  const layer = $("links");
-  const seen = new Set();
-  linkCount = 0;
-  for (const n of nodes) {
-    if (n.kind !== "lane") continue;
-    linkCount++;
-    seen.add(n.id);
-    const d = linkD(n);
-    let st = linkEls.get(n.id);
-    if (!st) {
-      layer.insertAdjacentHTML("beforeend", `<g class="linkwrap" data-link="${esc(n.id)}"><path class="link" d="${d}"/></g>`);
-      st = { g: layer.lastElementChild, path: layer.lastElementChild.firstElementChild, d, pktEls: [], pktAnims: [] };
-      linkEls.set(n.id, st);
-    } else if (st.d !== d) {
-      st.d = d;
-      st.path.setAttribute("d", d);
-      st.path.style.strokeDasharray = "";
-      st.pktOn = false;
-      killPackets(st);
-    }
-  }
-  for (const id of [...linkEls.keys()]) {
-    if (seen.has(id)) continue;
-    const st = linkEls.get(id);
-    linkEls.delete(id);
-    killPackets(st);
-    fadeOutRemove(st.g);
-  }
-  ensurePackets();
-}
-
-function fallbackSprite(hue) {
-  return `<svg viewBox="0 0 60 84" xmlns="http://www.w3.org/2000/svg"><ellipse cx="30" cy="79" rx="15" ry="4" fill="rgba(0,0,0,.45)"/><circle cx="30" cy="17" r="11" fill="hsl(${hue},42%,74%)"/><rect x="15" y="28" width="30" height="46" rx="13" fill="hsl(${hue},48%,58%)"/></svg>`;
-}
-function spriteSvg(role, st, hue, portrait) {
-  try { if (window.OfficeSprites && window.OfficeSprites.draw) return window.OfficeSprites.draw(role, { state: st, hue, portrait: !!portrait }); } catch (e) {}
-  return fallbackSprite(hue);
-}
-
-function createChar(n) {
-  const el = document.createElement("div");
-  const working = isWorking(n);
-  const role = roleOf(n);
-  el.className = "char" + (working ? " working" : " floaty");
-  const hv = hash(n.id);
-  el.style.setProperty("--fdur", (3.4 + (hv % 9) * 0.15).toFixed(2) + "s");
-  el.style.setProperty("--fdel", "-" + (hv % 3500) + "ms");
-  el.dataset.char = n.id;
-  el.__role = role;
-  el.__working = working;
-  el.innerHTML = `<div class="cfloat">${spriteSvg(role, working ? "working" : "idle", HUES[role])}</div>`;
-  $("actors").appendChild(el);
-  charEls.set(n.id, el);
-  sizeChar(el);
-  positionChar(n, el);
-  return el;
-}
-
-function sizeChar(el) {
-  if (el.__cw !== layout.boxCW) {
-    el.__cw = layout.boxCW;
-    el.style.width = layout.boxCW + "px";
-    el.style.height = layout.boxCH + "px";
-  }
-}
-
-function updateChar(n, el) {
-  const role = roleOf(n), working = isWorking(n);
-  if (el.__role !== role || el.__working !== working) {
-    el.__role = role;
-    el.__working = working;
-    el.classList.toggle("working", working);
-    el.classList.toggle("floaty", !working);
-    crossfadeSprite(el, spriteSvg(role, working ? "working" : "idle", HUES[role]));
-  }
-  sizeChar(el);
-  positionChar(n, el);
-}
-
-function crossfadeGlow(g, hk) {
-  const incoming = g.__glowSide === "a" ? g.querySelector(".glowgrp.gb") : g.querySelector(".glowgrp.ga");
-  const outgoing = g.__glowSide === "a" ? g.querySelector(".glowgrp.ga") : g.querySelector(".glowgrp.gb");
-  incoming.querySelector(".glow").setAttribute("class", "glow g-" + hk);
-  incoming.style.opacity = "1";
-  outgoing.style.opacity = "0";
-  g.__glowSide = g.__glowSide === "a" ? "b" : "a";
-}
-
-function crossfadeSprite(el, svg) {
-  const cf = el.querySelector(".cfloat");
-  const old = cf.firstElementChild;
-  if (!old || animState.reducedMotion) { cf.innerHTML = svg; return; }
-  cf.insertAdjacentHTML("beforeend", svg);
-  const nu = cf.lastElementChild;
-  const oa = old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: EASE_OUT, fill: "forwards" });
-  const na = nu.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: EASE_OUT, fill: "forwards" });
-  oa.onfinish = () => { old.remove(); na.cancel(); };
-}
-
-function sceneToClient(x, y) {
-  const svg = $("floor");
-  try {
-    const pt = svg.createSVGPoint(); pt.x = x; pt.y = y;
-    const m = pt.matrixTransform(svg.getScreenCTM());
-    return { x: m.x, y: m.y };
-  } catch (e) { return { x: 0, y: 0 }; }
-}
-
-function positionChar(n, el, r) {
-  const rect = r || $("stage").getBoundingClientRect();
-  const p = sceneToClient(n.x, n.y + layout.footOff);
-  const left = Math.round(p.x - rect.left - layout.boxCW / 2);
-  const top = Math.round(p.y - rect.top - layout.boxCH * layout.feetFrac);
-  if (el.__left !== left) { el.__left = left; el.style.left = left + "px"; }
-  if (el.__top !== top) { el.__top = top; el.style.top = top + "px"; }
-}
-
-function positionActors() {
-  if (!layout) return;
-  const r = $("stage").getBoundingClientRect();
-  for (const [id, el] of charEls) {
-    const n = nodes.find((x) => x.id === id);
-    if (n) positionChar(n, el, r);
-  }
-}
-
-function fadeOutRemove(el) {
-  if (!el) return;
-  if (animState.reducedMotion) { el.remove(); return; }
-  const a = el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: EASE_IN, fill: "forwards" });
-  a.onfinish = () => el.remove();
-}
-
-function syncScene() {
-  const svg = $("floor");
-  if (!sceneBuilt) { buildSceneSkeleton(); sceneBuilt = true; }
-  const vb = layout.vb;
-  const vbStr = `${vb.x} ${vb.y} ${vb.w} ${vb.h}`;
-  if (svg.__vb !== vbStr) { svg.__vb = vbStr; svg.setAttribute("viewBox", vbStr); }
-  const seen = new Set();
-  for (const n of nodes) {
-    seen.add(n.id);
-    let g = nodeEls.get(n.id);
-    if (!g) g = createNode(n); else updateNode(n, g);
-  }
-  for (const id of [...nodeEls.keys()]) if (!seen.has(id)) removeNode(id);
-  syncLinks();
-  const seenC = new Set();
-  for (const n of nodes) {
-    seenC.add(n.id);
-    let el = charEls.get(n.id);
-    if (!el) createChar(n); else updateChar(n, el);
-  }
-  for (const id of [...charEls.keys()]) {
-    if (seenC.has(id)) continue;
-    fadeOutRemove(charEls.get(id));
-    charEls.delete(id);
-  }
-  positionActors();
-}
-
-function syncSel() {
-  for (const g of $("floor").querySelectorAll("g.node")) g.classList.toggle("sel", g.dataset.node === selected);
-}
-
-function setHovered(id) {
-  if (hovered === id) return;
-  if (hovered) {
-    const g = nodeEls.get(hovered);
-    if (g) g.classList.remove("hover");
-    const el = charEls.get(hovered);
-    if (el) el.classList.remove("hover");
-  }
-  hovered = id;
-  if (id) {
-    const g = nodeEls.get(id);
-    if (g) g.classList.add("hover");
-    const el = charEls.get(id);
-    if (el) el.classList.add("hover");
-  }
-}
-
-const STEP_LI = `<li class="step"><span class="stepic"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="ck" d="M3.2 8.6 L6.8 12 L12.6 4.8"/></svg></span><span class="txt"></span></li>`;
-
-function syncSteps(ol, steps, numbered) {
-  while (ol.children.length > steps.length) ol.lastElementChild.remove();
-  for (let i = 0; i < steps.length; i++) {
-    let li = ol.children[i];
-    if (!li) { ol.insertAdjacentHTML("beforeend", STEP_LI); li = ol.lastElementChild; }
-    const st = steps[i].state || "pending";
-    if (li.__st !== st) { li.__st = st; li.className = "step s-" + st; }
-    const label = (numbered ? i + 1 + ". " : "") + steps[i].text;
-    const txt = li.querySelector(".txt");
-    if (txt.textContent !== label) txt.textContent = label;
-  }
-}
-
-function buildCard(n) {
-  const card = $("card");
-  const lead = n.kind === "lead";
-  const head = `<div class="chead"><div class="avatar"></div><div><div class="ctitle"></div><div class="csub"></div></div></div><hr class="cdiv">`;
-  card.innerHTML = lead
-    ? head
-      + `<div class="cnow" hidden><b>now:</b> <span class="cnowtext"></span></div>`
-      + `<div class="clabel">Planned next</div><ol class="steps"></ol>`
-      + `<div class="pbar"><div class="pfill"></div></div>`
-      + `<div class="clabel declabel" hidden>Recent decisions</div><ul class="dec" hidden></ul>`
-      + `<div class="cfoot"><span class="cprog"></span><a class="laneslink" href="/">Open in Lanes</a></div>`
-    : head
-      + `<div class="clabel">Steps</div><ol class="steps"></ol>`
-      + `<div class="pbar"><div class="pfill"></div></div>`
-      + `<div class="cfoot"><span class="cprog"></span><span class="ctok"></span><span class="badge"></span></div>`
-      + `<a class="laneslink">Open in Lanes</a>`
-      + `<div class="steer" hidden><input class="steerin" placeholder="Steer this lane..." maxlength="500"><button class="steerbtn">Send</button><span class="steermsg"></span></div>`;
-  crefs = {
-    avatar: card.querySelector(".avatar"), title: card.querySelector(".ctitle"), sub: card.querySelector(".csub"),
-    steps: card.querySelector(".steps"), pfill: card.querySelector(".pfill"),
-    cnow: card.querySelector(".cnow"), cnowtext: card.querySelector(".cnowtext"),
-    declabel: card.querySelector(".declabel"), dec: card.querySelector(".dec"),
-    prog: card.querySelector(".cprog"), tok: card.querySelector(".ctok"), badge: card.querySelector(".badge"),
-    link: card.querySelector(".laneslink"),
-    steer: card.querySelector(".steer"), steerin: card.querySelector(".steerin"), steerbtn: card.querySelector(".steerbtn"), steermsg: card.querySelector(".steermsg"),
-    avatarSig: "", decSig: "",
-  };
-  if (!lead && mode === "live") {
-    crefs.steerin.addEventListener("keydown", (e) => { if (e.key === "Enter") crefs.steerbtn.click(); });
-    crefs.steerbtn.onclick = async () => {
-      const text = crefs.steerin.value.trim();
-      if (!text) return;
-      crefs.steerbtn.disabled = true;
-      try {
-        const r = await fetch(`/api/lane/${encodeURIComponent(n.id)}/steer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-        const j = await r.json();
-        crefs.steermsg.textContent = j && j.ok ? "queued" : ((j && j.error) || "failed");
-        if (j && j.ok) crefs.steerin.value = "";
-      } catch (e) { crefs.steermsg.textContent = "failed"; }
-      crefs.steerbtn.disabled = false;
-    };
-  }
-}
-
-function setAvatar(role, st) {
-  const sig = role + ":" + st;
-  if (!crefs || crefs.avatarSig === sig) return;
-  crefs.avatarSig = sig;
-  crefs.avatar.innerHTML = spriteSvg(role, st, HUES[role], true);
-}
-
-async function laneSteps(n) {
-  if (mode === "demo") return (n.lane && n.lane.steps) || [];
-  if (!n.lane || !n.lane.models) return null;
-  const c = detailCache.get(n.id);
-  if (c && Date.now() - c.t < 2000) return c.steps;
-  try {
-    const d = await (await fetch(`/api/lane/${encodeURIComponent(n.id)}/detail`)).json();
-    if (!d || d.error || !Array.isArray(d.steps)) throw new Error("bad detail");
-    const steps = d.steps.map((s) => ({ text: s.text, state: s.state }));
-    detailCache.set(n.id, { t: Date.now(), steps });
-    return steps;
-  } catch (e) { return c ? c.steps : null; }
-}
-
-function positionCard() {
-  const card = $("card");
-  const n = nodes.find((x) => x.id === selected);
-  if (!n || !layout || card.hidden) return;
-  const L = layout, r = $("stage").getBoundingClientRect();
-  const p = sceneToClient(n.x, n.y);
-  const cw = card.offsetWidth, chh = card.offsetHeight;
-  let left = p.x - r.left + L.RX * L.scale + 16;
-  if (left + cw > r.width - 6) left = p.x - r.left - L.RX * L.scale - 16 - cw;
-  left = Math.max(6, Math.min(left, Math.max(6, r.width - cw - 6)));
-  let top = p.y - r.top - 34;
-  top = Math.max(6, Math.min(top, Math.max(6, r.height - chh - 6)));
-  const tail = p.x - r.left < left + cw / 2 ? "tail-left" : "tail-right";
-  card.style.left = Math.round(left) + "px";
-  card.style.top = Math.round(top) + "px";
-  card.className = "card " + tail;
-}
-
-async function updateCard(opening) {
-  const id = selected;
-  if (!id || !crefs) return;
-  const n = nodes.find((x) => x.id === id);
-  if (!n) return;
-  const req = ++cardReq;
-  const lead = n.kind === "lead";
-  let steps = [];
-  if (lead) {
-    const p = model.plan;
-    steps = (p.next || []).map((x) => ({ text: x.text, state: x.done ? "done" : "pending" }));
-    crefs.title.textContent = p.title || "Plan";
-    crefs.sub.textContent = `team leader \u00b7 ${p.lead || ""}`;
-    setAvatar("lead", "idle");
-    crefs.cnow.hidden = !p.now;
-    if (crefs.cnowtext.textContent !== p.now) crefs.cnowtext.textContent = p.now || "";
-    const dec = (p.decisions || []).slice(-3).reverse();
-    const dsig = JSON.stringify(dec.map((d) => d.text));
-    if (dsig !== crefs.decSig) {
-      crefs.decSig = dsig;
-      crefs.dec.innerHTML = dec.map((d) => `<li>${esc(d.text)}</li>`).join("");
-      crefs.dec.hidden = crefs.declabel.hidden = !dec.length;
-    }
-    const dn = steps.filter((s) => s.state === "done").length;
-    crefs.prog.textContent = `Progress: ${dn} / ${steps.length}`;
-    crefs.pfill.style.transform = `scaleX(${steps.length ? dn / steps.length : 0})`;
-    cardInfo = { title: p.title || "Plan", steps, progress: `${dn} / ${steps.length}` };
-  } else {
-    const l = n.lane || {};
-    steps = (await laneSteps(n)) || [];
-    if (selected !== id || req !== cardReq || !crefs) return;
-    const total = (l.progress && l.progress.total) || steps.length;
-    const dn = steps.length ? steps.filter((s) => s.state === "done").length : ((l.progress && l.progress.done) || 0);
-    crefs.title.textContent = n.task;
-    crefs.sub.textContent = `team mate \u00b7 ${shortModel((l.models && l.models.build) || (l.plan && l.plan.model) || "unknown model")}`;
-    setAvatar(roleOf(n), isWorking(n) ? "working" : "idle");
-    crefs.prog.textContent = `Progress: ${dn} / ${total}`;
-    crefs.tok.textContent = tokStr(l.tokens);
-    const ht = healthText(n.health);
-    if (crefs.badge.textContent !== ht) crefs.badge.textContent = ht;
-    const bc = "badge h-" + healthKey(n.health);
-    if (crefs.badge.className !== bc) crefs.badge.className = bc;
-    crefs.link.href = mode === "demo" ? "/" : "/#/lane/" + encodeURIComponent(id);
-    crefs.steer.hidden = !(mode === "live" && l.running);
-    crefs.pfill.style.transform = `scaleX(${total ? dn / total : 0})`;
-    cardInfo = { title: n.task, steps, progress: `${dn} / ${total}` };
-  }
-  syncSteps(crefs.steps, steps, !lead);
-  if (opening && !animState.reducedMotion) {
-    const lis = crefs.steps.children;
-    for (let i = 0; i < lis.length; i++) {
-      lis[i].animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0px)" }], { duration: 240, delay: 60 + i * 40, easing: EASE_OUT, fill: "backwards" });
-    }
-  }
-  positionCard();
-}
-
-function openCard(id) {
-  if (!nodes.some((n) => n.id === id)) return;
-  if (selected === id && !$("card").hidden) return;
-  selected = id;
-  syncSel();
-  const n = nodes.find((x) => x.id === id);
-  const card = $("card");
-  card.hidden = false;
-  if (cardCloseAnim) { cardCloseAnim.cancel(); cardCloseAnim = null; }
-  buildCard(n);
-  positionCard();
-  clearTimeout(cardTimer);
-  if (animState.reducedMotion) {
-    animState.card = "open";
-  } else {
-    animState.card = "opening";
-    cardTimer = setTimeout(() => { if (animState.card === "opening") animState.card = "open"; }, 300);
-    card.animate([
-      { transform: "scale(.92) translateY(6px)", opacity: 0 },
-      { transform: "scale(1) translateY(0px)", opacity: 1 },
-    ], { duration: 260, easing: EASE_SPRING });
-  }
-  updateCard(true);
-}
-
-function closeCard() {
-  const card = $("card");
-  if (card.hidden || animState.card === "closing") return;
-  selected = null;
-  syncSel();
-  cardInfo = { title: "", steps: [], progress: "" };
-  clearTimeout(cardTimer);
-  if (animState.reducedMotion) { card.hidden = true; animState.card = "closed"; return; }
-  animState.card = "closing";
-  cardCloseAnim = card.animate([
-    { transform: "scale(1)", opacity: 1 },
-    { transform: "scale(.95)", opacity: 0 },
-  ], { duration: 160, easing: EASE_IN, fill: "forwards" });
-  cardCloseAnim.onfinish = () => { cardCloseAnim.cancel(); cardCloseAnim = null; card.hidden = true; animState.card = "closed"; };
+function planStatus(p, lanes) {
+  if (p.status) return p.status;
+  if (lanes.some((l) => l.running)) return "running";
+  if (lanes.length && lanes.every((l) => l.result === "done" || l.result === "needs review")) return "done";
+  return "planned";
 }
 
 function renderTop() {
   const p = model.plan;
-  $("goal").textContent = p.goal || p.title || "(no goal)";
-  $("leadChip").textContent = p.lead || "";
+  $("planTitle").textContent = p.title || p.goal || "(no plan)";
+  const now = fetchErr ? fetchErr + " (retrying every 2 s)" : (p.now || "");
+  $("nowLine").hidden = !now;
+  $("nowLine").textContent = now ? "Now: " + now : "";
   $("leadChip").hidden = !p.lead;
-  $("statusChip").textContent = p.status || "";
-  $("statusChip").hidden = !p.status;
-  $("nowText").textContent = fetchErr ? fetchErr + " (retrying every 2 s)" : (p.now || "");
-  $("nowline").hidden = !$("nowText").textContent;
+  if (p.lead) $("leadChip").textContent = p.lead;
+  $("statusBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+  const nPlans = mode === "demo" ? 1 : plansArr.length;
+  const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
+  $("counts").textContent = `${nPlans} plan${nPlans === 1 ? "" : "s"} \u00b7 ${nLanes} lane${nLanes === 1 ? "" : "s"}`;
   const sel = $("planSel");
   const sig = JSON.stringify(plansArr.map((x) => x.id));
   if (mode === "live" && plansArr.length > 1) {
     sel.hidden = false;
-    if (sig !== plansSig) { plansSig = sig; sel.innerHTML = plansArr.map((x) => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join(""); }
+    if (sig !== plansSig) { plansSig = sig; sel.innerHTML = plansArr.map((x) => `<option value="${CAUI.esc(x.id)}">${CAUI.esc(x.title)}</option>`).join(""); }
     sel.value = (planSel && plansArr.some((x) => x.id === planSel)) ? planSel : plansArr[0].id;
   } else { sel.hidden = true; plansSig = ""; }
 }
 
-function isComplete() {
-  const ls = model ? model.lanes : [];
-  return ls.length > 0 && ls.every((l) => l.result === "done" || l.result === "needs review");
-}
-
-function countUp(sec) {
-  const els = [...sec.querySelectorAll("[data-count]")];
-  if (!els.length || animState.reducedMotion) return;
-  const fmtOf = (el) => el.dataset.fmt === "dur" ? durStr : String;
-  for (const el of els) el.textContent = fmtOf(el)(0);
-  const gen = ++countGen;
-  const t0 = performance.now();
-  const step = (t) => {
-    if (gen !== countGen) return;
-    const p = Math.min(1, (t - t0) / 1200);
-    const e = 1 - Math.pow(1 - p, 3);
-    for (const el of els) el.textContent = fmtOf(el)(Math.round((parseInt(el.getAttribute("data-count"), 10) || 0) * e));
-    if (p < 1) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-
-function renderComplete() {
-  const sec = $("complete");
-  if (!isComplete()) { sec.hidden = true; completeSig = ""; return; }
-  const ls = model.lanes;
-  const commits = ls.reduce((a, l) => a + commitsOf(l), 0);
-  const ms = ls.reduce((a, l) => a + (l.startedAt && l.finishedAt ? l.finishedAt - l.startedAt : 0), 0);
-  const secs = Math.max(0, Math.round(ms / 1000));
-  const sig = JSON.stringify([ls.map((l) => [l.task || l.id, (l.progress && l.progress.done) || 0, (l.progress && l.progress.total) || 0, commitsOf(l), tokStr(l.tokens), l.verdict || ""]), commits, secs]);
-  if (sig === completeSig && !sec.hidden) return;
-  completeSig = sig;
-  sec.innerHTML = `<h2><span class="okball">\u2713</span>All tasks complete</h2>
-    <p class="csum"><b class="num" data-count="${ls.length}">${ls.length}</b> lane${ls.length === 1 ? "" : "s"} delivered <b class="num" data-count="${commits}">${commits}</b> commit${commits === 1 ? "" : "s"} in <b class="num" data-count="${secs}" data-fmt="dur">${durStr(secs)}</b> of lane time.</p>
-    <table><thead><tr><th>Lane</th><th>Steps</th><th>Commits</th><th>Tokens</th><th>Verdict</th></tr></thead><tbody>
-    ${ls.map((l, i) => `<tr style="animation-delay:${80 + i * 40}ms"><td>${esc(l.task || l.id)}</td><td>${(l.progress && l.progress.done) || 0} / ${(l.progress && l.progress.total) || 0}</td><td>${commitsOf(l)}</td><td>${tokStr(l.tokens)}</td><td>${esc(l.verdict || "")}</td></tr>`).join("")}
-    </tbody></table>`;
-  sec.hidden = false;
-  countUp(sec);
-}
-
-function logEffect(name) {
-  animState.effects.push(name);
-  if (animState.effects.length > 20) animState.effects.shift();
-  animState.lastEffect = name;
-}
-
-function spawnRipple(n) {
-  const g = nodeEls.get(n.id);
-  if (!g) return;
-  const e = document.createElementNS(NS, "ellipse");
-  e.setAttribute("class", "ripple");
-  e.setAttribute("rx", layout.RX);
-  e.setAttribute("ry", layout.RY);
-  g.querySelector(".fx").appendChild(e);
-  const a = animState.reducedMotion
-    ? e.animate([{ opacity: 0.6 }, { opacity: 0 }], { duration: 150, easing: EASE_OUT, fill: "forwards" })
-    : e.animate([{ transform: "scale(1)", opacity: 0.75 }, { transform: "scale(1.6)", opacity: 0 }], { duration: 1000, easing: EASE_OUT });
-  a.onfinish = () => e.remove();
-}
-
-function reducedFlash(n, color) {
-  const g = nodeEls.get(n.id);
-  if (!g) return;
-  const e = document.createElementNS(NS, "ellipse");
-  e.setAttribute("class", "rflash");
-  e.setAttribute("rx", layout.RX);
-  e.setAttribute("ry", layout.RY);
-  e.setAttribute("fill", color);
-  g.querySelector(".fx").appendChild(e);
-  const a = e.animate([{ opacity: 0.45 }, { opacity: 0 }], { duration: 150, easing: EASE_OUT, fill: "forwards" });
-  a.onfinish = () => e.remove();
-}
-
-function spawnBurst(n) {
-  const g = nodeEls.get(n.id);
-  if (!g) return;
-  if (animState.reducedMotion) { reducedFlash(n, "#8fe6b8"); return; }
-  const grp = document.createElementNS(NS, "g");
-  grp.setAttribute("class", "burst");
-  const sq = layout.RY / layout.RX;
-  for (let i = 0; i < 8; i++) {
-    const ang = (i * Math.PI) / 4;
-    const c = Math.cos(ang), s = Math.sin(ang);
-    const r1 = layout.RX * 0.5, r2 = layout.RX * 0.95;
-    const ln = document.createElementNS(NS, "line");
-    ln.setAttribute("x1", (c * r1).toFixed(1)); ln.setAttribute("y1", (s * r1 * sq).toFixed(1));
-    ln.setAttribute("x2", (c * r2).toFixed(1)); ln.setAttribute("y2", (s * r2 * sq).toFixed(1));
-    const len = Math.hypot(c * (r2 - r1), s * (r2 - r1) * sq);
-    ln.style.strokeDasharray = len.toFixed(1);
-    grp.appendChild(ln);
-    ln.animate([{ strokeDashoffset: len.toFixed(1) }, { strokeDashoffset: 0 }], { duration: 240, delay: i * 25, easing: EASE_OUT, fill: "backwards" });
-  }
-  g.querySelector(".fx").appendChild(grp);
-  const ga = grp.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 650, delay: 300, easing: EASE_IN, fill: "forwards" });
-  ga.onfinish = () => grp.remove();
-}
-
-function shakeNode(n) {
-  if (animState.reducedMotion) { reducedFlash(n, "#f07a7a"); return; }
-  const g = nodeEls.get(n.id);
-  const targets = [];
-  if (g) targets.push(g.querySelector(".lift"));
-  const el = charEls.get(n.id);
-  if (el) targets.push(el);
-  for (const t of targets) {
-    if (!t) continue;
-    t.classList.remove("shake");
-    try { t.getBBox ? t.getBBox() : t.offsetWidth; } catch (e) {}
-    t.classList.add("shake");
-    t.addEventListener("animationend", function h(e) {
-      if (e.target !== t || e.animationName !== "shake") return;
-      t.classList.remove("shake");
-      t.removeEventListener("animationend", h);
-    });
-  }
-}
-
-function flashGlow(n) {
-  const g = nodeEls.get(n.id);
-  if (!g) return;
-  const grp = g.querySelector(g.__glowSide === "a" ? ".glowgrp.ga" : ".glowgrp.gb");
-  if (!grp) return;
-  if (animState.reducedMotion) { grp.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: EASE_OUT }); return; }
-  grp.animate([{ opacity: 1 }, { opacity: 0.12 }, { opacity: 1 }, { opacity: 0.25 }, { opacity: 1 }], { duration: 480, easing: EASE_OUT });
-}
-
-function diffEffects() {
-  for (const n of nodes) {
-    const hk = n.kind === "lead" ? "lead" : healthKey(n.health);
-    const result = n.lane ? String(n.lane.result || "") : "";
-    const prev = prevById.get(n.id);
-    if (prevInit && prev && n.kind === "lane") {
-      if (n.steps.done > prev.stepsDone) { logEffect("step-done:" + n.id); spawnRipple(n); }
-      const doneNow = result === "done" || hk === "done";
-      if (doneNow && !prev.doneFired) { logEffect("lane-done:" + n.id); spawnBurst(n); }
-      else if (hk === "bad" && prev.hk !== "bad") { logEffect("lane-failed:" + n.id); shakeNode(n); flashGlow(n); }
-      else if (hk === "warn" && prev.hk === "run" && /stopped|killed/i.test(String(n.health || ""))) { logEffect("lane-stopped:" + n.id); shakeNode(n); flashGlow(n); }
-    }
-    prevById.set(n.id, {
-      hk,
-      stepsDone: n.steps.done,
-      doneFired: prev ? (prev.doneFired || result === "done" || hk === "done") : (result === "done" || hk === "done"),
-    });
-  }
-  for (const id of [...prevById.keys()]) if (!nodes.some((n) => n.id === id)) prevById.delete(id);
-  prevInit = true;
-}
-
-function applyReduced() {
-  const red = mqReduce.matches;
-  if (red === animState.reducedMotion) return;
-  animState.reducedMotion = red;
-  document.body.classList.toggle("reduced", red);
-  if (red) {
-    for (const [, st] of linkEls) { st.pktOn = false; killPackets(st); }
-  } else {
-    ensurePackets();
-  }
-}
-
-function playIntro() {
-  if (animState.reducedMotion) { animState.intro = "done"; return; }
-  animState.intro = "running";
-  const tilt = $("tilt");
-  const ta = tilt.animate([
-    { transform: "perspective(950px) rotateX(34deg) scale(1.06)", opacity: 0 },
-    { transform: "perspective(950px) rotateX(0deg) scale(1)", opacity: 1 },
-  ], { duration: 900, easing: EASE_OUT, fill: "backwards" });
-  ta.onfinish = () => { ta.cancel(); positionActors(); };
-  let i = 0;
-  for (const n of nodes) {
-    const g = nodeEls.get(n.id);
-    if (g) {
-      const delay = 150 + i * 90;
-      g.querySelector(".lift").animate([
-        { transform: "translateY(38px) scale(.55)", opacity: 0 },
-        { transform: "translateY(0px) scale(1)", opacity: 1 },
-      ], { duration: 520, easing: EASE_SPRING, delay, fill: "backwards" });
-      g.querySelector(".plate").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: delay + 330, easing: EASE_OUT, fill: "backwards" });
-      const el = charEls.get(n.id);
-      if (el) el.animate([
-        { transform: "translateY(-34px)", opacity: 0 },
-        { transform: "translateY(0px)", opacity: 1 },
-      ], { duration: 480, easing: EASE_SPRING, delay: delay + 250, fill: "backwards" });
-      const st = linkEls.get(n.id);
-      if (st) {
-        let len = 0;
-        try { len = st.path.getTotalLength(); } catch (e) {}
-        if (len) {
-          st.path.style.strokeDasharray = len + " " + len;
-          const la = st.path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: 480, easing: EASE_OUT, delay: 380 + i * 90, fill: "backwards" });
-          la.onfinish = () => { st.path.style.strokeDasharray = ""; };
-        }
-      }
-    }
-    i++;
-  }
-  clearTimeout(introTimer);
-  introTimer = setTimeout(() => { animState.intro = "done"; ensurePackets(); }, 1800);
-}
-
 function render() {
   model = mode === "demo" ? demoModel() : liveModel();
-  nodes = buildNodes(model);
-  layout = computeLayout();
   renderTop();
-  syncScene();
-  diffEffects();
-  if (selected) {
-    if (!nodes.some((n) => n.id === selected)) closeCard();
-    else updateCard(false);
-  }
-  renderComplete();
-  if (!introPlayed) { introPlayed = true; playIntro(); }
 }
 
 async function tick() {
-  ticks++;
   if (mode !== "demo") {
     try {
       const [pr, lr] = await Promise.all([fetch("/api/plans"), fetch("/api/lanes")]);
@@ -1264,50 +272,27 @@ function demoFail(id) {
 
 window.__office = {
   state() {
-    const ns = nodes.map((n) => {
-      const p = sceneToClient(n.x, n.y);
-      return { id: n.id, kind: n.kind, task: n.task, health: n.kind === "lead" ? "lead" : String(n.health || "planned"), x: p.x, y: p.y, steps: { done: n.steps.done, total: n.steps.total } };
-    });
-    const open = !!selected && !$("card").hidden;
+    const r = $("stage").getBoundingClientRect();
     return {
       mode,
-      goal: (model && model.plan && model.plan.goal) || "",
       plan: (model && model.plan && model.plan.title) || "",
-      nodes: ns,
-      links: linkCount,
-      geometry: layout ? { small: layout.small, RX: layout.RX, RY: layout.RY, WALL: layout.WALL } : null,
-      selected: selected || null,
-      hovered: hovered || null,
-      card: open ? { open: true, title: cardInfo.title, steps: cardInfo.steps, progress: cardInfo.progress } : { open: false, title: "", steps: [], progress: "" },
-      complete: isComplete(),
-      ticks,
-      anim: { intro: animState.intro, card: animState.card, effects: animState.effects.slice(), lastEffect: animState.lastEffect, reducedMotion: animState.reducedMotion },
+      goal: (model && model.plan && model.plan.goal) || "",
+      stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
     };
   },
-  select(id) { if (nodes.some((n) => n.id === id)) openCard(id); },
   demoAdvance,
   demoFail,
 };
 
+const motionBtn = $("motionBtn");
+function syncMotionBtn() { motionBtn.setAttribute("aria-pressed", PixelSprites.motionPref() ? "true" : "false"); }
+motionBtn.addEventListener("click", () => { PixelSprites.setMotion(!PixelSprites.motionPref()); syncMotionBtn(); });
+PixelSprites.onMotion(syncMotionBtn);
+syncMotionBtn();
+
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
-$("floor").addEventListener("click", (e) => {
-  const g = e.target && e.target.closest ? e.target.closest("g.node") : null;
-  if (g) openCard(g.dataset.node); else closeCard();
-});
-$("floor").addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" && e.key !== " ") return;
-  const g = e.target && e.target.closest ? e.target.closest("g.node") : null;
-  if (g) { e.preventDefault(); openCard(g.dataset.node); }
-});
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCard(); });
-document.addEventListener("mousemove", (e) => {
-  const t = e.target;
-  const g = t && t.closest ? t.closest("g.node") : null;
-  setHovered(g ? g.dataset.node : null);
-});
-document.body.classList.toggle("reduced", animState.reducedMotion);
-mqReduce.addEventListener("change", applyReduced);
-new ResizeObserver(() => { if (layout) render(); }).observe($("stage"));
+new ResizeObserver(() => { sizeStage(); }).observe($("stagewrap"));
+sizeStage();
 if (mode === "demo") render();
 setInterval(tick, 2000);
 if (mode !== "demo") tick();
