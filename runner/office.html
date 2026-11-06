@@ -191,7 +191,8 @@ body.reduced .glowgrp{transition-duration:.15s}
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const q = new URLSearchParams(location.search);
-const demoDone = q.get("demo") === "done";
+const demoBig = q.get("demo") === "big";
+const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const mode = q.has("demo") ? "demo" : "live";
 const NS = "http://www.w3.org/2000/svg";
 const EASE_OUT = "cubic-bezier(.2,.8,.2,1)";
@@ -245,23 +246,58 @@ const DEMO_BASE = {
   "review-pass": { phase: "review", model: "maas/glm-5.3", dur: 8, tokens: { input: 1700, output: 3200, reasoning: 700 },
     texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"] },
 };
+const DEMO_BIG_BASE = {
+  "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 46, tokens: { input: 12100, output: 21400, reasoning: 4800 },
+    texts: ["Routes in ca.mjs", "Page shell with the goal box", "Data layer with demo mode", "Scene, cards and completion", "Links and packet animation", "Resize re-bakes geometry", "Keyboard focus and Escape", "Screenshots for the checks"],
+    init: { dn: 3, cur: 4, health: "running", running: true, result: "", verdict: "" } },
+  "office-sprites": { phase: "review", model: "maas/glm-5.3", dur: 32, tokens: { input: 3900, output: 7100, reasoning: 1400 },
+    texts: ["Sprite contract check", "Draw the five roles", "Isometric desks and chairs", "Floating panels and badges", "Working and idle poses", "Hue variants per role", "Reduced motion fallbacks", "Polish the animations"],
+    init: { dn: 8, cur: 0, health: "running", running: true, result: "", verdict: "" } },
+  "cli-dx": { phase: "build", model: "maas/qwen3-coder", dur: 41, tokens: { input: 8600, output: 12300, reasoning: 2600 },
+    texts: ["Split ca.mjs commands", "Harness-neutral arg parsing", "Help text for every command", "Exit codes and stderr", "Shell completion stubs", "Version and doctor output", "Man page snippet", "CLI contract check"],
+    init: { dn: 8, cur: 0, health: "done", running: false, result: "done", verdict: "ready" } },
+  "mcp": { phase: "build", model: "maas/glm-5.3", dur: 37, tokens: { input: 6400, output: 9800, reasoning: 1900 },
+    texts: ["MCP server skeleton", "Tool schemas", "stdio transport", "Auth from the user env", "List and read tools", "Error shapes", "Logging without secrets", "MCP check green"],
+    init: { dn: 8, cur: 0, health: "done", running: false, result: "done", verdict: "ready" } },
+  "setup": { phase: "fix", model: "maas/qwen3-max", dur: 29, tokens: { input: 5200, output: 8100, reasoning: 1200 },
+    texts: ["Detect installed harnesses", "Per-harness setup notes", "Doctor rows", "Copyable onboard command", "First-lane quick start", "Trust the worktree folder", "Windows path quirks", "Re-run the setup check"],
+    init: { dn: 7, cur: 8, health: "running", running: true, result: "", verdict: "" } },
+  "office-motion": { phase: "build", model: "maas/glm-5.3", dur: 34, tokens: { input: 7300, output: 10600, reasoning: 2200 },
+    texts: ["Motion brief", "Intro tilt", "Hover lift", "Working bob", "Packet trails", "Done burst", "Reduced motion fades", "Motion check green"],
+    init: { dn: 8, cur: 0, health: "needs review", running: false, result: "needs review", verdict: "needs fixes" } },
+  "office-motion-fix": { phase: "fix", model: "maas/qwen3-coder", dur: 12, tokens: { input: 2100, output: 3400, reasoning: 600 },
+    texts: ["Read the review notes", "Fix the packet timing", "Re-run the motion check", "Ask for review again"],
+    init: { dn: 0, cur: 0, health: "planned", running: false, result: "", verdict: "" } },
+  "onboard": { phase: "build", model: "maas/glm-5.3", dur: 25, tokens: { input: 4300, output: 6900, reasoning: 1100 },
+    texts: ["Welcome panel copy", "Doctor rows per harness", "Onboard command snippet", "First-lane list", "Links to the docs", "Dismiss and remember", "Onboard check", "Screenshots for the README"],
+    init: { dn: 0, cur: 0, health: "planned", running: false, result: "", verdict: "" } },
+};
+const DEMO_SET = demoBig ? DEMO_BIG_BASE : DEMO_BASE;
 const demoState = {};
-for (const [id, b] of Object.entries(DEMO_BASE)) {
-  const fin = demoDone || id === "review-pass";
-  const dn = fin ? b.texts.length : (id === "office-sprites" ? 1 : 2);
-  const cur = fin ? 0 : (id === "office-sprites" ? 2 : 3);
-  demoState[id] = {
-    dn, cur,
-    health: fin ? "done" : (id === "office-sprites" ? "quiet" : "running"),
-    running: !demoDone && !fin && id === "office-scene",
-    result: fin ? "done" : "", verdict: fin ? "ok" : "",
-  };
+if (demoBig) {
+  for (const [id, b] of Object.entries(DEMO_BIG_BASE)) {
+    demoState[id] = demoDone
+      ? { dn: b.texts.length, cur: 0, health: "done", running: false, result: "done", verdict: "ready" }
+      : { ...b.init };
+  }
+} else {
+  for (const [id, b] of Object.entries(DEMO_BASE)) {
+    const fin = demoDone || id === "review-pass";
+    const dn = fin ? b.texts.length : (id === "office-sprites" ? 1 : 2);
+    const cur = fin ? 0 : (id === "office-sprites" ? 2 : 3);
+    demoState[id] = {
+      dn, cur,
+      health: fin ? "done" : (id === "office-sprites" ? "quiet" : "running"),
+      running: !demoDone && !fin && id === "office-scene",
+      result: fin ? "done" : "", verdict: fin ? "ok" : "",
+    };
+  }
 }
 
 function demoModel() {
   const mkSteps = (texts, dn, cur) => texts.map((tx, i) => ({ text: tx, state: i < dn ? "done" : cur === i + 1 ? "current" : "pending" }));
   const mk = (id) => {
-    const b = DEMO_BASE[id], st = demoState[id];
+    const b = DEMO_SET[id], st = demoState[id];
     const started = DEMO_T0 - (b.dur + 6) * 60000;
     return {
       id, task: id, health: st.health, phase: b.phase, running: st.running,
@@ -273,8 +309,32 @@ function demoModel() {
       startedAt: started, finishedAt: st.result === "done" ? started + b.dur * 60000 : null,
     };
   };
-  const scene = mk("office-scene"), sprites = mk("office-sprites"), review = mk("review-pass");
   const at = (m) => new Date(DEMO_T0 - m * 60000).toISOString();
+  if (demoBig) {
+    const lanes = Object.keys(DEMO_BIG_BASE).map(mk);
+    const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
+    return {
+      plan: {
+        id: "demo-big", title: "CLI and Office view", goal: "Ship the harness-neutral CLI and Office view",
+        lead: "Claude Opus 5.5", status: demoDone ? "done" : "running",
+        now: demoDone ? "All eight lanes finished; every check is green." : "Wave 1 is still building; the CLI lane waits for review.",
+        next: [{ text: "Merge the sprites worktree into main", done: true }, { text: "Review the CLI help output", done: false }, { text: "Run every check on main", done: false }],
+        decisions: [
+          { at: at(58), text: "The CLI lane lands first so the Office view can build on the new arg parsing." },
+          { at: at(44), text: "The motion fix lane stays planned until the review names the fixes." },
+          { at: at(21), text: "Onboarding ships last; it needs the final CLI wording." },
+        ],
+      },
+      lanes,
+      waves: [
+        { name: "Wave 1", lanes: [byId["office-scene"], byId["office-sprites"]] },
+        { name: "Wave 2", lanes: [byId["cli-dx"]] },
+        { name: "Wave 3", lanes: [byId["mcp"], byId["setup"], byId["office-motion"], byId["office-motion-fix"]] },
+        { name: "Wave 4", lanes: [byId["onboard"]] },
+      ],
+    };
+  }
+  const scene = mk("office-scene"), sprites = mk("office-sprites"), review = mk("review-pass");
   return {
     plan: {
       id: "demo", title: "Office view for codearts-build", goal: "Build the Office view for codearts-build lanes",
@@ -315,29 +375,52 @@ function buildNodes(m) {
 }
 
 function computeLayout() {
-  const w = $("stage").clientWidth || 800;
+  const stage = $("stage");
+  const w = stage.clientWidth || 800;
   const small = w < 700;
   const RX = small ? 92 : 148, RY = small ? 34 : 54;
   const CW = Math.round(RX * 1.15), CH = Math.round(CW * 1.25);
   const WALL = 14;
   const PLATE_Y = RY + WALL + 4, PLATE_H = small ? 22 : 26;
-  const colP = RX * 2 + (small ? 56 : 64);
-  const rowP = RY * 2 + (small ? 150 : 170);
-  const leadX = RX + 34, leadY = CH + RY + 26;
-  for (const n of nodes) {
-    if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
-    else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
-  }
   const footOff = Math.round(RY * 0.3), feetFrac = 0.93;
-  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-  for (const n of nodes) {
-    x0 = Math.min(x0, n.x - RX); x1 = Math.max(x1, n.x + RX);
-    y0 = Math.min(y0, n.y + footOff - CH * feetFrac);
-    y1 = Math.max(y1, n.y + PLATE_Y + PLATE_H);
+  const RISE_F = (186 - 22) / 200, HL_F = (80 - 15) / 160, HR_F = (150 - 80) / 160;
+  const artMin = small ? 45 : 90;
+  const boxMin = Math.max(small ? 52 : 105, Math.ceil((artMin + 3) / 0.77));
+  stage.style.height = "";
+  const baseH = stage.clientHeight || 420;
+  const leadX = RX + 34, leadY = CH + RY + 26;
+  let boxW = CW, scale = 1, H = baseH, colP = 0, rowP = 0, vb = null;
+  for (let i = 0; i < 6; i++) {
+    const boxH = boxW * CH / CW;
+    const rise = RISE_F * boxH, hl = HL_F * boxW, hr = HR_F * boxW;
+    rowP = rise + PLATE_Y + PLATE_H + Math.max(10, 12 / scale) - footOff;
+    colP = Math.max(RX * 2 + 24, hl + hr + Math.max(24, 10 / scale));
+    for (const n of nodes) {
+      if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
+      else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
+    }
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (const n of nodes) {
+      x0 = Math.min(x0, n.x - Math.max(RX, hl)); x1 = Math.max(x1, n.x + Math.max(RX, hr));
+      y0 = Math.min(y0, n.y + footOff - rise);
+      y1 = Math.max(y1, n.y + PLATE_Y + PLATE_H);
+    }
+    const pad = 28;
+    vb = { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
+    const fit = boxMin / CW;
+    const scaleW = w / vb.w;
+    H = scaleW >= fit ? Math.min(2400, Math.max(baseH, vb.h * fit)) : baseH;
+    const ns = Math.min(scaleW, H / vb.h);
+    const nb = Math.max(CW * ns, boxMin) / ns;
+    const settled = Math.abs(nb - boxW) < 0.5 && Math.abs(ns - scale) < 0.001;
+    scale = ns; boxW = nb;
+    if (settled) break;
   }
-  const pad = 28;
-  return { small, RX, RY, CW, CH, WALL, PLATE_Y, PLATE_H, footOff, feetFrac, trunkX: leadX + RX + 26,
-    vb: { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 } };
+  const boxCW = Math.round(Math.max(CW * scale, boxMin));
+  const boxCH = Math.round(boxCW * CH / CW);
+  if (H > baseH) stage.style.height = Math.round(H) + "px";
+  return { small, RX, RY, CW, CH, WALL, PLATE_Y, PLATE_H, footOff, feetFrac, colP, rowP, boxCW, boxCH, scale,
+    trunkX: leadX + colP / 2, vb };
 }
 
 function plateName(t) { return t.length > 24 ? t.slice(0, 23) + "\u2026" : t; }
@@ -581,10 +664,10 @@ function createChar(n) {
 }
 
 function sizeChar(el) {
-  if (el.__cw !== layout.CW) {
-    el.__cw = layout.CW;
-    el.style.width = layout.CW + "px";
-    el.style.height = layout.CH + "px";
+  if (el.__cw !== layout.boxCW) {
+    el.__cw = layout.boxCW;
+    el.style.width = layout.boxCW + "px";
+    el.style.height = layout.boxCH + "px";
   }
 }
 
@@ -633,8 +716,8 @@ function sceneToClient(x, y) {
 function positionChar(n, el, r) {
   const rect = r || $("stage").getBoundingClientRect();
   const p = sceneToClient(n.x, n.y + layout.footOff);
-  const left = Math.round(p.x - rect.left - layout.CW / 2);
-  const top = Math.round(p.y - rect.top - layout.CH * layout.feetFrac);
+  const left = Math.round(p.x - rect.left - layout.boxCW / 2);
+  const top = Math.round(p.y - rect.top - layout.boxCH * layout.feetFrac);
   if (el.__left !== left) { el.__left = left; el.style.left = left + "px"; }
   if (el.__top !== top) { el.__top = top; el.style.top = top + "px"; }
 }
@@ -790,14 +873,13 @@ function positionCard() {
   if (!n || !layout || card.hidden) return;
   const L = layout, r = $("stage").getBoundingClientRect();
   const p = sceneToClient(n.x, n.y);
-  const scale = Math.min(r.width / L.vb.w, r.height / L.vb.h);
   const cw = card.offsetWidth, chh = card.offsetHeight;
-  let left = p.x - r.left + L.RX * scale + 16;
-  let tail = "tail-left";
-  if (left + cw > r.width - 6) { left = p.x - r.left - L.RX * scale - 16 - cw; tail = "tail-right"; }
+  let left = p.x - r.left + L.RX * L.scale + 16;
+  if (left + cw > r.width - 6) left = p.x - r.left - L.RX * L.scale - 16 - cw;
   left = Math.max(6, Math.min(left, Math.max(6, r.width - cw - 6)));
   let top = p.y - r.top - 34;
   top = Math.max(6, Math.min(top, Math.max(6, r.height - chh - 6)));
+  const tail = p.x - r.left < left + cw / 2 ? "tail-left" : "tail-right";
   card.style.left = Math.round(left) + "px";
   card.style.top = Math.round(top) + "px";
   card.className = "card " + tail;
@@ -1154,14 +1236,14 @@ function demoAdvance(id) {
   if (mode !== "demo") return false;
   const st = demoState[id];
   if (!st || st.result === "done" || st.health === "failed" || st.health === "stopped") return false;
-  const b = DEMO_BASE[id];
+  const b = DEMO_SET[id];
   st.dn = Math.min(b.texts.length, st.dn + 1);
   if (st.dn >= b.texts.length) {
     st.cur = 0;
     st.health = "done";
     st.running = false;
     st.result = "done";
-    st.verdict = "ok";
+    st.verdict = demoBig ? "ready" : "ok";
   } else {
     st.cur = Math.min(b.texts.length, st.dn + 1);
   }
