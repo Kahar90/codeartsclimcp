@@ -127,6 +127,10 @@
     if (lower === 'stopped' || lower === 'killed' || lower === 'attention' || lower === 'partial') return { key: 'warn', label: h.charAt(0).toUpperCase() + h.slice(1), raw: h };
     if (h === 'STALLED' || h === 'DEAD' || lower === 'failed') return { key: 'bad', label: lower === 'failed' ? 'Failed' : h.charAt(0) + h.slice(1).toLowerCase(), raw: h };
     if (lower === 'planned' || lower === 'waiting') return { key: 'idle', label: lower === 'waiting' ? 'Waiting' : 'Planned', raw: h };
+    // Plan states: closed = the lead closed it with work left undone; dropped = a lane the lead decided not to run.
+    if (lower === 'closed') return { key: 'done', label: 'Closed', raw: h };
+    if (lower === 'dropped') return { key: 'idle', label: 'Dropped', raw: h };
+    if (lower === 'verifying') return { key: 'warn', label: 'Verifying', raw: h };
     return { key: 'idle', label: h.charAt(0).toUpperCase() + h.slice(1), raw: h };
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
