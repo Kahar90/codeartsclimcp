@@ -452,12 +452,34 @@ function prog(p, res) {
   const k = res === 'failed' ? 'bad' : res === 'done' ? 'ok' : '';
   return `<div class="prog ${k}"><i style="width:${pct}%"></i></div>`;
 }
-const stepsLabel = (l) => l.progress?.total ? `${l.progress.done}/${l.progress.total} steps` : 'no numbered steps';
-function curLine(l) {
-  if (l.health === 'planned') return `<div class="cur mute">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>`;
-  if (l.running && l.progress?.current) return `<div class="cur"><span class="lbl">Step ${l.progress.current.n}</span> ${md(l.progress.current.text)}</div>`;
-  if (l.running) return `<div class="cur"><span class="lbl">${esc(l.phase)}</span> ${esc(l.now)}</div>`;
-  return `<div class="cur mute">${esc(l.result)}${l.verdict ? ' · review: ' + esc(l.verdict) : ''}${l.reason ? ' · ' + esc(l.reason) : ''}</div>`;
+// ---------- plan-home state that survives the 2.5 s polls ----------
+let curPlan = null;
+const waveCollapsed = new Map(); // "planId::waveIndex" -> true
+const stepsOpen = new Map(); // laneId -> true (step disclosure on the plan home)
+const stepsCache = new Map(); // laneId -> steps[] from the lane detail, fetched on first open
+
+// ---------- sprites: placeholders in the markup, mounted after every render ----------
+const spriteMap = new Map(); // spot key -> PixelSprites handle
+let spritesLoad = null;
+function mountSprites() {
+  const spots = [...document.querySelectorAll('[data-spot]')];
+  const live = new Set(spots.map((s) => s.dataset.spot));
+  for (const [key, sp] of [...spriteMap]) if (!live.has(key)) { sp.destroy(); spriteMap.delete(key); }
+  if (!spots.length || !window.PixelSprites) return;
+  if (!spritesLoad) spritesLoad = PixelSprites.load().catch(() => {});
+  spritesLoad.then(() => {
+    let budget = 6; // at most six sprites animate the work clip
+    for (const el of spots) {
+      const key = el.dataset.spot, scale = Number(el.dataset.scale) || 0.75;
+      let sp = spriteMap.get(key);
+      if (!sp) { try { sp = PixelSprites.create(el.dataset.role || 'builder', { scale, seed: key, clip: 'idle' }); } catch { continue; } spriteMap.set(key, sp); }
+      if (sp.el.parentNode !== el) el.appendChild(sp.el);
+      sp.setScale(scale);
+      let work = false;
+      if (el.dataset.work === '1' && budget > 0) { work = true; budget--; }
+      sp.setClip(work ? 'work' : 'idle');
+    }
+  });
 }
 
 function renderRail() {
@@ -482,29 +504,67 @@ function renderRail() {
   for (const c of $('railBody').querySelectorAll('[data-go]')) c.onclick = () => go(c.dataset.go);
 }
 
+function curBand(l) {
+  const chips = l.plan?.files?.length ? `<div class="chips">${l.plan.files.slice(0, 6).map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>` : '';
+  if (l.running && l.progress?.current) return `<div class="curband"><span class="lbl">Current step ${l.progress.current.n}/${l.progress.total}</span><div class="t1">${md(l.progress.current.text)}</div>${chips}</div>`;
+  if (l.running) return `<div class="curband"><span class="lbl">${esc(l.phase)}</span><div class="t1">${esc(l.now || 'running')}</div>${chips}</div>`;
+  if (l.health === 'planned') return `<div class="curband"><span class="lbl">Planned</span><div class="t2">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>${chips}</div>`;
+  const tail = [l.verdict ? 'review: ' + l.verdict : '', l.reason].filter(Boolean).join(' · ');
+  return `<div class="curband"><span class="lbl">${esc(l.result || l.health)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
+}
+const stepIc = (s) => s.state === 'done' ? '&#10003;' : s.state === 'current' ? '&#9654;' : '&#9675;';
+const stepLi = (s) => `<li class="st-${s.state}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}${s.commit ? ` <code>${esc(s.commit)}</code>` : ''}</span></li>`;
+function stepsBlock(l) {
+  const cached = stepsCache.get(l.id);
+  const n = cached?.length || l.progress?.total || 0;
+  if (!n) return '';
+  const open = stepsOpen.has(l.id);
+  const body = !open ? '' : cached ? `<ul class="steplist">${cached.map(stepLi).join('')}</ul>` : '<div class="small" style="margin-top:6px">loading steps...</div>';
+  return `<div class="stepsdisc"><button type="button" data-steps="${esc(l.id)}" aria-expanded="${open}"><span class="tri">&#9654;</span>${n} step${n === 1 ? '' : 's'}</button>${body}</div>`;
+}
+async function toggleSteps(id) {
+  if (stepsOpen.has(id)) stepsOpen.delete(id); else stepsOpen.set(id, true);
+  if (stepsOpen.has(id) && !stepsCache.has(id)) {
+    try { const d = await api(`/api/lane/${encodeURIComponent(id)}/detail`); stepsCache.set(id, d.error ? [] : (d.steps || [])); } catch { stepsCache.set(id, []); }
+  }
+  if (route.kind === 'plan' && curPlan) renderPlan(curPlan);
+}
 function renderPlan(p) {
-  const laneBox = (l) => `<div class="lane" data-go="lane/${esc(l.id)}">
-      <div class="row"><span class="name">${l.running ? '<span class="pulse"></span>' : ''}${esc(l.task)}</span><span class="badge ${cls(l.health)}">${esc(l.health)}</span></div>
-      <div class="small">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
-      ${prog(l.progress, l.result)}<div class="small">${stepsLabel(l)}</div>${curLine(l)}
-      ${l.plan?.why ? `<div class="small" style="margin-top:4px">${esc(l.plan.why)}</div>` : ''}
-      ${l.plan?.files?.length ? `<div style="margin-top:4px">${l.plan.files.slice(0, 6).map((f) => `<span class="tag">${esc(f)}</span>`).join(' ')}</div>` : ''}</div>`;
-  const waves = p.waves.map((w, i) => `${i ? '<div class="arrow">&rarr;</div>' : ''}<div class="wave">
-      <div class="row"><h3>${esc(w.name)}</h3><span class="badge ${cls(w.status)}">${esc(w.status)}</span></div>
-      ${w.note ? `<div class="small">${esc(w.note)}</div>` : ''}${w.lanes.map(laneBox).join('') || '<div class="small" style="margin-top:8px">no lanes listed</div>'}</div>`).join('');
-  const next = p.next.length ? `<ul class="plain">${p.next.map((n) => `<li class="${n.done ? 'st-done' : 'st-pending'}"><span class="ic">${n.done ? '&#10003;' : '&#9675;'}</span><span>${esc(n.text)}</span></li>`).join('')}</ul>` : '<div class="small">Nothing listed</div>';
-  const dec = p.decisions.length ? `<ul class="plain">${[...p.decisions].reverse().map((d) => `<li><span class="hash" style="margin:0;min-width:64px">${esc(d.at ? clock(d.at) : '')}</span><span>${esc(d.text)}</span></li>`).join('')}</ul>` : '<div class="small">None yet</div>';
+  const laneCard = (l) => `<div class="lane-card">
+      <span class="spot" data-spot="lane:${esc(l.id)}" data-role="${l.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.75" data-work="${l.running ? 1 : 0}"></span>
+      <div class="lane-main">
+        <a class="lane-name" href="#/lane/${esc(l.id)}">${esc(l.task)}</a>
+        <div class="lane-meta">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
+        <div class="lane-steps"><span>${l.progress?.total ? `${l.progress.done}/${l.progress.total} steps` : 'no numbered steps'}</span>${prog(l.progress, l.result)}</div>
+        ${curBand(l)}${stepsBlock(l)}
+      </div></div>`;
+  const waves = p.waves.map((w, i) => {
+    const key = `${p.id}::${i}`, collapsed = waveCollapsed.has(key);
+    const body = `<div class="wave-body">${w.note ? `<div class="small">${esc(w.note)}</div>` : ''}${w.lanes.map(laneCard).join('') || '<div class="small">no lanes listed</div>'}</div>`;
+    return `<section class="wave">
+      <div class="wave-head"><h3>${esc(w.name)}</h3><span class="cnt">${w.lanes.length} lane${w.lanes.length === 1 ? '' : 's'}</span>
+        <button type="button" class="chev" data-wave="${esc(key)}" aria-expanded="${!collapsed}" aria-label="Toggle ${esc(w.name)}"><span class="tri">&#9654;</span></button></div>
+      ${collapsed ? '' : body}</section>`;
+  }).join('');
+  const next = p.next.length ? `<ul class="plain">${p.next.map((n) => `<li class="${n.done ? 'st-done' : 'st-pending'}"><span class="ic">${n.done ? '&#10003;' : '&#9675;'}</span><span style="min-width:0">${esc(n.text)}</span></li>`).join('')}</ul>` : '<div class="small">Nothing listed</div>';
+  const risks = p.risks.length ? `<h4 style="margin-top:14px">Risks</h4><ul class="plain">${p.risks.map((r) => `<li class="risk"><span class="ic">!</span><span style="min-width:0">${esc(r)}</span></li>`).join('')}</ul>` : '';
+  const dec = p.decisions.length ? `<ul class="plain dec">${[...p.decisions].reverse().map((d) => `<li><span class="at">${esc(clock(d.at))}</span><span class="dv"></span><span class="tx">${esc(d.text)}</span></li>`).join('')}</ul>` : '<div class="small">None yet</div>';
   $('view').innerHTML = `<div class="pad">
-    <div class="row" style="justify-content:flex-start;gap:10px"><h2 class="title">${esc(p.title)}</h2>${p.status ? `<span class="badge h-${esc(p.status)}">${esc(p.status)}</span>` : ''}</div>
-    <div class="small">plan by ${esc(p.lead)} · updated ${ago(p.updatedAt)} · ${esc(p.file)}</div>
-    ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
-    ${p.now ? `<div class="now"><b>${esc(p.lead)} now:</b><span>${esc(p.now)}</span></div>` : ''}
-    <div class="waves">${waves}</div>
+    <div class="plan-head">
+      <h1>${esc(p.title)}</h1>
+      <div class="plan-sub">plan by ${esc(p.lead)} · updated ${ago(p.updatedAt)}</div>
+      ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
+      <div class="plan-path">${esc(p.file)}</div>
+    </div>
+    ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${esc(p.lead)} now</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
+    ${waves}
     <div class="grid2">
-      <div class="box"><h4>Planned next (lead)</h4>${next}${p.risks.length ? `<h4 style="margin-top:14px">Risks</h4><ul class="plain">${p.risks.map((r) => `<li><span class="ic" style="color:var(--warn)">!</span><span>${esc(r)}</span></li>`).join('')}</ul>` : ''}</div>
+      <div class="box"><h4>Planned next (lead)</h4>${next}${risks}</div>
       <div class="box"><h4>Decisions log</h4>${dec}</div>
     </div></div>`;
-  for (const c of $('view').querySelectorAll('[data-go]')) c.onclick = () => go(c.dataset.go);
+  for (const b of $('view').querySelectorAll('[data-wave]')) b.onclick = () => { waveCollapsed.has(b.dataset.wave) ? waveCollapsed.delete(b.dataset.wave) : waveCollapsed.set(b.dataset.wave, true); renderPlan(curPlan); };
+  for (const b of $('view').querySelectorAll('[data-steps]')) b.onclick = () => toggleSteps(b.dataset.steps);
+  mountSprites();
 }
 
 function pipeline(d) {
@@ -638,7 +698,7 @@ async function refresh(full) {
   $('counts').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`;
   if (!route.kind) { const p = plans[0], l = lanes.find((x) => x.running) || lanes[0]; if (p) return go('plan/' + p.id); if (l) return go('lane/' + l.id); }
   renderRail();
-  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) renderPlan(p); else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
+  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
   else if (route.kind === 'lane') {
     try { const d = await api(`/api/lane/${encodeURIComponent(route.id)}/detail`); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
     catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
