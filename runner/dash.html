@@ -496,11 +496,12 @@ const prevSteps = new Map(); // laneId -> Map(step n -> state) from the previous
 
 // ---------- sprites: placeholders in the markup, mounted after every render ----------
 const spriteMap = new Map(); // spot key -> PixelSprites handle
+const working = new Set(); // spot keys currently playing the work clip
 let spritesLoad = null;
 function mountSprites() {
   const spots = [...document.querySelectorAll('[data-spot]')];
   const live = new Set(spots.map((s) => s.dataset.spot));
-  for (const [key, sp] of [...spriteMap]) if (!live.has(key)) { sp.destroy(); spriteMap.delete(key); }
+  for (const [key, sp] of [...spriteMap]) if (!live.has(key)) { sp.destroy(); spriteMap.delete(key); working.delete(key); }
   if (!spots.length || !window.PixelSprites) return;
   if (!spritesLoad) spritesLoad = PixelSprites.load().catch(() => {});
   spritesLoad.then(() => {
@@ -514,6 +515,7 @@ function mountSprites() {
       let work = false;
       if (el.dataset.work === '1' && budget > 0) { work = true; budget--; }
       sp.setClip(work ? 'work' : 'idle');
+      work ? working.add(key) : working.delete(key);
     }
   });
 }
@@ -724,8 +726,9 @@ function renderLane(d, keep) {
     let r; try { r = await post('steer', { text }); } catch { r = { error: 'request failed' }; }
     inFlight = null;
     if (route.kind === 'lane' && route.id === id) {
-      if (r.ok) { if (msgEl.value.trim() === text) { msgEl.value = ''; drafts.delete(id); } }
-      else errEl.textContent = r.error || 'steer failed';
+      const m = $('msg'), e = $('steerErr');
+      if (r.ok) { if (m && m.value.trim() === text) { m.value = ''; drafts.delete(id); } }
+      else if (e) e.textContent = r.error || 'steer failed';
       restoreButtons();
     }
   };
@@ -737,7 +740,7 @@ function renderLane(d, keep) {
     let r; try { r = await post('stop'); } catch { r = { error: 'request failed' }; }
     inFlight = null;
     if (route.kind === 'lane' && route.id === id) {
-      if (!r.ok) { errEl.textContent = r.error || 'stop failed'; restoreButtons(); }
+      if (!r.ok) { const e = $('steerErr'); if (e) e.textContent = r.error || 'stop failed'; restoreButtons(); }
       else refresh(true);
     }
   };
@@ -748,7 +751,7 @@ function renderLane(d, keep) {
     let r; try { r = await post('attach'); } catch { r = { error: 'request failed' }; }
     inFlight = null;
     if (route.kind === 'lane' && route.id === id) {
-      if (!r.ok) errEl.textContent = r.error || 'could not open the TUI';
+      if (!r.ok) { const e = $('steerErr'); if (e) e.textContent = r.error || 'could not open the TUI'; }
       restoreButtons();
     }
   };
@@ -839,6 +842,18 @@ async function renderOnboard() {
   syncBarPad();
 }
 
+// Test hook for the check harness: one call snapshots route, rail, plan, lane and sprite state.
+window.__lanes = { state: () => {
+  const inPlan = new Set(plans.flatMap((p) => p.waves.flatMap((w) => w.lanes.map((l) => l.id))));
+  return {
+    route: { kind: route.kind, id: route.id },
+    rail: { plans: plans.map((p) => ({ id: p.id, selected: route.kind === 'plan' && route.id === p.id })), finished: lanes.filter((l) => !inPlan.has(l.id) && !l.running).map((l) => l.id) },
+    plan: route.kind === 'plan' && curPlan ? { waves: curPlan.waves.map((w, i) => ({ name: w.name, collapsed: waveCollapsed.has(`${curPlan.id}::${i}`), lanes: w.lanes.map((l) => ({ id: l.id, href: `#/lane/${l.id}`, stepsOpen: stepsOpen.has(l.id) })) })) } : null,
+    lane: route.kind === 'lane' && detail ? { id: detail.id, phase: detail.phase, liveSegment: document.querySelector('.seg.live')?.textContent || '', tab, follow: tget(detail.id).follow, transcriptScrollTop: tget(detail.id).top, transcriptAtBottom: tget(detail.id).atBottom, steps: detail.steps.map((x) => ({ n: x.n, state: x.state })), draft: drafts.get(detail.id) || '', sending: !!(inFlight && inFlight.laneId === detail.id) } : null,
+    sprites: { count: spriteMap.size, animating: working.size },
+    overflowX: document.documentElement.scrollWidth > window.innerWidth,
+  };
+} };
 function go(h) { location.hash = h; }
 function parseRoute() { const [k, ...r] = location.hash.slice(1).replace(/^\//, '').split('/'); return { kind: k, id: decodeURIComponent(r.join('/')) }; }
 async function refresh(full) {
