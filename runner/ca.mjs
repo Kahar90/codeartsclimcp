@@ -1022,6 +1022,14 @@ function cmdDash(args) {
       if (u.pathname === '/') { let html = page; try { html = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8'); } catch {} res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); }
       if (u.pathname === '/office') { let html = ''; try { html = fs.readFileSync(path.join(HERE, 'office.html'), 'utf8'); } catch {} if (html) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); } }
       if (u.pathname === '/office-sprites.js') { try { const js = fs.readFileSync(path.join(HERE, 'office-sprites.js'), 'utf8'); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }); return res.end(js); } catch { return json({ error: 'office-sprites.js not found' }, 404); } }
+      if (u.pathname.startsWith('/assets/')) {
+        // Static Pixel Workshop assets (room art, atlases, manifests, shared css/js). No traversal, known types only.
+        const types = { '.png': 'image/png', '.json': 'application/json', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+        const rel = decodeURIComponent(u.pathname.slice('/assets/'.length)); const root = path.join(HERE, 'assets'); const f = path.resolve(root, rel);
+        const type = types[path.extname(f).toLowerCase()];
+        if (!type || !f.startsWith(root + path.sep) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return json({ error: 'not found' }, 404);
+        res.writeHead(200, { 'content-type': type, 'cache-control': type.startsWith('image/') ? 'max-age=3600' : 'no-store' }); return res.end(fs.readFileSync(f));
+      }
       if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
       if (u.pathname === '/api/plans') return json(plans().map(planView));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
