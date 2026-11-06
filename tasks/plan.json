@@ -1,175 +1,30 @@
 {
-  "title": "CodeArts lanes: Office view, harness-neutral CLI, MCP, onboarding",
-  "goal": "Make codearts-build pleasant, reliable and informative for engineers in their existing workflow, usable from Claude Code, Kiro, Cursor, Codex and VS Code, with easy onboarding and a polished live Office view.",
+  "title": "Pixel Workshop redesign: Office and Lanes",
+  "goal": "Redo the Office visualizer and the Lanes dashboard from the CodeArts Pixel Workshop kit: full-width pixel room with atlas sprites and a floating agent window, plus the plum Lanes shell, plan home and lane detail.",
   "lead": "Claude Opus 5.5",
-  "status": "done",
-  "now": "Done: all lanes merged, 7 contract checks pass on main, installed into the live skill.",
+  "status": "running",
+  "now": "Foundation merged (assets, /assets route, shared sprite player, tokens). Two lanes building in parallel.",
   "waves": [
-    {
-      "name": "Wave 1: Office view",
-      "lanes": [
-        "office-scene",
-        "office-sprites"
-      ],
-      "note": "merged"
-    },
-    {
-      "name": "Wave 2: engineer CLI",
-      "lanes": [
-        "cli-dx"
-      ],
-      "note": "merged"
-    },
-    {
-      "name": "Wave 3: harnesses + motion",
-      "lanes": [
-        "mcp",
-        "setup",
-        "office-motion",
-        "office-motion-fix"
-      ],
-      "note": "merged (motion needed one fix lane)"
-    },
-    {
-      "name": "Wave 4: onboarding",
-      "lanes": [
-        "onboard"
-      ],
-      "note": "merged"
-    }
+    { "name": "Wave 1 · Surfaces", "lanes": ["office-v2", "lanes-v2"], "note": "Separate files: office.html vs dash.html; shared assets are frozen." }
   ],
   "lanes": [
-    {
-      "task": "office-scene",
-      "repo": ".",
-      "model": "maas/glm-5.3",
-      "why": "page, layout, data, card",
-      "files": [
-        "runner/office.html"
-      ]
-    },
-    {
-      "task": "office-sprites",
-      "repo": "../ca-office-wt-office-sprites",
-      "model": "maas/glm-5.3",
-      "why": "SVG characters",
-      "files": [
-        "runner/office-sprites.js"
-      ]
-    },
-    {
-      "task": "cli-dx",
-      "repo": ".",
-      "model": "maas/glm-5.3",
-      "why": "doctor, wait, json, init, detach",
-      "files": [
-        "runner/ca.mjs"
-      ]
-    },
-    {
-      "task": "mcp",
-      "repo": "../ca-office-wt-mcp",
-      "model": "maas/glm-5.3",
-      "why": "MCP stdio server for any harness",
-      "files": [
-        "runner/mcp.mjs"
-      ]
-    },
-    {
-      "task": "setup",
-      "repo": "../ca-office-wt-setup",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "one-command harness config",
-      "files": [
-        "runner/setup.mjs"
-      ]
-    },
-    {
-      "task": "office-motion",
-      "repo": "../ca-office-wt-office-motion",
-      "model": "maas/glm-5.3",
-      "why": "polished animation",
-      "files": [
-        "runner/office.html",
-        "runner/office-sprites.js"
-      ]
-    },
-    {
-      "task": "onboard",
-      "repo": "../ca-office-wt-onboard",
-      "model": "maas/glm-5.3",
-      "why": "guided first run, packaging, dashboard empty state",
-      "files": [
-        "runner/onboard.mjs",
-        "runner/ca.mjs",
-        "runner/dash.html",
-        "package.json",
-        "bin/"
-      ]
-    },
-    {
-      "task": "office-motion-fix",
-      "repo": "../ca-office-wt-office-motion",
-      "model": "maas/glm-5.3",
-      "why": "resize geometry, reduced-motion fades, durations",
-      "files": [
-        "runner/office.html"
-      ]
-    }
+    { "task": "office-v2", "repo": "../ca-office-wt-office-v2", "model": "maas/glm-5.3", "why": "Office v2 stage, stations, floating window, one-shot cues", "files": ["runner/office.html", "checks/office.check.mjs"] },
+    { "task": "lanes-v2", "repo": "../ca-office-wt-lanes-v2", "model": "maas/glm-5.3", "why": "Lanes shell, rail, plan home, lane detail, evidence tabs", "files": ["runner/dash.html", "checks/lanes.check.mjs"] }
   ],
   "next": [
-    {
-      "text": "Merge office-scene, office-sprites, cli-dx",
-      "done": true
-    },
-    {
-      "text": "Merge wave 3, run all checks",
-      "done": true
-    },
-    {
-      "text": "Run onboard lane",
-      "done": true
-    },
-    {
-      "text": "README quickstart + harness guide",
-      "done": true
-    },
-    {
-      "text": "Install into the live skill, update SKILL.md",
-      "done": true
-    }
+    { "text": "Foundation: kit assets, /assets route, workshop.js sprite player, workshop.css tokens", "done": true },
+    "Read lane summaries and verdicts",
+    "Run checks and look at screenshots of both surfaces",
+    "Merge both lanes, rerun all checks on master",
+    "Copy runner/ and checks/ to the live skill, update README and SKILL"
   ],
   "decisions": [
-    {
-      "at": "2026-11-05T17:27:27.911Z",
-      "text": "Overruled cli-dx reviewer: ca setup hook was a lead steer, not scope creep."
-    },
-    {
-      "at": "2026-11-05T17:27:27.912Z",
-      "text": "Fixed sprites myself: reviewer idle drew the empty desk, idle role drew a person."
-    },
-    {
-      "at": "2026-11-05T17:27:27.912Z",
-      "text": "Fixed ca lane with no args crashing (exit 2 now)."
-    },
-    {
-      "at": "2026-11-05T18:54:02.702Z",
-      "text": "Overruled onboard reviewer: setup stays planned without --yes or a TTY (no consent, no writes)."
-    },
-    {
-      "at": "2026-11-05T18:54:02.702Z",
-      "text": "Fixed mcp myself: answer in-flight requests before exiting on stdin end."
-    },
-    {
-      "at": "2026-11-05T18:54:02.702Z",
-      "text": "Fixed packaging myself: scripts/trust.mjs was not shipped (found by a real smoke lane)."
-    },
-    {
-      "at": "2026-11-05T18:54:02.702Z",
-      "text": "Verified for real: packed npm install, onboard --yes --smoke in a Cursor repo (exit 0), Claude Code client calling ca_doctor and ca_status over MCP."
-    }
+    { "at": "2026-11-06T13:30:00", "text": "Claude wrote the shared sprite player and tokens so both lanes animate and label states the same way." },
+    { "at": "2026-11-06T13:31:00", "text": "Worker stations get the role of the station (builder, artist, reviewer); assignment is sticky by lane id with an overflow list." },
+    { "at": "2026-11-06T13:32:00", "text": "Old SVG sprite system and its layout/motion/sprite checks are retired with Office v2." }
   ],
   "risks": [
-    "Sprite art quality from a text-only model; Claude judges the screenshots"
+    "GLM has no image input: Claude judges the screenshots against the mockups.",
+    "Snapshot diffs drive cues: first load and reconnect must not replay effects."
   ]
 }
