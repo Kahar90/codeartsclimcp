@@ -40,6 +40,12 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 .hit { position: absolute; pointer-events: auto; cursor: pointer; }
 #win { position: absolute; left: 0; top: 0; width: 320px; z-index: 10; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
 #win[hidden] { display: none; }
+#winTail { position: absolute; width: 10px; height: 10px; background: var(--panel); transform: rotate(45deg); }
+#winTail.t-left { border-left: 1px solid var(--border-2); border-bottom: 1px solid var(--border-2); }
+#winTail.t-right { border-top: 1px solid var(--border-2); border-right: 1px solid var(--border-2); }
+#winTail.t-up { border-left: 1px solid var(--border-2); border-top: 1px solid var(--border-2); }
+#winTail.t-down { border-bottom: 1px solid var(--border-2); border-right: 1px solid var(--border-2); }
+body.narrow #winTail { display: none; }
 #win [hidden] { display: none !important; }
 .win-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
 #winTitle { font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -47,6 +53,7 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 #winX { margin-left: auto; flex: none; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 12px var(--font); cursor: pointer; padding: 0; }
 #winBody { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
 #winMeta { color: var(--muted); }
+#winCont { color: var(--muted); font-size: 11px; }
 #winGoal { color: var(--fg); }
 #winNow { color: var(--muted); }
 #winSteps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
@@ -133,11 +140,13 @@ body.narrow #stagewrap { flex: none; }
       </div>
       <div id="winBody">
         <div id="winMeta"></div>
+        <div id="winCont" hidden></div>
         <div id="winGoal" hidden></div>
         <div id="winNow" hidden></div>
         <ul id="winSteps"></ul>
         <a id="winLink" hidden>Open in Lanes</a>
       </div>
+      <div id="winTail" aria-hidden="true"></div>
       <form id="winForm" hidden>
         <input id="winInput" placeholder="Steer this lane" aria-label="Steer this lane">
         <button id="winSend" type="submit">Send</button>
@@ -196,6 +205,7 @@ const DEMO_BASE = {
     init: { dn: 2, cur: 3, health: "waiting", running: false, result: "", verdict: "" } },
   "office-sprites": { phase: "build", model: "maas/glm-5.3", dur: 32, tokens: { input: 3900, output: 7100, reasoning: 1400 },
     texts: ["Sprite contract check", "Draw the five roles", "Polish the animations"],
+    runs: 2, continues: [{ id: "office-v2", task: "office-v2", reason: "paused for the atlas redraw", commits: "6/8", progress: { done: 6, total: 8 }, elapsed: "1h10m" }],
     init: { dn: 0, cur: 1, health: "waiting", running: false, result: "", verdict: "" } },
   "office-review": { phase: "review", model: "maas/glm-5.3", dur: 8, tokens: { input: 1700, output: 3200, reasoning: 700 },
     texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"],
@@ -286,6 +296,7 @@ function demoModel() {
       id, task: id, health: st.health, phase: b.phase, running: st.running,
       result: st.result, verdict: st.verdict,
       commits: st.dn + "/" + b.texts.length,
+      runs: b.runs || 0, continues: b.continues || [],
       models: { build: b.model }, tokens: b.tokens,
       progress: { done: st.dn, total: b.texts.length, current: st.cur ? { n: st.cur, text: b.texts[st.cur - 1] } : null },
       steps: mkSteps(b.texts, st.dn, st.cur),
@@ -674,6 +685,7 @@ function renderWinContent(keepInput) {
     $("winTitle").textContent = p.lead || "Lead";
     $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
     $("winMeta").textContent = "Orchestrator";
+    $("winCont").hidden = true;
     $("winGoal").hidden = !p.goal;
     $("winGoal").textContent = p.goal || "";
     $("winNow").hidden = !p.now;
@@ -691,6 +703,9 @@ function renderWinContent(keepInput) {
   $("winBadge").innerHTML = CAUI.badge(CAUI.status(l.health));
   const mm = l.models && (l.models.build || Object.values(l.models)[0]);
   $("winMeta").textContent = [mm ? CAUI.shortModel(mm) : "", pr.total ? pr.done + " / " + pr.total + " steps" : ""].filter(Boolean).join(" \u00b7 ");
+  const c0 = (l.continues || [])[0];
+  $("winCont").hidden = !c0;
+  if (c0) $("winCont").textContent = "Run " + (l.runs || l.continues.length + 1) + " \u00b7 continues " + (c0.task || c0.id) + " (paused at " + ((c0.progress && c0.progress.done) || 0) + "/" + ((c0.progress && c0.progress.total) || 0) + ")";
   $("winGoal").hidden = true;
   const cur = pr.current && pr.current.text;
   $("winNow").hidden = !cur;
@@ -718,44 +733,65 @@ async function fetchDetail(id) {
   } catch (e) { return c ? c.v : null; }
 }
 function positionWin() {
-  const win = $("win"), stage = $("stage");
+  const win = $("win"), stage = $("stage"), tail = $("winTail");
   if (narrow) { win.style.left = "12px"; win.style.top = "12px"; return; }
   const sw = stage.clientWidth, sh = stage.clientHeight;
   const w = win.offsetWidth, h = win.offsetHeight;
   const sr = stage.getBoundingClientRect();
   let a = { left: sw / 2 - 1, top: sh / 2 - 1, right: sw / 2 + 1, bottom: sh / 2 + 1, cx: sw / 2, cy: sh / 2 };
+  let anchorKey = null;
+  for (const key of STATION_KEYS) if ($("plate-" + key) === winAnchor) anchorKey = key;
   if (winAnchor && winAnchor.isConnected) {
     const ar = winAnchor.getBoundingClientRect();
     a = { left: ar.left - sr.left, top: ar.top - sr.top, right: ar.right - sr.left, bottom: ar.bottom - sr.top, cx: ar.left - sr.left + ar.width / 2, cy: ar.top - sr.top + ar.height / 2 };
   }
   const G = 10, I = 10;
   const cands = [
-    { x: a.right + G, y: a.cy - h / 2 },
-    { x: a.left - G - w, y: a.cy - h / 2 },
-    { x: a.cx - w / 2, y: a.bottom + G },
-    { x: a.cx - w / 2, y: a.top - G - h },
+    { side: "right", x: a.right + G, y: a.cy - h / 2 },
+    { side: "left", x: a.left - G - w, y: a.cy - h / 2 },
+    { side: "below", x: a.cx - w / 2, y: a.bottom + G },
+    { side: "above", x: a.cx - w / 2, y: a.top - G - h },
   ];
-  const inside = (c) => c.x >= I && c.y >= I && c.x + w <= sw - I && c.y + h <= sh - I;
-  let pick = cands.find(inside);
-  if (!pick) {
-    const plates = [...document.querySelectorAll("#plates .plate")].filter((p) => p !== winAnchor && p.getBoundingClientRect().width > 0).map((p) => {
-      const r = p.getBoundingClientRect();
-      return { x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height };
-    });
-    const overlap = (c) => {
-      let s = 0;
-      for (const p of plates) {
-        const ix = Math.min(c.x + w, p.x + p.w) - Math.max(c.x, p.x);
-        const iy = Math.min(c.y + h, p.y + p.h) - Math.max(c.y, p.y);
-        if (ix > 0 && iy > 0) s += ix * iy;
-      }
-      return s;
-    };
-    pick = cands.map((c) => ({ c, o: overlap(c) })).sort((p, q) => p.o - q.o)[0].c;
+  const boxes = [];
+  for (const key of STATION_KEYS) {
+    if (key === anchorKey) continue;
+    const plate = $("plate-" + key);
+    if (plate) {
+      const r = plate.getBoundingClientRect();
+      if (r.width > 0) boxes.push({ x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height });
+    }
+    const sp = sprites[key];
+    if (sp && sp.el.offsetWidth > 0) {
+      const r = sp.el.getBoundingClientRect();
+      boxes.push({ x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height });
+    }
   }
-  pick = { x: Math.min(Math.max(pick.x, I), Math.max(I, sw - I - w)), y: Math.min(Math.max(pick.y, I), Math.max(I, sh - I - h)) };
+  const overlap = (c) => {
+    let s = 0;
+    for (const b of boxes) {
+      const ix = Math.min(c.x + w, b.x + b.w) - Math.max(c.x, b.x);
+      const iy = Math.min(c.y + h, b.y + b.h) - Math.max(c.y, b.y);
+      if (ix > 0 && iy > 0) s += ix * iy;
+    }
+    return s;
+  };
+  const inside = (c) => c.x >= I && c.y >= I && c.x + w <= sw - I && c.y + h <= sh - I;
+  let pool = cands.filter(inside);
+  if (!pool.length) pool = cands;
+  const pick = pool.map((c) => ({ c, o: overlap(c) })).sort((p, q) => p.o - q.o)[0].c;
+  pick.x = Math.min(Math.max(pick.x, I), Math.max(I, sw - I - w));
+  pick.y = Math.min(Math.max(pick.y, I), Math.max(I, sh - I - h));
   win.style.left = pick.x + "px";
   win.style.top = pick.y + "px";
+  const T = 10;
+  tail.className = "t-" + (pick.side === "right" ? "left" : pick.side === "left" ? "right" : pick.side === "below" ? "up" : "down");
+  if (pick.side === "right" || pick.side === "left") {
+    tail.style.left = (pick.side === "right" ? -T / 2 - 1 : w - T / 2 - 1) + "px";
+    tail.style.top = Math.min(Math.max(a.cy - pick.y - T / 2, 6), Math.max(6, h - T - 6)) + "px";
+  } else {
+    tail.style.top = (pick.side === "below" ? -T / 2 - 1 : h - T / 2 - 1) + "px";
+    tail.style.left = Math.min(Math.max(a.cx - pick.x - T / 2, 6), Math.max(6, w - T - 6)) + "px";
+  }
 }
 function openWin(id, anchor, kb) {
   clearTimeout(winCloseTimer);

@@ -75,6 +75,7 @@ a{color:var(--run);text-decoration:none;cursor:pointer}
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cls = (h) => 'h-' + String(h || '').split('(')[0].trim().replace(/\s+/g, '-');
+const contLine = (l) => l.continues?.length ? `<div class="small">Run ${+(l.runs || l.continues.length + 1)} &middot; continues ${esc(l.continues[0].task || l.continues[0].id)} (paused at ${l.continues[0].progress?.done ?? 0}/${l.continues[0].progress?.total ?? 0})</div>` : '';
 const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new Date(t).getTime()) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : new Date(t).toLocaleDateString(); };
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -118,7 +119,7 @@ function renderSide() {
 function renderPlan(p) {
   const laneBox = (l) => `<div class="lane" data-go="lane/${esc(l.id)}">
       <div class="row"><span class="name">${l.running ? '<span class="pulse"></span>' : ''}${esc(l.task)}</span><span class="badge ${cls(l.health)}">${esc(l.health)}</span></div>
-      <div class="small">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
+      <div class="small">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>${contLine(l)}
       ${prog(l.progress, l.result)}<div class="small">${stepsLabel(l)}</div>${curLine(l)}
       ${l.plan?.why ? `<div class="small" style="margin-top:4px">${esc(l.plan.why)}</div>` : ''}
       ${l.plan?.files?.length ? `<div style="margin-top:4px">${l.plan.files.slice(0, 6).map((f) => `<span class="tag">${esc(f)}</span>`).join(' ')}</div>` : ''}</div>`;
@@ -164,6 +165,7 @@ function renderLane(d, keep) {
     ${plan ? `<div class="small"><a data-go="plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a></div>` : ''}
     <div class="row" style="justify-content:flex-start;gap:10px;margin-top:4px"><h2 class="title">${d.running ? '<span class="pulse"></span>' : ''}${esc(d.task)}</h2><span class="badge ${cls(d.health)}">${esc(d.health)}</span>${d.verdict ? `<span class="badge ${d.verdict === 'ready' ? 'h-done' : 'h-needs-review'}">review: ${esc(d.verdict)}</span>` : ''}</div>
     <div class="kv"><span>build <b>${esc(short(d.models?.build))}</b></span><span>review <b>${esc(short(d.models?.review))}</b></span><span>elapsed <b>${esc(d.elapsed)}</b></span><span>idle <b>${esc(d.idle)}</b></span><span>tokens <b>${t.input ?? 0}</b> in / <b>${t.output ?? 0}</b> out</span><span>steers <b>${d.steers.length}</b></span><span>interruptions <b>${d.interruptions.length}</b></span></div>
+    ${contLine(d)}
     <div class="small">${esc(d.repo)}</div>
     ${pipeline(d)}
     <div class="now"><b>${d.running ? 'Now:' : 'Result:'}</b><div style="min-width:0"><div>${d.running ? (d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : '') + esc(d.now) : esc(d.result) + (d.reason ? ' &middot; ' + esc(d.reason) : '')}</div>${tools}</div></div>
