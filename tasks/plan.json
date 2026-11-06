@@ -2,8 +2,8 @@
   "title": "Pixel Workshop redesign: Office and Lanes",
   "goal": "Redo the Office visualizer and the Lanes dashboard from the CodeArts Pixel Workshop kit: full-width pixel room with atlas sprites and a floating agent window, plus the plum Lanes shell, plan home and lane detail.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "Wave 2 running (office-v2b, lanes-v2b). Lead waits for them, then checks screenshots and merges.",
+  "status": "done",
+  "now": "Done: both surfaces merged, all checks green, deployed to the live skill.",
   "waves": [
     {
       "name": "Wave 1 · Surfaces",
@@ -77,14 +77,20 @@
     },
     {
       "text": "After merge: confirm both new pages render continues/runs, paused and continued labels via CAUI, and the /api/ui self-reload",
-      "done": false
+      "done": true
     },
     {
       "text": "Merge both lanes, rerun all checks on master",
-      "done": false
+      "done": true
     },
-    "Run checks and look at screenshots of both surfaces",
-    "Copy runner/ and checks/ to the live skill, update README and SKILL"
+    {
+      "text": "Run checks and look at screenshots of both surfaces",
+      "done": true
+    },
+    {
+      "text": "Copy runner/ and checks/ to the live skill, update README and SKILL",
+      "done": true
+    }
   ],
   "decisions": [
     {
@@ -118,6 +124,10 @@
     {
       "at": "2026-11-06T09:07:27.063Z",
       "text": "office-v2b: gates green; reviewer's 3 findings overruled (they contradict the lead's two steers: cover-fit stage, continuation line). Claude fixed the narrow stage height and its check."
+    },
+    {
+      "at": "2026-11-06T10:10:24.583Z",
+      "text": "Merged lanes-v2 and office-v2; post-merge: compact window step titles, folded lanes off the rail. 9 checks green; deployed."
     }
   ],
   "risks": [
