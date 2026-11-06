@@ -375,32 +375,52 @@ function buildNodes(m) {
 }
 
 function computeLayout() {
-  const w = $("stage").clientWidth || 800;
+  const stage = $("stage");
+  const w = stage.clientWidth || 800;
   const small = w < 700;
   const RX = small ? 92 : 148, RY = small ? 34 : 54;
   const CW = Math.round(RX * 1.15), CH = Math.round(CW * 1.25);
   const WALL = 14;
   const PLATE_Y = RY + WALL + 4, PLATE_H = small ? 22 : 26;
   const footOff = Math.round(RY * 0.3), feetFrac = 0.93;
-  const artRise = (186 - 22) / 200 * CH;
-  const artW = (150 - 15) / 160 * CW;
-  const colP = Math.max(RX * 2 + 24, artW + 24);
-  const rowP = artRise + PLATE_Y + PLATE_H + 10 - footOff;
+  const RISE_F = (186 - 22) / 200, HL_F = (80 - 15) / 160, HR_F = (150 - 80) / 160;
+  const artMin = small ? 45 : 90;
+  const boxMin = Math.max(small ? 52 : 105, Math.ceil((artMin + 3) / 0.77));
+  stage.style.height = "";
+  const baseH = stage.clientHeight || 420;
   const leadX = RX + 34, leadY = CH + RY + 26;
-  for (const n of nodes) {
-    if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
-    else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
+  let boxW = CW, scale = 1, H = baseH, colP = 0, rowP = 0, vb = null;
+  for (let i = 0; i < 6; i++) {
+    const boxH = boxW * CH / CW;
+    const rise = RISE_F * boxH, hl = HL_F * boxW, hr = HR_F * boxW;
+    rowP = rise + PLATE_Y + PLATE_H + Math.max(10, 12 / scale) - footOff;
+    colP = Math.max(RX * 2 + 24, hl + hr + Math.max(24, 10 / scale));
+    for (const n of nodes) {
+      if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
+      else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
+    }
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (const n of nodes) {
+      x0 = Math.min(x0, n.x - Math.max(RX, hl)); x1 = Math.max(x1, n.x + Math.max(RX, hr));
+      y0 = Math.min(y0, n.y + footOff - rise);
+      y1 = Math.max(y1, n.y + PLATE_Y + PLATE_H);
+    }
+    const pad = 28;
+    vb = { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
+    const fit = boxMin / CW;
+    const scaleW = w / vb.w;
+    H = scaleW >= fit ? Math.min(2400, Math.max(baseH, vb.h * fit)) : baseH;
+    const ns = Math.min(scaleW, H / vb.h);
+    const nb = Math.max(CW * ns, boxMin) / ns;
+    const settled = Math.abs(nb - boxW) < 0.5 && Math.abs(ns - scale) < 0.001;
+    scale = ns; boxW = nb;
+    if (settled) break;
   }
-  const artHL = (80 - 15) / 160 * CW, artHR = (150 - 80) / 160 * CW;
-  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-  for (const n of nodes) {
-    x0 = Math.min(x0, n.x - Math.max(RX, artHL)); x1 = Math.max(x1, n.x + Math.max(RX, artHR));
-    y0 = Math.min(y0, n.y + footOff - artRise);
-    y1 = Math.max(y1, n.y + PLATE_Y + PLATE_H);
-  }
-  const pad = 28;
-  return { small, RX, RY, CW, CH, WALL, PLATE_Y, PLATE_H, footOff, feetFrac, trunkX: leadX + colP / 2,
-    vb: { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 } };
+  const boxCW = Math.round(Math.max(CW * scale, boxMin));
+  const boxCH = Math.round(boxCW * CH / CW);
+  if (H > baseH) stage.style.height = Math.round(H) + "px";
+  return { small, RX, RY, CW, CH, WALL, PLATE_Y, PLATE_H, footOff, feetFrac, colP, rowP, boxCW, boxCH, scale,
+    trunkX: leadX + colP / 2, vb };
 }
 
 function plateName(t) { return t.length > 24 ? t.slice(0, 23) + "\u2026" : t; }
@@ -644,10 +664,10 @@ function createChar(n) {
 }
 
 function sizeChar(el) {
-  if (el.__cw !== layout.CW) {
-    el.__cw = layout.CW;
-    el.style.width = layout.CW + "px";
-    el.style.height = layout.CH + "px";
+  if (el.__cw !== layout.boxCW) {
+    el.__cw = layout.boxCW;
+    el.style.width = layout.boxCW + "px";
+    el.style.height = layout.boxCH + "px";
   }
 }
 
@@ -696,8 +716,8 @@ function sceneToClient(x, y) {
 function positionChar(n, el, r) {
   const rect = r || $("stage").getBoundingClientRect();
   const p = sceneToClient(n.x, n.y + layout.footOff);
-  const left = Math.round(p.x - rect.left - layout.CW / 2);
-  const top = Math.round(p.y - rect.top - layout.CH * layout.feetFrac);
+  const left = Math.round(p.x - rect.left - layout.boxCW / 2);
+  const top = Math.round(p.y - rect.top - layout.boxCH * layout.feetFrac);
   if (el.__left !== left) { el.__left = left; el.style.left = left + "px"; }
   if (el.__top !== top) { el.__top = top; el.style.top = top + "px"; }
 }
