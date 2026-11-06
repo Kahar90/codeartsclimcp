@@ -2,8 +2,8 @@
   "title": "Office view polish: sprites and layout",
   "goal": "Make the Office view polished and tasteful: isometric sprites, a done pose, merged lanes shown with their real results, and a layout that fits many lanes without clipping or overlap.",
   "lead": "Claude Opus 5.5",
-  "status": "done",
-  "now": "Done: office-layout merged (d6563b3), 8 checks pass on main, installed into the live skill.",
+  "status": "running",
+  "now": "think-watchdog lane is building; Claude verifies the check and a real long-thinking probe when it finishes.",
   "waves": [
     {
       "name": "Wave 1: layout",
@@ -11,6 +11,13 @@
         "office-layout"
       ],
       "note": "Sprite art, the done pose and the merged-lane fallback were done by Claude (visual work, commits 23e638e and cf51334)."
+    },
+    {
+      "name": "Wave 2: runner watchdog",
+      "lanes": [
+        "think-watchdog"
+      ],
+      "note": "Catch a builder that streams reasoning for many minutes with no tool call."
     }
   ],
   "lanes": [
@@ -21,6 +28,20 @@
       "why": "layout math with a geometric contract check (checks/layout.check.mjs)",
       "files": [
         "runner/office.html"
+      ]
+    },
+    {
+      "task": "think-watchdog",
+      "repo": "../ca-office-wt-think-watchdog",
+      "model": "maas/glm-5.3",
+      "why": "runner state + watchdog + health; contract in checks/think.check.mjs",
+      "files": [
+        "runner/watchdog.mjs",
+        "runner/ca.mjs",
+        "runner/office.html",
+        "runner/dash.html",
+        "README.md",
+        "docs/workflow.md"
       ]
     }
   ],
@@ -45,7 +66,11 @@
       "text": "Merge into main, copy into the live skill, remove the worktree",
       "done": true
     },
-    "Next candidate: runner watchdog for long thinking with no tool calls"
+    {
+      "text": "Write checks/think.check.mjs before the brief",
+      "done": true
+    },
+    "Read the think-watchdog summary, run all checks, merge, install"
   ],
   "decisions": [
     {
