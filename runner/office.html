@@ -73,6 +73,21 @@ body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 #lamp { position: absolute; left: calc(650 / 1280 * 100%); top: calc(120 / 720 * 100%); width: calc(230 / 1280 * 100%); height: calc(170 / 720 * 100%); transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(ellipse at center, rgba(255, 220, 150, 0.2), rgba(255, 220, 150, 0.07) 45%, transparent 70%); animation: lamp 4s ease-in-out infinite; }
 @keyframes lamp { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 body.no-motion #lamp { display: none; }
+#stlist { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 20px; background: var(--bg); }
+#stlist[hidden] { display: none; }
+.st-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--border-2); border-radius: 8px; font: 12px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: left; }
+.st-row .st-name { font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-row .st-sub { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.st-row.st-lead { border-left-color: var(--lead); }
+.st-row.st-builder { border-left-color: var(--builder); }
+.st-row.st-artist { border-left-color: var(--artist); }
+.st-row.st-reviewer { border-left-color: var(--reviewer); }
+body.narrow .plate { display: none !important; }
+body.narrow #links { display: none; }
+body.narrow #overflow { display: none; }
+body.narrow #win:not([hidden]) { display: flex; flex-direction: column; width: calc(100% - 24px); max-height: min(55vh, calc(100% - 24px)); }
+body.narrow .win-head, body.narrow #winForm, body.narrow #winErr { flex: none; }
+body.narrow #winBody { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 body.narrow { height: auto; min-height: 100%; overflow-y: auto; }
 body.narrow #stagewrap { flex: none; }
 </style>
@@ -130,6 +145,7 @@ body.narrow #stagewrap { flex: none; }
     </div>
   </div>
 </main>
+<div id="stlist" hidden></div>
 <script src="/assets/workshop.js"></script>
 <script>
 "use strict";
@@ -169,7 +185,7 @@ async function loadScene() {
 }
 
 let plansArr = [], lanesArr = [], planSel = null, plansSig = "";
-let model = null, fetchErr = "", k = 1;
+let model = null, fetchErr = "", k = 1, narrow = false;
 const detailCache = new Map();
 
 const DEMO_T0 = Date.now();
@@ -331,7 +347,9 @@ function liveModel() {
 function sizeStage() {
   const wrap = $("stagewrap"), stage = $("stage");
   const w = wrap.clientWidth || 1, h = wrap.clientHeight || 1;
-  const sw = Math.max(1, Math.min(w, h * STAGE_W / STAGE_H));
+  narrow = w < 700;
+  document.body.classList.toggle("narrow", narrow);
+  const sw = narrow ? w : Math.max(1, Math.min(w, h * STAGE_W / STAGE_H));
   stage.style.width = sw + "px";
   stage.style.height = (sw * STAGE_H / STAGE_W) + "px";
   k = sw / STAGE_W;
@@ -372,6 +390,7 @@ function render() {
   assignStations();
   renderStations();
   renderOverflow();
+  renderNarrowList();
   fireCues(cues);
   updateWin();
 }
@@ -426,6 +445,7 @@ const stationLane = { builder: null, artist: null, reviewer: null };
 const laneStation = new Map();
 const sprites = {};
 const ovBtns = new Map();
+const stRows = new Map();
 const winHooks = { open: () => {}, close: () => {} };
 let assignedOnce = false, prevPlanId = null, prevRunning = new Map();
 
@@ -569,6 +589,39 @@ function renderOverflow() {
   const have = [...box.querySelectorAll(".ov-row")].map((b) => b.dataset.lane).join(",");
   if (want !== have) for (const l of rest) box.appendChild(ovBtns.get(l.id));
 }
+function renderNarrowList() {
+  const box = $("stlist");
+  if (!narrow || !model) { if (!box.hidden) box.hidden = true; return; }
+  box.hidden = false;
+  const want = [{ id: "lead", name: model.plan.lead || "Lead", sub: "Orchestrator", cls: "st-lead" }];
+  for (const stKey of WORKER_STATIONS) {
+    const id = stationLane[stKey];
+    const l = id && model.lanes.find((x) => x.id === id);
+    if (l) want.push({ id: l.id, name: laneName(l), sub: stationSub(l), cls: "st-" + stKey });
+  }
+  for (const l of model.lanes) if (!laneStation.has(l.id)) want.push({ id: l.id, name: laneName(l), sub: stationSub(l), cls: "st-ov" });
+  for (const [id, b] of [...stRows]) if (!want.some((r) => r.id === id)) { b.remove(); stRows.delete(id); }
+  for (const r of want) {
+    let b = stRows.get(r.id);
+    if (!b) {
+      b = document.createElement("button");
+      b.type = "button";
+      b.className = "st-row";
+      b.dataset.lane = r.id;
+      b.setAttribute("aria-controls", "win");
+      b.setAttribute("aria-expanded", "false");
+      b.innerHTML = '<span class="st-name"></span><span class="st-sub"></span>';
+      b.addEventListener("click", (ev) => winHooks.open(r.id, b, ev.detail === 0));
+      stRows.set(r.id, b);
+    }
+    if (b.className !== "st-row " + r.cls) b.className = "st-row " + r.cls;
+    b.querySelector(".st-name").textContent = r.name;
+    b.querySelector(".st-sub").textContent = r.sub;
+  }
+  const sig = want.map((r) => r.id).join(",");
+  const have = [...box.querySelectorAll(".st-row")].map((b) => b.dataset.lane).join(",");
+  if (sig !== have) for (const r of want) box.appendChild(stRows.get(r.id));
+}
 async function initSprites() {
   try { await PixelSprites.load(); } catch (e) {}
   for (const key of STATION_KEYS) {
@@ -665,6 +718,7 @@ async function fetchDetail(id) {
 }
 function positionWin() {
   const win = $("win"), stage = $("stage");
+  if (narrow) { win.style.left = "12px"; win.style.top = "12px"; return; }
   const sw = stage.clientWidth, sh = stage.clientHeight;
   const w = win.offsetWidth, h = win.offsetHeight;
   const sr = stage.getBoundingClientRect();
@@ -734,6 +788,10 @@ function closeWin(toFocus) {
   if (toFocus && anchor && anchor.isConnected) anchor.focus();
 }
 function focusFallback() {
+  if (narrow) {
+    const row = stRows.get("lead");
+    if (row) { row.focus(); return; }
+  }
   const box = $("overflow");
   const first = box.hidden ? null : box.querySelector(".ov-row");
   if (first) first.focus();
@@ -750,6 +808,10 @@ function updateWin() {
 }
 winHooks.open = (id, anchor, kb) => {
   if (winFor === id && !$("win").hidden) { closeWin(false); return; }
+  if (narrow) {
+    const row = stRows.get(id);
+    if (row) anchor = row;
+  }
   openWin(id, anchor, kb);
 };
 winHooks.close = () => closeWin(false);
@@ -868,12 +930,12 @@ function fireCues(cues) {
     if (c.type === "receive") {
       recordEffect("receive", c.id);
       if (sprites.lead) sprites.lead.play("receive");
-      firePacket(stKey);
+      if (!narrow) firePacket(stKey);
       const sp = sprites[stKey];
       if (sp) setTimeout(() => { if (laneStation.get(c.id) === stKey) sp.play("receive"); }, 600);
     } else if (c.type === "step") {
       recordEffect("step", c.id);
-      fireCheck(stKey);
+      if (!narrow) fireCheck(stKey);
     } else if (c.type === "complete") {
       recordEffect("complete", c.id);
       const sp = sprites[stKey];
@@ -907,7 +969,7 @@ PixelSprites.onMotion(syncMotionBtn);
 syncMotionBtn();
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
-new ResizeObserver(() => { sizeStage(); layoutStations(); }).observe($("stagewrap"));
+new ResizeObserver(() => { sizeStage(); layoutStations(); renderNarrowList(); }).observe($("stagewrap"));
 (async () => {
   await loadScene();
   STAGE_W = SCENE.stage[0]; STAGE_H = SCENE.stage[1];
