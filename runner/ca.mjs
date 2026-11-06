@@ -1059,7 +1059,6 @@ function cmdDash(args) {
     try {
       if (u.pathname === '/') { let html = page; try { html = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8'); } catch {} res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); }
       if (u.pathname === '/office') { let html = ''; try { html = fs.readFileSync(path.join(HERE, 'office.html'), 'utf8'); } catch {} if (html) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); } }
-      if (u.pathname === '/office-sprites.js') { try { const js = fs.readFileSync(path.join(HERE, 'office-sprites.js'), 'utf8'); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }); return res.end(js); } catch { return json({ error: 'office-sprites.js not found' }, 404); } }
       if (u.pathname.startsWith('/assets/')) {
         // Static Pixel Workshop assets (room art, atlases, manifests, shared css/js). No traversal, known types only.
         const types = { '.png': 'image/png', '.json': 'application/json', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
