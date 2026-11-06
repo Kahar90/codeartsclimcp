@@ -2,8 +2,8 @@
   "title": "Office view polish: sprites and layout",
   "goal": "Make the Office view polished and tasteful: isometric sprites, a done pose, merged lanes shown with their real results, and a layout that fits many lanes without clipping or overlap.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "think-watchdog lane is building; Claude verifies the check and a real long-thinking probe when it finishes.",
+  "status": "done",
+  "now": "Done: think-watchdog merged; real probe (THINK_S=60) aborted at 1m01s, nudged, lane finished DONE.",
   "waves": [
     {
       "name": "Wave 1: layout",
@@ -70,7 +70,10 @@
       "text": "Write checks/think.check.mjs before the brief",
       "done": true
     },
-    "Read the think-watchdog summary, run all checks, merge, install"
+    {
+      "text": "Read the think-watchdog summary, run all checks, merge, install",
+      "done": true
+    }
   ],
   "decisions": [
     {
@@ -88,6 +91,10 @@
     {
       "at": "2026-11-06T04:23:05.656Z",
       "text": "Merged office-layout: ready, 0 fix rounds; overruled nothing (reviewer noted larger minimum sprite box, needed by the check)."
+    },
+    {
+      "at": "2026-11-06T06:21:07.918Z",
+      "text": "Merged think-watchdog (ready). Hardened the reviewer minor finding myself: unannounced deltas no longer count as answer text."
     }
   ],
   "risks": [
