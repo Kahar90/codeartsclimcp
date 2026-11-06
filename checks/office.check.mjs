@@ -50,8 +50,19 @@ try {
     check('stage is full width at 1280x800', Math.abs(s.stage.w - 1280) <= 1, `${s.stage.w}x${s.stage.h}`);
     check('stage aspect is 16:9', Math.abs(s.stage.w / s.stage.h - 16 / 9) < 0.01, (s.stage.w / s.stage.h).toFixed(3));
     check('demo has the goal line', typeof s.goal === 'string' && s.goal.length > 10);
+    check('demo=1 has the three scene lanes', s.lanes.map((l) => l.id).join(',') === 'office-scene,office-sprites,office-review', s.lanes.map((l) => l.id).join(','));
+    check('reviewer lane starts running', s.lanes.find((l) => l.id === 'office-review')?.running === true);
+    check('builder lane starts waiting', s.lanes.find((l) => l.id === 'office-scene')?.running === false);
   }
   await shot('1-scene');
+  await wait(1300); s = await st();
+  check('timeline assignment makes the builder lane run', s.lanes.find((l) => l.id === 'office-scene')?.running === true);
+  await send('Page.navigate', { url: base + '/office?demo=done' }); await wait(1500); s = await st();
+  check('demo=done: every lane done', s && s.lanes.length === 3 && s.lanes.every((l) => l.result === 'done' && l.done === l.total), s && s.lanes.map((l) => `${l.id}:${l.result}`).join(','));
+  await send('Page.navigate', { url: base + '/office?demo=big' }); await wait(1500); s = await st();
+  check('demo=big has 8 lanes', s && s.lanes.length === 8, s && String(s.lanes.length));
+  await send('Page.navigate', { url: base + '/office?demo=1&still=1' }); await wait(2600); s = await st();
+  check('still=1 keeps the builder lane waiting', s && s.lanes.find((l) => l.id === 'office-scene')?.running === false);
   await send('Page.navigate', { url: base + '/office' }); await wait(2500); s = await st();
   check('live mode renders from the runner API', s && s.mode === 'live', s && s.mode);
   await shot('6-live');
