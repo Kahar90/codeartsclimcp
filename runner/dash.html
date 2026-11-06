@@ -183,6 +183,7 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 /* ---------- motion ---------- */
 @keyframes rowflash { 0% { background: var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel) } 100% { background: transparent; box-shadow: none } }
 .flash { animation: rowflash 1.6s ease-out 1 }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none } }
 
 /* ---------- narrow ---------- */
 @media (max-width: 1024px) { .grid21 { grid-template-columns: 1fr } }
@@ -238,8 +239,10 @@ const short = (m) => String(m || '').replace(/^huaweicloud-maas\//, 'codearts/')
 
 // ---------- demo fixture (?demo=1): one fetch-layer swap used for every /api call ----------
 const DEMO = new URLSearchParams(location.search).has('demo');
+const DEMO_ADV = DEMO && new URLSearchParams(location.search).has('advance'); // check hook: office-layout step 1 finishes 6 s after load
 const DEMO_T0 = Date.now();
 const dIso = (m) => new Date(DEMO_T0 - m * 60000).toISOString();
+const dAdv = () => DEMO_ADV && Date.now() - DEMO_T0 > 6000;
 const dClock = (i) => { const t = new Date(DEMO_T0 + i * 1500); return [t.getHours(), t.getMinutes(), t.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); };
 const D_REPO = 'D:\\Coding\\demo-repo';
 const D_HASHES = ['e3f1c2a', 'b7d94ce', 'c5a83f1', 'd9274ab', 'a6b5e90'];
@@ -277,8 +280,8 @@ const D_REVIEW_CHAOS = '## Review\n\nVerdict: needs fixes\n\nThe layout work lan
 const D_SUMMARY_CHAOS = '## Summary\n\nReworked the Lanes dashboard as Pixel Workshop Lanes: plum shell, persistent plans rail, plan homescreen with full-width waves and a full-page lane detail.\n\nKept every route, data call and action. The demo fixture renders both routes without real lanes; steer, stop and open TUI answer through the same handlers.';
 function demoLanes() {
   return [
-    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: '0/7', now: 'Thinking', tokens: { input: 52764, output: 202 }, session: 's-7011', startedAt: DEMO_T0 - 231000,
-      progress: { done: 0, total: 7, current: { n: 1, text: D_STEPS_LAYOUT[0] } }, tools: [{ tool: 'edit', input: 'runner/dash.html', since: DEMO_T0 - 9000 }] }),
+    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', tokens: { input: 52764, output: 202 }, session: 's-7011', startedAt: DEMO_T0 - 231000,
+      progress: dAdv() ? { done: 1, total: 7, current: { n: 2, text: D_STEPS_LAYOUT[1] } } : { done: 0, total: 7, current: { n: 1, text: D_STEPS_LAYOUT[0] } }, tools: [{ tool: 'edit', input: 'runner/dash.html', since: DEMO_T0 - 9000 }] }),
     dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', tokens: { input: 21014, output: 5302 }, session: 's-7012', startedAt: DEMO_T0 - 437000,
       progress: { done: 2, total: 4, current: { n: 3, text: D_STEPS_STRINGS[2] } } }),
     dLane('demo-repo--path-join', 'path-join', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', tokens: { input: 12050, output: 3211 }, finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
@@ -323,7 +326,7 @@ function demoDetail(id) {
   if (!l) return { error: `no lane matches "${id}"` };
   const base = { ...l, steps: [], commits: [], todos: [], files: [], gates: [], interruptions: [], steers: [], permissions: [], outside: [], errors: [], phases: [l.phase], checks: [], brief: '', review: '', summary: '', config: { stall: 240, think: 480 } };
   const sets = {
-    'demo-repo--office-layout': { steps: dSteps(D_STEPS_LAYOUT, 0, 1), todos: [{ status: 'in_progress', text: 'Render the CURRENT STEP band with chips' }, { status: 'pending', text: 'Wire the step disclosure' }], files: ['runner/dash.html', 'checks/lanes.check.mjs'], checks: D_CHECKS_FULL,
+    'demo-repo--office-layout': { steps: dSteps(D_STEPS_LAYOUT, dAdv() ? 1 : 0, dAdv() ? 2 : 1), todos: [{ status: 'in_progress', text: 'Render the CURRENT STEP band with chips' }, { status: 'pending', text: 'Wire the step disclosure' }], files: ['runner/dash.html', 'checks/lanes.check.mjs'], checks: D_CHECKS_FULL,
       brief: dBrief('office-layout', 'Rework `runner/dash.html` so waves render full width, the step disclosure never navigates and the check harness can screenshot both routes from `?demo=1` fixture data.', D_STEPS_LAYOUT, D_CHECKS_FULL) },
     'demo-repo--string-utils': { steps: dSteps(D_STEPS_STRINGS, 2, 3), files: ['runner/sandbox.mjs'], checks: ['node checks/sandbox.check.mjs'],
       commits: [{ hash: 'e3f1c2a', subject: 'step 1 string templates' }, { hash: 'b7d94ce', subject: 'step 2 path joins' }],
@@ -462,6 +465,7 @@ const stepsOpen = new Map(); // laneId -> true (step disclosure on the plan home
 const stepsCache = new Map(); // laneId -> steps[] from the lane detail, fetched on first open
 const stepOpen = new Set(); // "laneId:stepN" keys for expanded truncated step rows
 const ctxOpen = new Map(); // laneId -> Set of lane-context section keys ('gates'|'files'|'steer')
+const prevSteps = new Map(); // laneId -> Map(step n -> state) from the previous render, for the step-done flash
 
 // ---------- sprites: placeholders in the markup, mounted after every render ----------
 const spriteMap = new Map(); // spot key -> PixelSprites handle
@@ -595,7 +599,9 @@ function renderLane(d, keep) {
   const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed))}${metric('Idle', na(d.idle))}${metric('Tokens', tokens)}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
   const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
   const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(d.result || st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
-  const stepRow = (s) => { const key = `${d.id}:${s.n}`, x = stepOpen.has(key); return `<div class="steprow s-${s.state}${x ? ' x' : ''}" data-step="${esc(key)}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</div>`; };
+  const prevSt = prevSteps.get(d.id);
+  const justDone = (s) => !!(prevSt && prevSt.get(s.n) && prevSt.get(s.n) !== 'done' && s.state === 'done' && (window.PixelSprites?.motion() ?? true));
+  const stepRow = (s) => { const key = `${d.id}:${s.n}`, x = stepOpen.has(key); return `<div class="steprow s-${s.state}${x ? ' x' : ''}${justDone(s) ? ' flash' : ''}" data-step="${esc(key)}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</div>`; };
   const steps = d.steps.length ? d.steps.map(stepRow).join('') : '<div class="small">The brief has no numbered steps.</div>';
   const extraCommits = d.commits.filter((c) => !d.steps.some((s) => s.commit === c.hash));
   const todos = d.todos.length ? `<h4 style="margin-top:14px">Worker's own todo list</h4><ul class="plain">${d.todos.map((x) => `<li class="st-${x.status === 'completed' ? 'done' : x.status === 'in_progress' ? 'current' : 'pending'}"><span class="ic">${x.status === 'completed' ? '&#10003;' : x.status === 'in_progress' ? '&#9654;' : '&#9675;'}</span><span style="min-width:0">${esc(x.text)}</span></li>`).join('')}</ul>` : '';
@@ -717,6 +723,7 @@ function renderLane(d, keep) {
   };
   if (keep) $('view').scrollTop = vtop;
   if (hadFocus) msgEl.focus();
+  prevSteps.set(d.id, new Map(d.steps.map((s) => [s.n, s.state])));
   mountSprites();
 }
 // Re-render the lane view without losing typed steering text, scroll or the transcript.
