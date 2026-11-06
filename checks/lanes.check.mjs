@@ -37,7 +37,24 @@ try {
   const text = await ev('document.body.innerText');
   check('demo fixture renders the first plan', /Office view polish: sprites and layout/.test(text || ''));
   check('demo counts render', /2 plans/.test(text || ''), (text || '').split('\n')[0]);
+  const railJ = JSON.parse(await ev('(function(){return JSON.stringify({plans:document.querySelectorAll("#railBody .rail-card").length,fin:document.querySelectorAll("#railBody .rail-fin").length});})()') || '{}');
+  check('rail lists 2 plans and 5 finished lanes', railJ.plans === 2 && railJ.fin === 5, JSON.stringify(railJ));
+  const laneHref = await ev('document.querySelector(".lane-name")?.getAttribute("href")');
+  check('lane card links to the lane route', laneHref === '#/lane/demo-repo--office-layout', String(laneHref));
+  check('plan home renders one wave', (await ev('document.querySelectorAll(".wave").length')) === 1);
+  check('wave spans the full content width', (await ev('(function(){const w=document.querySelector(".wave"),p=document.querySelector(".pad"),cs=getComputedStyle(p);return w.offsetWidth===p.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);})()')) === true);
+  const cur = await ev('document.querySelector(".curband")?.innerText || ""');
+  check('current step band shows step 1 of 7', /current step 1\/7/i.test(cur) && /Demo fixture/.test(cur), cur.slice(0, 90));
+  check('current step band shows file chips', (await ev('document.querySelectorAll(".curband .chip").length')) === 2);
+  check('lead and lane sprites mounted', (await ev('document.querySelectorAll(".px-sprite:not(.px-fallback)").length')) === 2);
+  check('decisions log lists entries', (await ev('document.querySelectorAll(".dec li").length')) === 3);
+  check('no horizontal overflow on the plan home', (await ev('document.documentElement.scrollWidth <= document.documentElement.clientWidth')) === true);
   await shot('lanes-home');
+  const hash0 = await ev('location.hash');
+  const pt = JSON.parse(await ev('(function(){const b=document.querySelector("[data-steps]");if(!b)return "{}";const r=b.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()') || '{}');
+  if (pt.x != null) { await click(pt.x, pt.y); await wait(400); }
+  const opened = JSON.parse(await ev('(function(){const b=document.querySelector("[data-steps]");return JSON.stringify({hash:location.hash,open:b?b.getAttribute("aria-expanded"):"",items:document.querySelectorAll(".steplist li").length});})()') || '{}');
+  check('step disclosure opens without route change', opened.hash === hash0 && opened.open === 'true' && opened.items === 7, JSON.stringify(opened));
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
