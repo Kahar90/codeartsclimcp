@@ -443,7 +443,12 @@ async function api(path, opts) {
   return r.json();
 }
 
-let plans = [], lanes = [], detail = null, route = { kind: '', id: '' }, tab = 'log', logPos = 0, logLane = null;
+let plans = [], lanes = [], detail = null, route = { kind: '', id: '' }, tab = 'log';
+const tstate = new Map(); // laneId -> {html, pos, rendered, follow, top, atBottom} transcript state
+const drafts = new Map(); // laneId -> steer text typed so far
+const evScroll = new Map(); // "laneId:tab" -> evidence scroll top
+let inFlight = null; // {what, laneId} while a steer/stop/attach POST runs
+const tget = (id) => { let s = tstate.get(id); if (!s) { s = { html: '', pos: 0, rendered: 0, follow: true, top: 0, atBottom: true }; tstate.set(id, s); } return s; };
 
 function prog(p, res) {
   const t = p?.total || 0, d = p?.done || 0; const pct = t ? Math.round((100 * d) / t) : 0;
@@ -580,6 +585,8 @@ function pipeline(d) {
   return `<div class="pipe">${st.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="true"' : ''}>${esc(n)}</span>`).join('')}</div>`;
 }
 function renderLane(d, keep) {
+  const vtop = keep ? $('view')?.scrollTop : 0;
+  const hadFocus = keep && document.activeElement?.id === 'msg';
   const t = d.tokens || {}; const plan = plans.find((p) => p.waves.some((w) => w.lanes.some((l) => l.id === d.id)));
   const st = CAUI.status(d.health, d.result);
   const na = (v) => (v == null || v === '' || v === '-') ? 'n/a' : esc(v);
@@ -615,9 +622,20 @@ function renderLane(d, keep) {
         ${ctx('steer', 'Steering and incidents', `${evts.length}`, evtsBody)}
       </div>
     </div>
-    <div class="tabs">${[['log', 'Transcript'], ['review', 'Review'], ['summary', 'Summary'], ['brief', 'Brief']].map(([k, n]) => `<span class="tab ${tab === k ? 'on' : ''}" data-tab="${k}">${n}</span>`).join('')}<span style="flex:1"></span>${tab === 'log' ? '<label class="small" style="align-self:center"><input type="checkbox" id="follow" checked> follow</label>' : ''}</div>
-    <pre class="out" id="out"></pre></div>
-    <div id="bar"><input id="msg" placeholder="Steer the builder: queued into its session within 2 s" ${d.running ? '' : 'disabled'}><button id="send" ${d.running ? '' : 'disabled'}>Steer</button><button id="attach" ${d.running ? '' : 'disabled'} title="Open the CodeArts TUI on this session in a new window">Open TUI</button><button id="stop" class="danger" ${d.running ? '' : 'disabled'}>Stop</button></div>`;
+    <div class="evidence">
+      <div class="tabstrip" role="tablist" aria-label="Evidence">
+        ${[['log', 'Transcript'], ['review', 'Review'], ['summary', 'Summary'], ['brief', 'Brief']].map(([k, n]) => `<button type="button" class="etab" role="tab" id="etab-${k}" data-tab="${k}" aria-selected="${tab === k}" tabindex="${tab === k ? 0 : -1}">${n}</button>`).join('')}
+        ${tab === 'log' ? `<label class="follow"><input type="checkbox" id="follow" ${tget(d.id).follow ? 'checked' : ''}>Follow live</label>` : ''}
+      </div>
+      <pre class="ebody" id="out" tabindex="0"></pre>
+    </div></div>
+    <div id="bar">
+      <input id="msg" placeholder="Steer the builder: queued into its session within 2 s" autocomplete="off">
+      <button id="send" class="btn primary">Steer</button>
+      <span id="steerErr" role="alert"></span>
+      <button id="attach" class="btn" title="Open the CodeArts TUI on this session in a new window">Open TUI</button>
+      <button id="stop" class="btn danger">Stop</button>
+    </div>`;
   for (const r of $('view').querySelectorAll('[data-step]')) r.onclick = () => { const k = r.dataset.step; if (stepOpen.has(k)) { stepOpen.delete(k); r.classList.remove('x'); } else { stepOpen.add(k); r.classList.add('x'); } };
   for (const b of $('view').querySelectorAll('[data-ctx]')) b.onclick = () => {
     const set = ctxOpen.get(d.id) || new Set(); const k = b.dataset.ctx;
@@ -625,24 +643,90 @@ function renderLane(d, keep) {
     b.setAttribute('aria-expanded', set.has(k));
     const body = b.parentElement.querySelector('.ctxbody'); if (body) body.style.display = set.has(k) ? '' : 'none';
   };
-  for (const c of $('view').querySelectorAll('[data-tab]')) c.onclick = () => { tab = c.dataset.tab; logPos = 0; renderLane(detail); };
-  if (tab === 'log') { if (!keep) { logPos = 0; logLane = d.id; pollLog(); } } else $('out').textContent = (tab === 'review' ? d.review : tab === 'summary' ? d.summary : d.brief) || '(nothing yet)';
-  $('send').onclick = async () => { const text = $('msg').value.trim(); if (!text) return; const r = await post('steer', { text }); if (r.ok) $('msg').value = ''; else alert(r.error); };
-  $('msg').onkeydown = (e) => { if (e.key === 'Enter') $('send').click(); };
-  $('stop').onclick = async () => { if (confirm(`Stop lane ${d.task}?`)) await post('stop'); };
-  $('attach').onclick = async () => { const r = await post('attach'); if (!r.ok) alert(r.error); };
+  const stt = tget(d.id), out = $('out'), msgEl = $('msg'), errEl = $('steerErr');
+  if (tab === 'log') {
+    out.innerHTML = stt.html; stt.rendered = stt.html.length;
+    out.scrollTop = stt.follow ? out.scrollHeight : stt.top;
+    if (stt.follow) { stt.top = out.scrollTop; stt.atBottom = true; }
+    if (!keep) pollLog();
+  } else {
+    out.textContent = (tab === 'review' ? d.review : tab === 'summary' ? d.summary : d.brief) || '(nothing yet)';
+    out.scrollTop = evScroll.get(`${d.id}:${tab}`) ?? 0;
+  }
+  out.onscroll = () => {
+    const atB = out.scrollTop + out.clientHeight >= out.scrollHeight - 2;
+    evScroll.set(`${d.id}:${tab}`, out.scrollTop);
+    if (tab === 'log') { stt.top = out.scrollTop; stt.atBottom = atB; if (!atB && stt.follow) { stt.follow = false; const f = $('follow'); if (f) f.checked = false; } }
+  };
+  const f = $('follow');
+  if (f) f.onchange = () => { stt.follow = f.checked; stt.atBottom = f.checked; if (f.checked) { out.scrollTop = out.scrollHeight; stt.top = out.scrollTop; } };
+  const strip = $('view').querySelector('.tabstrip');
+  strip.onkeydown = (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const ts = [...strip.querySelectorAll('.etab')];
+    const i = ts.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+    const n = (i + (e.key === 'ArrowRight' ? 1 : ts.length - 1)) % ts.length;
+    switchTab(ts[n].dataset.tab);
+    $(`etab-${ts[n].dataset.tab}`)?.focus();
+  };
+  for (const c of $('view').querySelectorAll('[data-tab]')) c.onclick = () => switchTab(c.dataset.tab);
+  msgEl.value = drafts.get(d.id) || '';
+  msgEl.oninput = () => drafts.set(d.id, msgEl.value);
+  msgEl.onkeydown = (e) => { if (e.key === 'Enter') $('send').click(); };
+  const busy = !!inFlight && inFlight.laneId === d.id;
+  $('send').disabled = busy;
+  $('stop').disabled = busy || !d.running;
+  $('attach').disabled = busy || !d.running;
+  const restoreButtons = () => { const dd = detail && detail.id === d.id ? detail : d; $('send').disabled = false; $('stop').disabled = !dd.running; $('attach').disabled = !dd.running; };
+  $('send').onclick = async () => {
+    const text = msgEl.value.trim(); if (!text) return;
+    const id = d.id;
+    inFlight = { what: 'steer', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
+    errEl.textContent = '';
+    let r; try { r = await post('steer', { text }); } catch { r = { error: 'request failed' }; }
+    inFlight = null;
+    if (route.kind === 'lane' && route.id === id) {
+      if (r.ok) { if (msgEl.value.trim() === text) { msgEl.value = ''; drafts.delete(id); } }
+      else errEl.textContent = r.error || 'steer failed';
+      restoreButtons();
+    }
+  };
+  $('stop').onclick = async () => {
+    if (!confirm(`Stop lane ${d.task}?`)) return;
+    const id = d.id;
+    inFlight = { what: 'stop', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
+    errEl.textContent = '';
+    let r; try { r = await post('stop'); } catch { r = { error: 'request failed' }; }
+    inFlight = null;
+    if (route.kind === 'lane' && route.id === id) {
+      if (!r.ok) { errEl.textContent = r.error || 'stop failed'; restoreButtons(); }
+      else refresh(true);
+    }
+  };
+  $('attach').onclick = async () => {
+    const id = d.id;
+    inFlight = { what: 'attach', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
+    errEl.textContent = '';
+    let r; try { r = await post('attach'); } catch { r = { error: 'request failed' }; }
+    inFlight = null;
+    if (route.kind === 'lane' && route.id === id) {
+      if (!r.ok) errEl.textContent = r.error || 'could not open the TUI';
+      restoreButtons();
+    }
+  };
+  if (keep) $('view').scrollTop = vtop;
+  if (hadFocus) msgEl.focus();
   mountSprites();
 }
 // Re-render the lane view without losing typed steering text, scroll or the transcript.
-function patchLane(d) {
-  const msg = $('msg')?.value, focus = document.activeElement?.id === 'msg', out = $('out'), outHTML = out?.innerHTML, top = out?.scrollTop, vtop = $('view').scrollTop;
-  const follow = $('follow')?.checked ?? true;
-  renderLane(d, true);
-  if (tab === 'log' && outHTML != null) { $('out').innerHTML = outHTML; logPos = savedPos; $('out').scrollTop = top; }
-  if ($('follow')) $('follow').checked = follow;
-  if (msg) $('msg').value = msg; if (focus) $('msg').focus(); $('view').scrollTop = vtop;
+function patchLane(d) { renderLane(d, true); }
+function switchTab(k) {
+  if (k === tab) return;
+  const out = $('out'); if (out) evScroll.set(`${route.id}:${tab}`, out.scrollTop);
+  tab = k;
+  if (detail) renderLane(detail, true);
 }
-let savedPos = 0;
 function lineClass(l) {
   if (/^\d\d:\d\d:\d\d ==/.test(l)) return 'sys';
   if (/^\d\d:\d\d:\d\d >> |^ {9}» /.test(l)) return 'steer';
@@ -651,17 +735,22 @@ function lineClass(l) {
   if (/^\d\d:\d\d:\d\d +~ /.test(l)) return 'think';
   return '';
 }
+const renderLine = (l) => { const c = lineClass(l); return c ? `<span class="${c}">${esc(l)}</span>` : esc(l); };
 async function pollLog() {
-  if (route.kind !== 'lane' || tab !== 'log' || !$('out')) return; const id = route.id;
+  if (route.kind !== 'lane') return;
+  const id = route.id, stt = tget(id);
   try {
-    const r = await api(`/api/lane/${encodeURIComponent(id)}/log?from=${logPos}`);
-    if (id !== route.id || tab !== 'log' || !$('out')) return;
-    if (r.reset || logPos === 0) $('out').innerHTML = '';
-    if (r.text) {
-      $('out').insertAdjacentHTML('beforeend', r.text.split('\n').map((l) => { const c = lineClass(l); return c ? `<span class="${c}">${esc(l)}</span>` : esc(l); }).join('\n'));
-      if ($('follow')?.checked) $('out').scrollTop = $('out').scrollHeight;
+    const r = await api(`/api/lane/${encodeURIComponent(id)}/log?from=${stt.pos}`);
+    if (id !== route.id) return;
+    if (r.reset || stt.pos === 0) { stt.html = ''; stt.rendered = 0; const o = $('out'); if (o && tab === 'log') o.innerHTML = ''; }
+    if (r.text) stt.html += r.text.split('\n').map(renderLine).join('\n');
+    stt.pos = r.size;
+    const out = $('out');
+    if (out && tab === 'log') {
+      if (stt.rendered > stt.html.length) { out.innerHTML = ''; stt.rendered = 0; }
+      if (stt.rendered < stt.html.length) { out.insertAdjacentHTML('beforeend', stt.html.slice(stt.rendered)); stt.rendered = stt.html.length; }
+      if (stt.follow) { out.scrollTop = out.scrollHeight; stt.top = out.scrollTop; stt.atBottom = true; }
     }
-    logPos = savedPos = r.size;
   } catch {}
 }
 async function post(what, body) { return api(`/api/lane/${encodeURIComponent(route.id)}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); }
