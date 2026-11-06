@@ -21,6 +21,7 @@ main{flex:1;display:grid;grid-template-columns:300px 1fr;min-height:0}
 .name{font-weight:600;word-break:break-all}
 .badge{font-size:11px;font-weight:600;padding:1px 7px;border-radius:10px;border:1px solid currentColor;white-space:nowrap}
 .h-running,.h-running-tool{color:var(--run)}.h-quiet,.h-thinking,.h-needs-review,.h-stopped,.h-killed,.h-attention,.h-partial{color:var(--warn)}
+.h-paused{color:var(--warn)}.h-continued{color:var(--mute)}
 .h-STALLED,.h-DEAD,.h-failed{color:var(--bad)}.h-done{color:var(--ok)}.h-planned{color:var(--mute)}
 .pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--run);margin-right:6px;animation:p 1.2s infinite;vertical-align:1px}@keyframes p{50%{opacity:.25}}
 .prog{height:5px;background:var(--bar);border-radius:3px;overflow:hidden;margin:6px 0 3px}.prog>i{display:block;height:100%;background:var(--run)}.prog.ok>i{background:var(--ok)}.prog.bad>i{background:var(--bad)}
