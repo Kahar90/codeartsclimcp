@@ -100,7 +100,10 @@ body.narrow #overflow { display: none; }
 body.narrow #win:not([hidden]) { display: flex; flex-direction: column; width: calc(100% - 24px); max-height: min(55vh, calc(100% - 24px)); }
 body.narrow .win-head, body.narrow #winForm, body.narrow #winErr { flex: none; }
 body.narrow #winBody { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
-body.narrow { height: auto; min-height: 100%; overflow-y: auto; }
+body.narrow { height: auto; min-height: 100%; overflow-y: auto; scrollbar-width: none; }
+body.narrow::-webkit-scrollbar { display: none; }
+html.narrow { scrollbar-width: none; }
+html.narrow::-webkit-scrollbar { display: none; }
 body.narrow #stagewrap { flex: none; }
 </style>
 </head>
@@ -367,6 +370,7 @@ function sizeStage() {
   const wrap = $("stagewrap"), stage = $("stage");
   narrow = (wrap.clientWidth || 1) < 700;
   document.body.classList.toggle("narrow", narrow);
+  document.documentElement.classList.toggle("narrow", narrow);
   const w = wrap.clientWidth || 1;
   let h;
   if (narrow) {
@@ -1015,13 +1019,49 @@ syncMotionUi();
 window.__office = {
   state() {
     const r = $("stage").getBoundingClientRect();
+    const win = $("win");
+    const wr = win.getBoundingClientRect();
+    const stations = STATION_KEYS.map((key) => {
+      const f = SCENE.stations[key].foot;
+      const plate = $("plate-" + key).getBoundingClientRect();
+      const sp = sprites[key];
+      const id = key === "lead" ? "lead" : stationLane[key];
+      const l = id && id !== "lead" && model ? model.lanes.find((x) => x.id === id) : null;
+      const st = key === "lead" ? (model ? CAUI.status(planStatus(model.plan, model.lanes)) : { key: "idle" }) : l ? CAUI.status(l.health) : { key: "idle" };
+      return {
+        station: key, role: key, laneId: id || null,
+        name: key === "lead" ? ((model && model.plan.lead) || "Lead") : (l ? laneName(l) : ""),
+        status: st.key,
+        clip: sp ? sp.clip : "",
+        frame: sp && sp.el && sp.el.dataset.frame !== undefined ? Number(sp.el.dataset.frame) : null,
+        foot: { x: r.x + ox + f[0] * k, y: r.y + oy + f[1] * k },
+        plate: { x: plate.x, y: plate.y, w: plate.width, h: plate.height },
+        done: l && l.progress ? (l.progress.done || 0) : 0,
+        total: l && l.progress ? (l.progress.total || 0) : 0,
+      };
+    });
     return {
       mode,
       plan: (model && model.plan && model.plan.title) || "",
       goal: (model && model.plan && model.plan.goal) || "",
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
+      stations,
+      overflow: model ? model.lanes.filter((l) => !laneStation.has(l.id)).map((l) => l.id) : [],
+      window: { open: !win.hidden && !!winFor, laneId: winFor, x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement) },
+      effects: effects.slice(),
+      motion: PixelSprites.motion(),
       lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 })),
     };
+  },
+  press(id) {
+    if (!model) return false;
+    if (id === "lead") { winHooks.open("lead", narrow ? (stRows.get("lead") || null) : $("plate-lead"), false); return true; }
+    if (!model.lanes.some((l) => l.id === id)) return false;
+    let anchor = null;
+    for (const stKey of WORKER_STATIONS) if (stationLane[stKey] === id) anchor = $("plate-" + stKey);
+    if (!anchor) anchor = ovBtns.get(id) || stRows.get(id) || null;
+    winHooks.open(id, anchor, false);
+    return true;
   },
   demoAdvance,
   demoFail,
