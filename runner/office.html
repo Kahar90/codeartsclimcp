@@ -391,10 +391,11 @@ function computeLayout() {
     if (n.kind === "lead") { n.x = leadX; n.y = leadY; }
     else { n.x = leadX + colP * (n.wave + 1); n.y = leadY + rowP * n.row; }
   }
+  const artHL = (80 - 15) / 160 * CW, artHR = (150 - 80) / 160 * CW;
   let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
   for (const n of nodes) {
-    x0 = Math.min(x0, n.x - RX); x1 = Math.max(x1, n.x + RX);
-    y0 = Math.min(y0, n.y + footOff - CH * feetFrac);
+    x0 = Math.min(x0, n.x - Math.max(RX, artHL)); x1 = Math.max(x1, n.x + Math.max(RX, artHR));
+    y0 = Math.min(y0, n.y + footOff - artRise);
     y1 = Math.max(y1, n.y + PLATE_Y + PLATE_H);
   }
   const pad = 28;
