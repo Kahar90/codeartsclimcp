@@ -38,6 +38,13 @@ summaries, not transcripts.
   resume), DEAD (supervisor gone, `ca_stop` cleans up), done, needs review, failed, stopped.
 - Steering: `ca_steer {lane, message}` for clarifications, scope cuts, "also do X". A real change
   of direction: `ca_stop`, edit the brief, start again.
+- Stuck turn: `ca_kick {lane, mode, message}` (turn retries the turn, fresh starts a clean
+  session, server restarts the codearts server, now skips a backoff wait). Ended lane:
+  `ca_resume {lane, note}` continues a paused, failed, stopped or DEAD lane in place, applying
+  the note first. The human can do both from the dashboard.
+- Token counters: each lane tracks its tokens per agent (build, review, other sessions) and per
+  model; `ca_status`, `ca_summary` and the plan views carry them, so cost is visible per lane
+  and per plan.
 
 ## 5. Judge and verify
 - Exit codes / results: 0 done (review ready), 4 needs review, 1 failed or stopped,

@@ -50,6 +50,15 @@ box to steer a lane mid-run.
 
 ![The Lanes view: plan, waves, current step and decisions](docs/images/lanes.png)
 
+## Controls and tokens
+
+From the dashboard, or with `ca kick` and `ca resume`, anyone watching can act on a lane without
+the lead: **kick** a stuck turn (retry the turn, start a fresh session, restart the CodeArts
+server or skip a backoff wait), and **resume** a paused, failed, stopped or DEAD lane where it
+left off, with an optional note the worker applies first. Every view also shows what the lane
+spent: token totals per agent (builder, reviewer, other sessions) and per model, per lane and
+summed per plan.
+
 ## Why it is safe to leave running
 
 - **Checked, not trusted:** your test commands are run by the runner itself when the agent

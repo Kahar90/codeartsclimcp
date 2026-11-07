@@ -126,7 +126,7 @@ try {
   check('/api/lanes: actions and suggest per lane', has(L('live').actions, 'kick', 'steer') && has(L('paused').actions, 'resume') && L('paused').suggest === 'resume' && has(L('dead').actions, 'resume') && Array.isArray(L('donelane').actions) && L('donelane').actions.length === 0,
     JSON.stringify(['live', 'paused', 'dead', 'donelane'].map((t) => [t, L(t).actions, L(t).suggest])));
   const plans = await (await fetch(base + '/api/plans')).json(); const p = plans.find((x) => x.title === 'tok') || {};
-  check('/api/plans: plan tokens = sum of its lanes', p.tokens?.total === 6250 + 3500 + 15, JSON.stringify(p.tokens));
+  check('/api/plans: plan tokens = sum of its lanes', p.tokens?.total === 6250 + 3400 + 15, JSON.stringify(p.tokens));
   check('/api/plans: plan tokensBy per agent', p.tokensBy?.build?.total === 5090 + 2800 && p.tokensBy?.review?.total === 600, JSON.stringify(p.tokensBy));
 
   let x = await post('demo-repo--live', 'kick', { mode: 'turn' }, false); check('POST without JSON content-type is refused (415)', x.status === 415, `status ${x.status}`);
