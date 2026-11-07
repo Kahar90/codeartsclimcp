@@ -65,8 +65,11 @@ lane spent: token totals per agent (builder, reviewer, other sessions) and per m
 included when its harness reports it), per lane and summed per plan.
 
 The **Control room** (the Lanes home) groups every lane from every project into Needs you,
-Running, Done and Ended, with the reason, a one-click fix, project filters, a freshness label,
-the count in the tab title and optional browser notifications.
+Running, Done and Ended, with the reason, how long ago it happened, a one-click fix, project
+filters, a freshness label, the count in the tab title and optional browser notifications.
+Nothing leaves Needs you by itself: every row has its own decision (Resume, Kick, Mark handled),
+and lanes that have waited more than 2 days collect in an **Older than 2 days** group with one
+**Mark all handled** button (`ca ack --stale` from a terminal). Reopen brings a lane back.
 
 ## Why it is safe to leave running
 

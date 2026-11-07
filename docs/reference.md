@@ -25,6 +25,7 @@
 | `ca kick <lane> [--fresh|--server|--now] [msg]` | unstick a turn: retry it, start a fresh session, restart the CodeArts server, or skip a backoff wait |
 | `ca resume <lane> [--note t]` | continue a paused, failed, stopped or DEAD lane in place (detached) |
 | `ca ack <lane> [--note t] [--undo]` | mark a finished lane seen; a failed or paused one you dealt with becomes "handled" |
+| `ca ack --stale [--older-than 48h] [--dry-run] [--note t]` | mark every finished Needs-you lane older than that handled (the dashboard's Mark all handled); running lanes are never touched |
 | `ca lead-tokens [--session f | --set m ...]` | record the lead's own token use on the plan |
 | `ca update [--dry-run]` | reinstall the latest version and refresh every harness config |
 | `ca uninstall [--harness h] [--keys] [--dry-run]` | remove exactly what setup added (and the keys with `--keys`) |

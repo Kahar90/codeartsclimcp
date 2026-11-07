@@ -50,7 +50,9 @@ summaries, not transcripts.
   the note first. The human can do both from the dashboard.
 - Handled: after you deal with a failed, paused or needs-review lane yourself (merged it, took it
   over, dropped it), `ca_ack {lane, note}` moves it out of the human's "Needs you" list into
-  Ended with your note. It comes back if the lane runs and ends again.
+  Ended with your note. It comes back if the lane runs and ends again. Old leftovers from earlier
+  sessions: `ca_ack {stale: true, note}` handles every finished Needs-you lane older than 48 h
+  (`older_than_h` to change it); tell the human which ones.
 - Tokens of the lead: Claude Code leads run `ca lead-tokens` once per plan (reads the session
   transcript live); other harnesses report with `ca_lead_tokens` or `leadTokens` in plan.json.
   Unknown usage shows as "not reported", never as 0.
