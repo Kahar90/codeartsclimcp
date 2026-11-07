@@ -1458,8 +1458,16 @@ function planGoal(text, task) {
 function withPlanLock(planFile, fn) {
   const lock = `${planFile}.lock`; fs.mkdirSync(path.dirname(lock), { recursive: true });
   let fd = null; const t0 = now();
-  while (fd === null && now() - t0 < 5000) {
-    try { fd = fs.openSync(lock, 'wx'); } catch (e) { if (e.code !== 'EEXIST') throw e; const t = now() + 50; while (now() < t); }
+  // A plan edit takes milliseconds: wait up to 30 s, take over a lock older than 20 s (a crashed holder),
+  // and never edit without the lock, so two lanes starting together cannot lose each other's lane.
+  while (fd === null) {
+    try { fd = fs.openSync(lock, 'wx'); } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let age = 0; try { age = now() - fs.statSync(lock).mtimeMs; } catch {}
+      if (age > 20000) { try { fs.rmSync(lock, { force: true }); } catch {} continue; }
+      if (now() - t0 > 30000) throw new Error(`plan file is locked by another lane (${lock})`);
+      const t = now() + 50; while (now() < t);
+    }
   }
   try { return fn(); }
   finally { if (fd !== null) { try { fs.closeSync(fd); } catch {} try { fs.rmSync(lock, { force: true }); } catch {} } }
@@ -1474,7 +1482,8 @@ function ensurePlan(repo, task, briefText) {
   const rel = (path.relative(main, repo) || '.').split(path.sep).join('/') || '.';
   const goal = planGoal(briefText, task);
   // A file that exists but cannot be parsed is left untouched (never overwritten): warn, do not stop the lane.
-  if (fs.existsSync(planFile) && readJSON(planFile) === null) throw new Error(`tasks/plan.json is not valid JSON; the lane runs without a plan`);
+  const raw = fs.existsSync(planFile) ? readJSON(planFile) : undefined;
+  if (raw !== undefined && (raw === null || typeof raw !== 'object' || Array.isArray(raw))) throw new Error(`tasks/plan.json is not a JSON object; fix it (the lane runs, but is not in a plan)`);
   const existing = readJSON(planFile);
   if (existing && !planClosed(existing) && planListsLane(existing, main, repo, task)) { registerPlan(planFile); return planFile; }
   return withPlanLock(planFile, () => {
