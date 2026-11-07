@@ -60,6 +60,35 @@ function upsertBlock(text, body) {
   return (head ? head + '\n\n' : '') + block;
 }
 
+// A TOML table header line, if the line is one, returns the (trimmed) header name.
+const tomlHeader = (line) => { const m = line.match(/^\s*\[([^\]]+)\]/); return m ? m[1].trim() : null; };
+const isCodeartsTable = (name) => name === 'mcp_servers.codearts' || name.startsWith('mcp_servers.codearts.');
+
+// Replace (or append) the [mcp_servers.codearts] table and every [mcp_servers.codearts.*]
+// sub-table, keeping all other content byte for byte. Each table runs until the next header
+// that is not one of them.
+function upsertCodexToml(text, block) {
+  const lines = text.split('\n');
+  const kept = [];
+  let i = 0;
+  while (i < lines.length) {
+    const name = tomlHeader(lines[i]);
+    if (name && isCodeartsTable(name)) {
+      i++;
+      while (i < lines.length) {
+        const sub = tomlHeader(lines[i]);
+        if (sub) { if (isCodeartsTable(sub)) { i++; continue; } break; }
+        i++;
+      }
+      continue;
+    }
+    kept.push(lines[i]);
+    i++;
+  }
+  const body = kept.join('\n').replace(/\s+$/, '');
+  return (body ? body + '\n\n' : '') + block;
+}
+
 // Read-only lanes tools that are safe to auto-approve: they never start or change a lane.
 const AUTO_APPROVE = ['ca_doctor', 'ca_status', 'ca_summary', 'ca_tail', 'ca_wait'];
 
@@ -161,20 +190,15 @@ function buildPlan(harness, repo, flags) {
 
   if (harness === 'codex') {
     // Codex asks before every MCP tool call: pre-approve the read-only tools (same set as Kiro).
-    const toml = `[mcp_servers.codearts]\ncommand = "node"\nargs = [${tomlStr(CA_MJS)}, "mcp"]\n`
+    const block = `[mcp_servers.codearts]\ncommand = "node"\nargs = [${tomlStr(CA_MJS)}, "mcp"]\n`
       + AUTO_APPROVE.map((t) => `\n[mcp_servers.codearts.tools.${t}]\napproval_mode = "approve"\n`).join('');
-    const config = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml');
-    if (flags.write && !flags.dryRun) {
-      const existing = readText(config);
-      const content = existing.includes('[mcp_servers.codearts]')
-        ? existing
-        : existing + (existing && !existing.endsWith('\n') ? '\n' : '') + toml;
-      plan.push({ path: config, content });
-      notes.push(`codex: MCP server written to ${config}`);
-    } else {
-      notes.push(`codex: MCP server for ${config}. Add this block:\n${toml}`);
-    }
-    plan.push({ path: path.join(repo, 'AGENTS.md'), content: upsertBlock(readText(path.join(repo, 'AGENTS.md')), WORKFLOW) });
+    // The MCP server is machine-wide: always written to config.toml, with or without --write.
+    const codexHome = process.env.CODEX_HOME || path.join(home(), '.codex');
+    const config = path.join(codexHome, 'config.toml');
+    plan.push({ path: config, content: upsertCodexToml(readText(config), block) });
+    notes.push(`codex: MCP server in ${config}`);
+    const agents = flags.user ? path.join(codexHome, 'AGENTS.md') : path.join(repo, 'AGENTS.md');
+    plan.push({ path: agents, content: upsertBlock(readText(agents), WORKFLOW) });
   }
 
   if (harness === 'opencode') {
