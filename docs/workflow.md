@@ -55,7 +55,11 @@ summaries, not transcripts.
 
 ## 5. Judge and verify
 - Exit codes / results: 0 done (review ready), 4 needs review, 1 failed or stopped,
-  2 usage or unknown lane, 3 missing credentials, 124 wait timeout.
+  2 usage or unknown lane, 3 keys missing or rejected (ask the human to run `ca auth`; never ask
+  for keys in chat), 5 paused at the time limit (`ca_resume` continues it), 124 still running.
+  `ca_wait` returns a `next` hint for each.
+- Rate limits, network drops and a crowded model are waited out by the runner; a lane that shows
+  `rate limited`, `offline` or `queued` needs nothing from you.
 - `ca_summary {lane}`: commits, gates, fix rounds, interruptions, steering, outside-repo access,
   reviewer findings and VERDICT. Open `ca_tail` only when the summary points at a problem.
 - Judge reviewer findings against the brief and the steering; overrule ones that contradict
@@ -65,8 +69,10 @@ summaries, not transcripts.
   run it as a new lane. Fix one-liners yourself.
 - Merge worktree lanes into main yourself, run the checks on main, remove the worktree.
 
-## 6. Report
+## 6. Report and close
 What was built, commits, checks and in-app results, verdicts and what you overruled, open items.
+If you registered a plan, close it when the work is done or a wave will not run: `ca_plan_close
+{id, reason}` (never-started lanes become Dropped). Never leave a plan open.
 
 ## Rules
 - Never commit secrets, CLI configs or lane logs (`tasks/*.lane/`, `tasks/*.lane.log`).

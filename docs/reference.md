@@ -22,16 +22,24 @@
 | `ca plan list`, `ca plan close [id] [--reason t]`, `ca plan rm <id>` | plan state from real lanes; close marks never-started lanes Dropped; rm unregisters |
 | `ca workflow` | print the lead workflow (`docs/workflow.md`) |
 | `ca mcp` | MCP stdio server |
+| `ca kick <lane> [--fresh|--server|--now] [msg]` | unstick a turn: retry it, start a fresh session, restart the CodeArts server, or skip a backoff wait |
+| `ca resume <lane> [--note t]` | continue a paused, failed, stopped or DEAD lane in place (detached) |
+| `ca ack <lane> [--note t] [--undo]` | mark a finished lane seen; a failed or paused one you dealt with becomes "handled" |
+| `ca lead-tokens [--session f | --set m ...]` | record the lead's own token use on the plan |
+| `ca update [--dry-run]` | reinstall the latest version and refresh every harness config |
+| `ca uninstall [--harness h] [--keys] [--dry-run]` | remove exactly what setup added (and the keys with `--keys`) |
 | `ca gc` | forget lanes finished more than 3 days ago |
 
 MCP tools: `ca_doctor`, `ca_init`, `ca_lane_start`, `ca_status`, `ca_wait`, `ca_summary`,
-`ca_tail`, `ca_steer`, `ca_stop`, `ca_plan`, `ca_note`, plus the prompt `codearts_build` (the
-lead workflow in [workflow.md](workflow.md)).
+`ca_tail`, `ca_steer`, `ca_stop`, `ca_kick`, `ca_resume`, `ca_ack`, `ca_plan`, `ca_plan_list`,
+`ca_plan_close`, `ca_note`, `ca_lead_tokens`, `ca_gc`, plus the prompt `codearts_build` (the lead
+workflow in [workflow.md](workflow.md)). Read-only tools carry `readOnlyHint`, so clients can
+auto-approve them; `ca_wait` returns every result (including 3 keys and 5 paused) with a `next` hint.
 
 ## Exit codes
 
 `0` done (review ready or skipped), `1` failed / stopped / killed, `2` usage or unknown lane,
-`3` missing credentials, `4` needs review, `5` paused at LANE_TIMEOUT (`ca lane <repo> <task>
+`3` keys missing or rejected (the summary names which: run `ca auth --force`), `4` needs review, `5` paused at LANE_TIMEOUT (`ca lane <repo> <task>
 --resume`), `124` wait timeout. Lanes and `ca wait` also print a machine-readable line:
 `CA_RESULT {"lane":..,"result":..,"verdict":..,"exit":..,"summaryPath":..}`.
 
@@ -42,7 +50,8 @@ lead workflow in [workflow.md](workflow.md)).
 | running / running tool | working, events in the last minute | nothing |
 | quiet | no events for 60 s (normal model gaps are 5 to 15 s) | wait |
 | STALLED | silent past STALL_S (240 s) or one tool over 900 s | nothing: the watchdog aborts and resumes |
-| DEAD | supervisor process gone | `ca stop <lane>` cleans up, then rerun |
+| rate limited / offline / queued | waiting out a model rate limit (RATE_WAIT_S, 30 min budget), a network drop (NET_WAIT_S) or a free model slot (CA_MAX_LANES_PER_MODEL) | nothing: it continues by itself |
+| DEAD | supervisor process gone | `ca resume <lane>` continues it, or `ca stop <lane>` cleans up |
 | done / needs review / failed / stopped | finished | `ca summary <lane>` |
 
 ## Models
@@ -73,4 +82,5 @@ Run `ca doctor`; every failing row has a fix line. Common ones:
 
 Env knobs: `BUILD_MODEL`, `REVIEW_MODEL`, `STALL_S`, `TOOL_STALL_S`, `THINK_S`, `MAX_RETRIES`,
 `MAX_FIXES`, `CHECK_TIMEOUT`, `LANE_TIMEOUT`, `NO_REVIEW=1`, `CA_DASH=0`, `CA_DASH_PORT`,
-`CA_REGISTRY`, `CA_CREDENTIALS`.
+`CA_REGISTRY`, `CA_CREDENTIALS`, `RATE_WAIT_S` (1800), `RATE_BACKOFF_S` (45), `NET_WAIT_S` (1800),
+`CA_MAX_LANES_PER_MODEL` (e.g. `maas/glm-5.3=2,default=4`, `off`), `CA_DASH_HOSTS` (extra dashboard hosts for a proxy).
