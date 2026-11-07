@@ -124,6 +124,16 @@ export function readCreds() {
   return v;
 }
 
+// Read the keys from one file, with no cache and no migration, for checks and tools that hold an
+// explicit path. v2 (dpapi) is decrypted, anything else is returned as is, unreadable gives {}.
+export function readCredsAt(file) {
+  let v;
+  try { v = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch { return {}; }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  if (v.v === 2 && v.protection === 'dpapi' && v.keys && typeof v.keys === 'object') return unprotect(v.keys) || {};
+  return v;
+}
+
 function saveCreds(values) {
   const cur = readCreds();
   const saved = [];

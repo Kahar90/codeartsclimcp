@@ -6,6 +6,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readCredsAt } from '../runner/auth.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-auth-'));
@@ -20,7 +21,7 @@ await new Promise((r) => fakeMaas.listen(0, '127.0.0.1', r));
 const env = { ...process.env, CA_CREDENTIALS: cred, CA_DASH: '0', MAAS_BASE_URL: `http://127.0.0.1:${fakeMaas.address().port}/openai/v1` };
 const ca = (args, input = '') => { const r = spawnSync(process.execPath, [CA, 'auth', ...args], { env, encoding: 'utf8', input, timeout: 30000 }); return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }; };
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 200) : ''}`);
-const rd = () => { try { return JSON.parse(fs.readFileSync(cred, 'utf8')); } catch { return null; } };
+const rd = () => readCredsAt(cred);
 
 let r = ca(['--stdin'], 'export CODEARTS_CLI_AK=ak-111\nCODEARTS_CLI_SK="sk-222"\nOTHER=x\n');
 check('--stdin saves KEY=VALUE lines, ignores unknown keys', r.code === 0 && rd()?.CODEARTS_CLI_AK === 'ak-111' && rd()?.CODEARTS_CLI_SK === 'sk-222' && !('OTHER' in rd()), r.out);

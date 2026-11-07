@@ -8,6 +8,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readCredsAt } from '../runner/auth.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-authfast-'));
@@ -57,7 +58,7 @@ const run = (args, input = '') => new Promise((res) => {
   setTimeout(() => p.kill(), 30000);
 });
 fs.writeFileSync(cred, JSON.stringify({ CODEARTS_CLI_AK: 'seed-ak', CODEARTS_CLI_SK: 'seed-sk' }));
-const rd = () => { try { return JSON.parse(fs.readFileSync(cred, 'utf8')); } catch { return {}; } };
+const rd = () => readCredsAt(cred);
 let r = await run(['auth', '--stdin'], 'MAAS_API_KEY=bad-key\n');
 check('--stdin with a rejected MaaS key: not saved, exit 1', r.code === 1 && !rd().MAAS_API_KEY, `${r.code} ${r.out}`);
 check('rejected MaaS key: message says rejected, never prints the value', /rejected/i.test(r.out) && !/bad-key/.test(r.out), r.out);
