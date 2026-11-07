@@ -155,6 +155,8 @@ try {
 const src = fs.readFileSync(CA, 'utf8');
 check('runner imports tokens.mjs and controls.mjs', /from '\.\/tokens\.mjs'/.test(src) && /from '\.\/controls\.mjs'/.test(src));
 check('runner consumes the KICK file in the supervisor', /'KICK'/.test(src) && /kick/i.test(src));
+// Found on a real lane: resume after a stop ended at once because the old STOP file was still there.
+check('a new run clears the STOP file of the previous run', /rmSync\(path\.join\(dir, 'STOP'\)/.test(src));
 check('runner reads resume-note.txt on resume', /resume-note\.txt/.test(src));
 check('step-finish tokens are counted once per part', /step-finish/.test(src) && /counted|seenStep|stepSeen/.test(src));
 check('summary keeps "tokens in X out Y" for laneFromLog', /tokens in \$\{/.test(src));
