@@ -8,6 +8,7 @@
 <style>
 html, body { height: 100%; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; display: flex; flex-direction: column; overflow: hidden; }
 .runstrip { flex: none; height: 38px; padding: 0 20px; display: flex; align-items: center; gap: 14px; font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; background: var(--bg); border-bottom: 1px solid var(--border); }
 body.narrow .runstrip { height: auto; min-height: 38px; flex-wrap: wrap; align-content: center; white-space: normal; overflow: visible; padding: 7px 12px; row-gap: 5px; }
@@ -386,6 +387,11 @@ const DEMO_CROWD_BASE = {
     texts: ["Profile the render loop", "Trim the sprite atlas", "Cache the scene JSON", "Debounce the resize", "Verdict and notes", "Perf check green"],
     init: { dn: 6, cur: 0, health: "done", running: false, result: "done", verdict: "ready" } },
 };
+const DEMO_KINDS = {
+  "office-scene": "code", "office-sprites": "art", "office-review": "review",
+  "cli-dx": "code", mcp: "review", setup: "docs", onboard: "code",
+  "office-motion": "art", "docs-site": "docs", "perf-pass": "code",
+};
 const DEMO_SET = demoBig ? DEMO_BIG_BASE : demoCrowd ? DEMO_CROWD_BASE : DEMO_BASE;
 const DEMO_STUCK_INIT = {
   "office-scene": { dn: 2, cur: 3, health: "STALLED", running: true, result: "", verdict: "" },
@@ -469,7 +475,7 @@ function demoModel() {
     const tp = tokParts(b.by);
     const ctl = demoControlsFor(st);
     return {
-      id, task: id, health: st.health, phase: b.phase, running: st.running,
+      id, task: id, kind: DEMO_KINDS[id] || "code", health: st.health, phase: b.phase, running: st.running,
       result: st.result, verdict: st.verdict,
       commits: st.dn + "/" + b.texts.length,
       runs: b.runs || 0, continues: b.continues || [],
@@ -1626,7 +1632,7 @@ window.__office = {
       const l = id && id !== "lead" && model ? model.lanes.find((x) => x.id === id) : null;
       const st = key === "lead" ? (model ? CAUI.status(planStatus(model.plan, model.lanes)) : { key: "idle" }) : l ? CAUI.status(l.health) : { key: "idle" };
       return {
-        station: key, role: key, laneId: id || null,
+        station: key, role: key, kind: l ? laneKind(l) : null, laneId: id || null,
         name: key === "lead" ? leadName(model && model.plan) : (l ? laneName(l) : ""),
         status: st.key,
         clip: sp ? sp.clip : "",
@@ -1651,7 +1657,7 @@ window.__office = {
       const st = CAUI.status(l.health);
       const desk = desks[hd.key];
       return {
-        station: hd.key, role: hd.role, laneId: id, name: laneName(l),
+        station: hd.key, role: sp ? sp.role : hd.role, kind: laneKind(l), laneId: id, name: laneName(l),
         status: st.key,
         clip: sp ? sp.clip : "",
         frame: sp && sp.el && sp.el.dataset.frame !== undefined ? Number(sp.el.dataset.frame) : null,
@@ -1661,6 +1667,8 @@ window.__office = {
         total: l.progress ? (l.progress.total || 0) : 0,
         tokens: CAUI.tokenTotal(l.tokens),
         suggest: l.suggest || "",
+        prop: hotProp[hd.key] || hd.prop,
+        deskImage: desk ? desk.style.backgroundImage.replace(/^url\(["']?/, "").replace(/["']?\)$/, "") : "",
         desk: !!desk && desk.style.display !== "none",
       };
     }).filter(Boolean);
@@ -1677,7 +1685,7 @@ window.__office = {
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
       stations: allStations,
       overflow: (() => { const ids = model ? model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).map((l) => l.id) : []; return { count: ids.length, ids, open: ovOpen }; })(),
-      window: { open: !win.hidden && !!winFor, laneId: winFor, x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement), tokens: winTk, actions: [...$("winBtns").children].map((b) => b.dataset.action), suggest: (winLane && winLane.suggest) || "", noteOpen: !$("winNote").hidden },
+      window: { open: !win.hidden && !!winFor, laneId: winFor, kind: winFor === "lead" ? null : (winLane ? laneKind(winLane) : null), x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement), tokens: winTk, actions: [...$("winBtns").children].map((b) => b.dataset.action), suggest: (winLane && winLane.suggest) || "", noteOpen: !$("winNote").hidden },
       effects: effects.slice(),
       motion: PixelSprites.motion(),
       lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 })),
