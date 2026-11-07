@@ -132,6 +132,15 @@ ul.plain li:first-child { border-top: 0 }
 .tokrow .tk-bar > i { display: block; height: 100%; background: var(--run) }
 .tokrow .tk-bar > i.review { background: var(--sel) }
 .tokrow .tk-bar > i.other { background: var(--amber) }
+.modeltable { display: grid; gap: 7px; margin-top: 4px }
+.mtrow { display: grid; grid-template-columns: minmax(0, 1.4fr) 62px minmax(72px, auto) minmax(0, 1.6fr); align-items: baseline; gap: 10px; font-size: 12.5px }
+.mtrow.mt-h { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .04em }
+.mt-model { color: var(--fg); font: 12px var(--mono); overflow-wrap: anywhere; min-width: 0 }
+.mt-who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted) }
+.mt-who.lead { color: var(--lead, var(--run)); font-weight: 700 }
+.mt-n { font: 12px var(--mono); color: var(--fg); text-align: right; white-space: nowrap }
+.mt-split { color: var(--faint); font-size: 11.5px; overflow-wrap: anywhere; min-width: 0 }
+.mt-none { color: var(--amber); font-size: 11.5px; white-space: nowrap }
 .wt { font: 12px var(--mono); color: var(--faint); margin-top: 10px; overflow-wrap: anywhere; user-select: all }
 .pipe { display: flex; margin-top: 16px; flex-wrap: wrap }
 .seg { padding: 6px 16px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font-size: 12.5px; font-weight: 600; margin-right: -1px; white-space: nowrap }
@@ -339,6 +348,35 @@ const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new D
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const short = (m) => String(m || '').replace(/^huaweicloud-maas\//, 'codearts/');
+const leadName = (p) => (p && (p.leadName || (typeof p.lead === 'string' ? p.lead : ''))) || 'Lead';
+// Tokens by model: one row per model, sorted by total, lead and worker tagged; unknown is never shown as a zero.
+const mtWho = (e) => (e && e.who === 'lead' ? 'lead' : 'worker');
+function mtRows(byModel) {
+  return Object.entries(byModel || {}).map(([m, e]) => ({ m, e: e || {} })).sort((a, b) => {
+    const at = typeof a.e.total === 'number' ? a.e.total : -1, bt = typeof b.e.total === 'number' ? b.e.total : -1;
+    return bt - at || a.m.localeCompare(b.m);
+  });
+}
+function mtSplit(e) {
+  const cache = (e.cacheRead || 0) + (e.cacheWrite || 0);
+  const bits = [`${CAUI.fmtTokens(e.input || 0)} in`, `${CAUI.fmtTokens(e.output || 0)} out`];
+  if (cache) bits.push(`${CAUI.fmtTokens(cache)} cache`);
+  return bits.join(' / ');
+}
+function modelTable(byModel) {
+  const rows = mtRows(byModel);
+  if (!rows.length) return '<div class="small">No model usage reported yet.</div>';
+  const body = rows.map(({ m, e }) => {
+    const unknown = e.source === 'none' || typeof e.total !== 'number';
+    const val = unknown
+      ? '<span class="mt-none" title="ca lead-tokens --set ... or leadTokens in plan.json">not reported</span>'
+      : `<span class="mt-n">${CAUI.fmtTokens(e.total)}</span><span class="mt-split">${esc(mtSplit(e))}</span>`;
+    return `<div class="mtrow"><span class="mt-model" title="${esc(m)}">${esc(short(m))}</span><span class="mt-who ${mtWho(e)}">${mtWho(e)}</span>${val}</div>`;
+  }).join('');
+  return `<div class="modeltable"><div class="mtrow mt-h"><span class="mt-model">Model</span><span class="mt-who">Who</span><span class="mt-n">Total</span><span class="mt-split">Breakdown</span></div>${body}</div>`;
+}
+function tokLabel(tokens) { return `${tokens && tokens.complete === false ? 'Known' : 'Tokens'} ${CAUI.fmtTokens(CAUI.tokenTotal(tokens))}`; }
+function tokTitle(tokens) { const miss = (tokens && tokens.missing) || []; return miss.length ? `not reported by ${miss.map(short).join(', ')}` : ''; }
 
 // ---------- demo fixture (?demo=1): one fetch-layer swap used for every /api call ----------
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -722,6 +760,15 @@ const projKey = (l) => (l.project && l.project.key) || '';
 const projName = (l) => (l.project && (l.project.name || l.project.key)) || '';
 function crProjectKeys() { const m = new Map(); for (const l of lanes) { const k = projKey(l); if (k && !m.has(k)) m.set(k, projName(l)); } return m; }
 function crBucketCounts(list) { const c = { attention: 0, running: 0, done: 0, ended: 0 }; for (const l of list) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; } return c; }
+function crModels() {
+  const by = {};
+  for (const l of lanes) for (const [m, e] of Object.entries(l.tokensByModel || {})) {
+    const cur = by[m] || (by[m] = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0, who: 'worker', source: 'runner' });
+    cur.input += e.input || 0; cur.output += e.output || 0; cur.reasoning += e.reasoning || 0; cur.cacheRead += e.cacheRead || 0; cur.cacheWrite += e.cacheWrite || 0; cur.steps += e.steps || 0;
+  }
+  for (const e of Object.values(by)) { e.total = (e.input || 0) + (e.output || 0) + (e.reasoning || 0) + (e.cacheRead || 0) + (e.cacheWrite || 0); e.source = (e.steps > 0 && e.total === 0) ? 'none' : 'runner'; }
+  return by;
+}
 function crSection(b, ls) {
   const open = crOpen.has(b.key) || crFilter === b.key;
   let body = ls.map(crRow).join('');
@@ -756,7 +803,8 @@ function renderControl() {
     <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · ${crGroup === 'project' ? 'by project' : 'by status'}</div></div>
     <div class="crtiles" role="group" aria-label="Lane buckets">${tiles}</div>
     <div class="cr-controls"><div class="cr-group" role="group" aria-label="Group lanes">${groups}</div><div class="cr-chips">${chips}</div></div>
-    <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div></div>`;
+    <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div>
+    <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(crModels())}</div></div>`;
   for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; lsSet('ca-cr-filter', crFilter); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); lsSet('ca-cr-open', [...crOpen].join(',')); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
@@ -888,13 +936,14 @@ function renderPlan(p) {
   $('view').innerHTML = `<div class="pad">
     <div class="plan-head">
       <h1>${esc(p.title)}</h1>
-      <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(p.lead)} · updated ${ago(p.updatedAt)}</div>
+      <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
       ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
-      <div class="plan-tok" title="${esc(planTokTitle)}">Tokens ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))}</div>
+      <div class="plan-tok" title="${esc(tokTitle(p.tokens) || planTokTitle)}">${tokLabel(p.tokens)}</div>
     </div>
     ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${p.closed ? 'Outcome' : 'Lead now'}</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
+    <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(p.tokensByModel)}</div>
     ${waves}
     <div class="grid2">
       <div class="box"><h4>Planned next (lead)</h4>${next}${risks}</div>
@@ -954,6 +1003,7 @@ function renderLane(d, keep) {
     ${pipeline(d)}
     <div class="nowband"><span class="lb">${d.running ? 'Now' : 'Result'}</span><div class="bd">${nowInner}${tools}</div></div>
     <div class="box tokbox"><h4>Tokens by agent</h4>${tokRows}</div>
+    <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(d.tokensByModel)}</div>
     <div class="grid21">
       <div class="box"><h4>Plan steps (brief) &middot; ${d.progress.done}/${d.progress.total}</h4>${steps}
         ${extraCommits.length ? `<h4 style="margin-top:14px">Other commits</h4><ul class="plain">${extraCommits.map((c) => `<li><span style="font:11.5px var(--mono);color:var(--faint);flex:none;min-width:64px">${esc(c.hash)}</span><span style="min-width:0">${esc(c.subject)}</span></li>`).join('')}</ul>` : ''}${todos}</div>

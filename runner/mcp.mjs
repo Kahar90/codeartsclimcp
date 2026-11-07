@@ -120,6 +120,11 @@ const needCount = (v, name, def, max) => {
   if (!Number.isFinite(n) || n < 1) throw new ArgError(name);
   return Math.min(Math.round(n), max);
 };
+const needNum = (v, name) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new ArgError(name);
+  return String(Math.round(n));
+};
 const optStr = (a, name) => (a[name] === undefined || a[name] === null ? [] : [needStr(a[name], name)]);
 const needLanes = (v) => {
   if (!Array.isArray(v) || v.length < 1 || !v.every((x) => typeof x === 'string' && x.trim())) throw new ArgError('lanes');
@@ -294,6 +299,31 @@ const TOOLS = [
     ok: [0],
     timeout: 30000,
     build: (a) => ['note', ...(a.now ? ['--now'] : []), needStr(a.text, 'text')],
+  },
+  {
+    name: 'ca_lead_tokens',
+    description: 'Report the lead harness own token usage on the registered plan so the dashboard counts the lead, not only the CodeArts workers (ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--plan id]). Use add: true to accumulate onto an existing entry. Unknown usage is never shown as zero: report only what the harness knows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        model: { type: 'string', description: 'model id the lead ran on, for example maas/glm-5.3' },
+        input: { type: 'number', description: 'input tokens the lead used (default 0)' },
+        output: { type: 'number', description: 'output tokens the lead used (default 0)' },
+        cache_read: { type: 'number', description: 'cache read tokens, optional' },
+        cache_write: { type: 'number', description: 'cache write tokens, optional' },
+        plan: { type: 'string', description: 'plan id to attach to (default: the newest registered plan)' },
+        add: { type: 'boolean', description: 'true: add to an existing entry for this model instead of replacing it' },
+      },
+      required: ['model'],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['lead-tokens', ...(a.plan === undefined || a.plan === null ? [] : ['--plan', needStr(a.plan, 'plan')]), '--set', needStr(a.model, 'model'),
+      '--input', needNum(a.input === undefined || a.input === null ? 0 : a.input, 'input'),
+      '--output', needNum(a.output === undefined || a.output === null ? 0 : a.output, 'output'),
+      ...(a.cache_read === undefined || a.cache_read === null ? [] : ['--cache-read', needNum(a.cache_read, 'cache_read')]),
+      ...(a.cache_write === undefined || a.cache_write === null ? [] : ['--cache-write', needNum(a.cache_write, 'cache_write')]),
+      ...(a.add ? ['--add'] : [])],
   },
 ];
 

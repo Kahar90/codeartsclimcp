@@ -529,6 +529,8 @@ function planBucket(lanes) {
   return "ended";
 }
 function bucketBadge(b) { return '<span class="ca-badge s-' + BUCKET_TONE[b] + '">' + BUCKET_WORD[b] + "</span>"; }
+// The plan carries the author name as leadName (lead is now the lead token table); old/demo fixtures still use a string.
+function leadName(p) { return (p && (p.leadName || (typeof p.lead === "string" ? p.lead : ""))) || "Lead"; }
 
 function renderTop() {
   const p = model.plan;
@@ -536,8 +538,8 @@ function renderTop() {
   const now = fetchErr ? fetchErr + " (retrying every 2 s)" : (p.now || "");
   $("nowLine").hidden = !now;
   $("nowLine").textContent = now ? "Now: " + now : "";
-  $("leadChip").hidden = !p.lead;
-  if (p.lead) $("leadChip").textContent = p.lead;
+  $("leadChip").hidden = !leadName(p);
+  $("leadChip").textContent = leadName(p);
   $("statusBadge").innerHTML = bucketBadge(planBucket(model.lanes));
   const attn = model.lanes.filter((l) => laneBucket(l) === "attention").length;
   const pill = $("needsPill");
@@ -546,7 +548,9 @@ function renderTop() {
   $("tokenChip").hidden = !pt;
   if (pt) {
     $("tokenChip").textContent = "Tokens " + CAUI.fmtTokens(pt);
-    $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).join(" \u00b7 ");
+    const mm = Object.entries(p.tokensByModel || {}).sort((a, b) => ((typeof b[1]?.total === "number" ? b[1].total : -1) - (typeof a[1]?.total === "number" ? a[1].total : -1)))
+      .map(([m, e]) => CAUI.shortModel(m) + " " + ((e.source === "none" || typeof e.total !== "number") ? "not reported" : CAUI.fmtTokens(e.total)) + " (" + (e.who === "lead" ? "lead" : "worker") + ")");
+    $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).concat(mm).join(" \u00b7 ");
   }
   const nPlans = mode === "demo" ? 1 : plansArr.length;
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
@@ -702,7 +706,7 @@ function renderStations() {
   if (!model) return;
   const p = model.plan;
   const planKey = CAUI.status(planStatus(p, model.lanes)).key;
-  setStation("lead", { name: p.lead || "Lead", sub: "Orchestrator", laneId: "lead", clip: CLIP_BY_KEY[planKey] || "idle" });
+  setStation("lead", { name: leadName(p), sub: "Orchestrator", laneId: "lead", clip: CLIP_BY_KEY[planKey] || "idle" });
   for (const stKey of WORKER_STATIONS) {
     const id = stationLane[stKey];
     const l = id && model.lanes.find((x) => x.id === id);
@@ -784,7 +788,7 @@ function renderNarrowList() {
   const box = $("stlist");
   if (!narrow || !model) { if (!box.hidden) box.hidden = true; return; }
   box.hidden = false;
-  const want = [{ id: "lead", name: model.plan.lead || "Lead", sub: "Orchestrator", cls: "st-lead" }];
+  const want = [{ id: "lead", name: leadName(model.plan), sub: "Orchestrator", cls: "st-lead" }];
   for (const stKey of WORKER_STATIONS) {
     const id = stationLane[stKey];
     const l = id && model.lanes.find((x) => x.id === id);
@@ -975,7 +979,7 @@ function renderTokensRow(tokens, by) {
 function renderWinContent(keepInput) {
   if (winFor === "lead") {
     const p = model.plan;
-    $("winTitle").textContent = p.lead || "Lead";
+    $("winTitle").textContent = leadName(p);
     $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
     $("winMeta").textContent = "Orchestrator";
     renderTokensRow(p.tokens, p.tokensBy);
@@ -1305,7 +1309,7 @@ window.__office = {
       const st = key === "lead" ? (model ? CAUI.status(planStatus(model.plan, model.lanes)) : { key: "idle" }) : l ? CAUI.status(l.health) : { key: "idle" };
       return {
         station: key, role: key, laneId: id || null,
-        name: key === "lead" ? ((model && model.plan.lead) || "Lead") : (l ? laneName(l) : ""),
+        name: key === "lead" ? leadName(model && model.plan) : (l ? laneName(l) : ""),
         status: st.key,
         clip: sp ? sp.clip : "",
         frame: sp && sp.el && sp.el.dataset.frame !== undefined ? Number(sp.el.dataset.frame) : null,
