@@ -188,7 +188,7 @@ try {
   await ev('window.__office.press("office-review")'); await wait(300);
   s = await st();
   check('window opens as a card when narrow', s.window.open && s.window.laneId === 'office-review', s.window.laneId);
-  check('window rect inside the stage at 390x844', winIn(s), `${Math.round(s.window.x)},${Math.round(s.window.y)} ${Math.round(s.window.w)}x${Math.round(s.window.h)}`);
+  check('narrow window is a bottom sheet: full width, docked to the viewport bottom, tall enough to read', near(s.window.x, 0) && near(s.window.w, 390) && near(s.window.y + s.window.h, 844) && s.window.h >= 300 && s.window.h <= 844 * 0.86, `${Math.round(s.window.x)},${Math.round(s.window.y)} ${Math.round(s.window.w)}x${Math.round(s.window.h)}`);
   await shot('4-phone');
 
   await size(1280, 800); await wait(400);

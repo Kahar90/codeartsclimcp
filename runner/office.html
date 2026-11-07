@@ -207,7 +207,8 @@ body.narrow .plate { display: none !important; }
 body.narrow #overflow { left: 0; right: 0; bottom: 0; align-items: stretch; gap: 0; }
 body.narrow .ov-pill { width: 100%; justify-content: center; height: 34px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
 body.narrow .ov-list { max-width: none; border-radius: 0; border-left: 0; border-right: 0; }
-body.narrow #win:not([hidden]) { display: flex; flex-direction: column; top: auto; left: 12px; right: 12px; bottom: 12px; width: auto; max-width: none; max-height: calc(100% - 24px); border-radius: 16px 16px 0 0; }
+body.narrow #win:not([hidden]) { display: flex; flex-direction: column; position: fixed; z-index: 50; top: auto; left: 0; right: 0; bottom: 0; width: auto; max-width: none; max-height: 85vh; max-height: 85dvh; border-radius: 16px 16px 0 0; border-bottom: 0; padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -12px 40px rgba(0, 0, 0, .55); }
+body.narrow #winScrim { position: fixed; z-index: 49; }
 body.narrow #winGrab { display: block; flex: none; width: 40px; height: 4px; border-radius: 2px; background: var(--border-2); margin: 8px auto 0; }
 body.narrow .win-head, body.narrow #winForm, body.narrow #winErr, body.narrow #winChips { flex: none; }
 body.narrow #winBody { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
