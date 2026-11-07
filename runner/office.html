@@ -101,8 +101,12 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 .ov-row .ov-flag { color: var(--amber); font-weight: 800; }
 .ov-row .ov-flag[hidden] { display: none; }
 .hit { position: absolute; pointer-events: auto; cursor: pointer; }
-#win { position: absolute; left: 0; top: 0; width: 440px; max-width: calc(100% - 24px); z-index: 10; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); }
+#win { position: absolute; left: 0; top: 0; width: 440px; max-width: calc(100% - 24px); z-index: 10; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); display: flex; flex-direction: column; }
 #win[hidden] { display: none; }
+#winGrab { display: none; }
+#winScrim { position: fixed; inset: 0; z-index: 9; background: rgba(10, 6, 16, .5); opacity: 0; transition: opacity .2s ease; }
+#winScrim[hidden] { display: none !important; }
+#winScrim.show { opacity: 1; }
 #winTail { position: absolute; width: 14px; height: 14px; background: var(--panel); transform: rotate(45deg); }
 #winTail.t-left { border-left: 1px solid var(--border-2); border-bottom: 1px solid var(--border-2); }
 #winTail.t-right { border-top: 1px solid var(--border-2); border-right: 1px solid var(--border-2); }
@@ -110,12 +114,12 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #winTail.t-down { border-bottom: 1px solid var(--border-2); border-right: 1px solid var(--border-2); }
 body.narrow #winTail { display: none; }
 #win [hidden] { display: none !important; }
-.win-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px 10px; }
+.win-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px 10px; flex: none; }
 #winTitle { font-weight: 700; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #winBadge { flex: none; }
 #winKind { flex: none; color: var(--muted); font-size: 13px; }
 #winX { margin-left: auto; flex: none; width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 15px var(--font); cursor: pointer; padding: 0; }
-#winBody { padding: 0 18px 14px; display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; }
+#winBody { padding: 0 18px 14px; display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 #winMeta { color: var(--muted); font-size: 14px; }
 #winTokens { display: flex; flex-direction: column; gap: 5px; }
 .tk-top { display: flex; align-items: baseline; gap: 8px; }
@@ -145,12 +149,12 @@ body.narrow #winTail { display: none; }
 #winSteps .st-current .mark { color: var(--sel); }
 #winSteps .st-pending .mark { color: var(--faint); }
 #winLink { font-size: 14.5px; }
-#winForm { display: flex; gap: 8px; padding: 0 18px 16px; }
+#winForm { display: flex; gap: 8px; padding: 0 18px 16px; flex: none; }
 #winInput { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--code-bg); color: var(--fg); font: 14.5px var(--font); }
 #winSend { flex: none; height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 14.5px var(--font); cursor: pointer; }
 #winSend:disabled, #winInput:disabled { opacity: 0.55; cursor: default; }
-#winErr { padding: 0 18px 14px; color: var(--bad); font-size: 13.5px; }
-#winCtl { display: flex; flex-direction: column; gap: 7px; }
+#winErr { padding: 0 18px 14px; color: var(--bad); font-size: 13.5px; flex: none; }
+#winCtl { display: flex; flex-direction: column; gap: 7px; padding: 0 18px 12px; flex: none; }
 .ctl-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .ctl-btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 13px var(--font); cursor: pointer; }
 .ctl-btn:hover { border-color: var(--sel); }
@@ -159,7 +163,7 @@ body.narrow #winTail { display: none; }
 #winNote { display: flex; flex-direction: column; gap: 7px; }
 #noteText { resize: vertical; min-height: 46px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--code-bg); color: var(--fg); font: 13.5px/1.4 var(--font); }
 .note-btns { display: flex; gap: 6px; }
-#winChips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px; }
+#winChips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px; flex: none; }
 .qchip { height: 24px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 12px var(--font); cursor: pointer; }
 .qchip:hover { color: var(--fg); border-color: var(--sel); }
 #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60; max-width: min(420px, calc(100vw - 32px)); padding: 9px 16px; border-radius: 8px; background: var(--raise); border: 1px solid var(--sel); color: var(--fg); font: 600 13.5px var(--font); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
@@ -189,7 +193,8 @@ body.narrow .plate { display: none !important; }
 body.narrow #overflow { left: 0; right: 0; bottom: 0; align-items: stretch; gap: 0; }
 body.narrow .ov-pill { width: 100%; justify-content: center; height: 34px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
 body.narrow .ov-list { max-width: none; border-radius: 0; border-left: 0; border-right: 0; }
-body.narrow #win:not([hidden]) { display: flex; flex-direction: column; width: calc(100% - 24px); max-height: min(55vh, calc(100% - 24px)); }
+body.narrow #win:not([hidden]) { display: flex; flex-direction: column; top: auto; left: 12px; right: 12px; bottom: 12px; width: auto; max-width: none; max-height: calc(100% - 24px); border-radius: 16px 16px 0 0; }
+body.narrow #winGrab { display: block; flex: none; width: 40px; height: 4px; border-radius: 2px; background: var(--border-2); margin: 8px auto 0; }
 body.narrow .win-head, body.narrow #winForm, body.narrow #winErr, body.narrow #winChips { flex: none; }
 body.narrow #winBody { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 body.narrow { height: auto; min-height: 100%; overflow-y: auto; scrollbar-width: none; }
@@ -238,6 +243,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
       <button type="button" id="ovPill" class="ov-pill" aria-expanded="false" aria-controls="ovList"></button>
     </div>
     <div id="win" role="dialog" aria-labelledby="winTitle" hidden>
+      <div id="winGrab" aria-hidden="true"></div>
       <div class="win-head">
         <b id="winTitle"></b>
         <span id="winBadge"></span>
@@ -256,7 +262,8 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
         <div id="winNow" hidden></div>
         <ul id="winSteps"></ul>
         <a id="winLink" hidden>Open in Lanes</a>
-        <div id="winCtl" hidden>
+      </div>
+      <div id="winCtl" hidden>
           <div id="winBtns" class="ctl-row"></div>
           <div id="winWhy" class="ctl-why" hidden></div>
           <div id="winNote" hidden>
@@ -267,7 +274,6 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
             </div>
           </div>
         </div>
-      </div>
       <div id="winTail" aria-hidden="true"></div>
       <div id="winChips" hidden></div>
       <form id="winForm" hidden>
@@ -279,6 +285,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
   </div>
 </main>
 <div id="stlist" hidden></div>
+<div id="winScrim" hidden></div>
 <div id="toast" hidden></div>
 <script src="/assets/workshop.js"></script>
 <script>
@@ -1551,12 +1558,22 @@ async function fetchDetail(id) {
     return v;
   } catch (e) { return c ? c.v : null; }
 }
+// The visible region a floating surface may occupy: the stage rect intersected with the viewport, 8px in from every edge.
+function winRegion() {
+  const sr = $("stage").getBoundingClientRect();
+  const M = 8, vw = window.innerWidth, vh = window.innerHeight;
+  const l = Math.max(sr.left, M), t = Math.max(sr.top, M);
+  const r = Math.min(sr.right, vw - M), b = Math.min(sr.bottom, vh - M);
+  return { l, t, r, b, sr, x: l - sr.left, y: t - sr.top, w: Math.max(0, r - l), h: Math.max(0, b - t) };
+}
 function positionWin() {
   const win = $("win"), stage = $("stage"), tail = $("winTail");
-  if (narrow) { win.style.left = "12px"; win.style.top = "12px"; return; }
+  if (narrow) { win.style.left = ""; win.style.top = ""; win.style.maxHeight = ""; return; }
+  const R = winRegion();
+  win.style.maxHeight = Math.max(140, Math.round(R.h)) + "px";
   const sw = stage.clientWidth, sh = stage.clientHeight;
+  const sr = R.sr, rl = R.x, rt = R.y, rr = R.x + R.w, rb = R.y + R.h;
   const w = win.offsetWidth, h = win.offsetHeight;
-  const sr = stage.getBoundingClientRect();
   let a = { left: sw / 2 - 1, top: sh / 2 - 1, right: sw / 2 + 1, bottom: sh / 2 + 1, cx: sw / 2, cy: sh / 2 };
   let anchorKey = null;
   for (const key of STATION_KEYS) if ($("plate-" + key) === winAnchor) anchorKey = key;
@@ -1564,7 +1581,7 @@ function positionWin() {
     const ar = winAnchor.getBoundingClientRect();
     a = { left: ar.left - sr.left, top: ar.top - sr.top, right: ar.right - sr.left, bottom: ar.bottom - sr.top, cx: ar.left - sr.left + ar.width / 2, cy: ar.top - sr.top + ar.height / 2 };
   }
-  const G = 10, I = 10;
+  const G = 10;
   const cands = [
     { side: "right", x: a.right + G, y: a.cy - h / 2 },
     { side: "left", x: a.left - G - w, y: a.cy - h / 2 },
@@ -1594,14 +1611,14 @@ function positionWin() {
     }
     return s;
   };
-  const inside = (c) => c.x >= I && c.y >= I && c.x + w <= sw - I && c.y + h <= sh - I;
+  const inside = (c) => c.x >= rl && c.y >= rt && c.x + w <= rr && c.y + h <= rb;
   let pool = cands.filter(inside);
   if (!pool.length) pool = cands;
   const pick = pool.map((c) => ({ c, o: overlap(c) })).sort((p, q) => p.o - q.o)[0].c;
-  pick.x = Math.min(Math.max(pick.x, I), Math.max(I, sw - I - w));
-  pick.y = Math.min(Math.max(pick.y, I), Math.max(I, sh - I - h));
-  win.style.left = pick.x + "px";
-  win.style.top = pick.y + "px";
+  pick.x = Math.min(Math.max(pick.x, rl), Math.max(rl, rr - w));
+  pick.y = Math.min(Math.max(pick.y, rt), Math.max(rt, rb - h));
+  win.style.left = Math.round(pick.x) + "px";
+  win.style.top = Math.round(pick.y) + "px";
   const T = 10;
   tail.className = "t-" + (pick.side === "right" ? "left" : pick.side === "left" ? "right" : pick.side === "below" ? "up" : "down");
   if (pick.side === "right" || pick.side === "left") {
