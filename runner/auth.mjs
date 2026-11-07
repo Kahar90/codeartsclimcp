@@ -46,6 +46,24 @@ function saveCreds(values) {
   return saved;
 }
 
+const MAAS_BASE = () => (process.env.MAAS_BASE_URL || 'https://api-ap-southeast-1.modelarts-maas.com/openai/v1').replace(/\/+$/, '');
+
+// Verify a MaaS key against ModelArts MaaS before saving it. Never logs the key.
+//   { ok: true }               accepted (HTTP 200)
+//   { ok: false, status }      rejected (HTTP 401/403): do not save this key
+//   { ok: true, warn }         could not verify (network error or other status): save anyway
+async function verifyMaas(key) {
+  try {
+    const r = await fetch(`${MAAS_BASE()}/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
+    if (r.status === 200) return { ok: true };
+    if (r.status === 401 || r.status === 403) return { ok: false, status: r.status };
+    return { ok: true, warn: `HTTP ${r.status}` };
+  } catch (e) {
+    const reason = e && e.name === 'TimeoutError' ? 'timed out' : (e && (e.code || e.message)) || 'network error';
+    return { ok: true, warn: String(reason) };
+  }
+}
+
 // Set = in the process env, the credentials file, or (Windows) the user environment.
 // CA_CREDENTIALS_ONLY=1 looks at the credentials file alone (checks, screenshots).
 function isSet(k) {
@@ -85,12 +103,15 @@ button{margin-top:22px;width:100%;padding:11px;border:0;border-radius:8px;backgr
 <label>Secret key (SK) ${have.CODEARTS_CLI_SK ? '<small>already set, leave blank to keep</small>' : ''}</label><input name="CODEARTS_CLI_SK" type="password" autocomplete="off" ${have.CODEARTS_CLI_SK ? '' : 'required'}>
 <p style="margin:8px 0 0"><small>Create them at <a href="${PORTAL}" target="_blank" rel="noopener">CodeArts CLI auth settings</a>.</small></p>
 <label>MaaS API key <small>optional, enables the faster builder models${have.MAAS_API_KEY ? '; already set' : ''}</small></label><input name="MAAS_API_KEY" type="password" autocomplete="off">
+<p style="margin:8px 0 0"><small>Create one in the ModelArts Studio (MaaS) console under API Key Management (Singapore region). <a href="https://support.huaweicloud.com/intl/en-us/usermanual-maas-modelarts/maas-modelarts-0073.html" target="_blank" rel="noopener">Open the guide</a>.</small></p>
 <button>Save keys</button><p id="m" style="margin:12px 0 0"></p></form></main>
 <script>
-document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const m=document.getElementById('m');
+document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const m=document.getElementById('m');m.className='';m.textContent='';
 const body=Object.fromEntries(new FormData(e.target));
 try{const r=await fetch(location.pathname+'/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-if(!r.ok)throw new Error(await r.text());
+const j=await r.json().catch(()=>({}));
+if(!r.ok||j.ok===false)throw new Error(j.error||'save failed');
+if(j.warning){m.textContent=j.warning;return;}
 document.getElementById('c').innerHTML='<h1 class="done">Keys saved</h1><p>You can close this tab and go back to your coding agent. It continues on its own.</p>';}
 catch(err){m.className='err';m.textContent='Could not save: '+err.message;}};
 </script></body></html>`;
@@ -107,13 +128,22 @@ function serve(portFile) {
     if (req.method === 'POST' && req.url === `${base}/save`) {
       let raw = '';
       req.on('data', (d) => { raw += d; if (raw.length > 20000) req.destroy(); });
-      req.on('end', () => {
-        let v; try { v = JSON.parse(raw); } catch { return send(400, 'bad request'); }
+      req.on('end', async () => {
+        const j = (code, obj) => send(code, JSON.stringify(obj), 'application/json');
+        let v; try { v = JSON.parse(raw); } catch { return j(400, { ok: false, error: 'bad request' }); }
         const merged = { ...status() };
         for (const k of REQUIRED) if (typeof v[k] === 'string' && v[k].trim()) merged[k] = true;
-        if (!ready(merged)) return send(400, 'AK and SK are both required');
-        saveCreds(v);
-        send(200, 'ok');
+        if (!ready(merged)) return j(400, { ok: false, error: 'AK and SK are both required' });
+        let warning = '';
+        let rejected = '';
+        if (typeof v.MAAS_API_KEY === 'string' && v.MAAS_API_KEY.trim()) {
+          const vr = await verifyMaas(v.MAAS_API_KEY.trim());
+          if (!vr.ok) { delete v.MAAS_API_KEY; rejected = `MaaS API key rejected by ModelArts MaaS (HTTP ${vr.status})`; }
+          else if (vr.warn) warning = `could not verify the MaaS API key (${vr.warn}); saved anyway`;
+        }
+        saveCreds(v); // AK/SK (and a MaaS key that was not rejected) are saved; the form stays on a rejection
+        if (rejected) return j(200, { ok: false, error: rejected });
+        j(200, { ok: true, warning });
         setTimeout(() => process.exit(0), 300);
       });
       return;
@@ -142,10 +172,18 @@ export default async function auth(args) {
     try { v = JSON.parse(text); } catch {
       for (const ln of text.split(/\r?\n/)) { const m = ln.match(/^\s*(?:export\s+)?([A-Z_]+)\s*=\s*["']?(.*?)["']?\s*$/); if (m) v[m[1]] = m[2]; }
     }
+    const msgs = [];
+    let maasRejected = false;
+    if (typeof v.MAAS_API_KEY === 'string' && v.MAAS_API_KEY.trim()) {
+      const vr = await verifyMaas(v.MAAS_API_KEY.trim());
+      if (!vr.ok) { delete v.MAAS_API_KEY; maasRejected = true; msgs.push(`MaaS API key rejected by ModelArts MaaS (HTTP ${vr.status}); not saved`); }
+      else if (vr.warn) msgs.push(`could not verify the MaaS API key (${vr.warn}); saved anyway`);
+      else msgs.push('MAAS_API_KEY verified');
+    }
     const saved = saveCreds(v);
     const s = status();
-    out({ saved, ready: ready(s) }, `saved: ${saved.join(', ') || 'nothing'}${ready(s) ? '\nauth: ready' : '\nauth: AK and SK still missing'}`);
-    process.exitCode = ready(s) ? 0 : 3;
+    out({ saved, ready: ready(s), maasRejected }, [`saved: ${saved.join(', ') || 'nothing'}`, ...msgs, ready(s) ? 'auth: ready' : 'auth: AK and SK still missing'].join('\n'));
+    process.exitCode = maasRejected ? 1 : (ready(s) ? 0 : 3);
     return;
   }
 

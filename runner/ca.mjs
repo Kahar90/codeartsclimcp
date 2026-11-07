@@ -66,6 +66,7 @@ import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
 import { laneActions, laneBucket, laneKind } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
+import { authProblem } from './authsignal.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
@@ -314,6 +315,22 @@ async function runLane(repoArg, task, opts = {}) {
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
     S.commits = S.commitLog.length;
   };
+
+  // The codearts server writes sign-in failures to server.log right at start. Read only its tail:
+  // enough for the classifier, never the whole (long) log.
+  const serverLogTail = () => {
+    try {
+      const f = path.join(dir, 'server.log'); const st = fs.statSync(f);
+      const start = Math.max(0, st.size - 200 * 1024);
+      const fd = fs.openSync(f, 'r');
+      const buf = Buffer.alloc(st.size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      fs.closeSync(fd);
+      return buf.toString('utf8');
+    } catch { return ''; }
+  };
+  // Called when a turn ends in an error: null (keep the old behaviour) or a plain-words key problem.
+  const keyProblem = (model, error) => authProblem({ model, error, serverLog: serverLogTail() });
 
   const server = new Server(repo, path.join(dir, 'server.log'));
   let finished = false;
@@ -592,6 +609,12 @@ async function runLane(repoArg, task, opts = {}) {
       const cls = o.kind === 'error' ? classify(o.error) : o.kind;
       const what = o.kind === 'error' ? `${o.error.name || 'error'}: ${oneLine(o.error.data?.message || o.error.message || '', 200)}` : (o.what || o.kind);
       S.interruptions.push({ at: now(), phase: label, kind: cls, what }); save(true);
+      // A rejected key can look like a plain 503 (AK/SK) or a maas/ authorization error: the classifier
+      // reads the server log, so catch it here even when the error class is not 'auth'. End at once.
+      if (o.kind === 'error') {
+        const ap = keyProblem(model, what);
+        if (ap) { L(`  ! ${ap.message}`); S.keysMessage = ap.message; return { ok: false, sid, reason: 'auth', exit: 3, what: ap.message, keys: ap.message }; }
+      }
       if (cls === 'auth') return { ok: false, sid, reason: 'auth', exit: 3, what };
       if (cls === 'other' && o.kind === 'error' && /Abort/i.test(o.error.name || '')) { /* user aborted in TUI: resume */ }
       if (++interruptions > CFG.retries) return { ok: false, sid, reason: `gave up after ${CFG.retries} interruptions (last: ${cls}: ${what})` };
@@ -678,6 +701,12 @@ async function runLane(repoArg, task, opts = {}) {
     ensureDash().then((u) => u && L(`dashboard: ${u}`));
     if (PRE_DIRTY.size) { S.preDirty = [...PRE_DIRTY].slice(0, 20); say(`note: ${PRE_DIRTY.size} file(s) were already dirty before the lane (excluded from the git gate): ${S.preDirty.slice(0, 5).join(', ')}`); }
 
+    // A wrong AK/SK is written to server.log at sign-in, before the first model call. Give the log up
+    // to 3 s, then end the lane at once instead of retrying for a minute. No retry, no backoff.
+    let startKeys = null;
+    for (let i = 0; i < 30 && !startKeys; i++) { startKeys = keyProblem(buildModel, ''); if (!startKeys) await sleep(100); }
+    if (startKeys) { L(`  ! ${startKeys.message}`); S.keysMessage = startKeys.message; throw Object.assign(new Error('auth'), { caAuth: true }); }
+
     // BUILD
     let sid = await newSession(`${task} build`); S.buildSession = sid; builderSessions.add(sid); S.attempt = 1;
     phase('build', 'sending brief'); L(`== build (${BUILD}) session ${sid}; ${checks.length} CHECK lines, ${stepCount} steps`);
@@ -698,7 +727,7 @@ async function runLane(repoArg, task, opts = {}) {
     for (;;) {
       const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
       sid = r.sid; S.buildSession = sid;
-      if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; break; }
+      if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; if (r.keys) S.keysMessage = r.keys; break; }
       if (await pumpInbox(sid)) continue; // a steer arrived right at the end: let the builder handle it
       phase('gate', 'running gates');
       const g = await gates();
@@ -719,6 +748,7 @@ async function runLane(repoArg, task, opts = {}) {
       phase('review', 'reviewing'); L(`== review (${REVIEW}, read-only plan agent) session ${rsid}`);
       await send(rsid, rb, REVIEW, 'plan');
       const rr = await drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
+      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; if (rr.keys) S.keysMessage = rr.keys; }
       let text = '';
       try {
         const msgs = await server.api('GET', `/session/${rr.sid}/message`);
@@ -735,7 +765,8 @@ async function runLane(repoArg, task, opts = {}) {
       review = text;
     }
   } catch (err) {
-    reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`);
+    if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
+    else { reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`); }
   }
 
   // ---- summary ----
@@ -757,6 +788,7 @@ async function runLane(repoArg, task, opts = {}) {
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
     `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}`,
+    ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
     ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
     `steering: ${S.steers.length ? S.steers.map((x) => `[${x.by}] ${oneLine(x.text, 160)}`).join(' / ') : 'none'}`,
     `outside-repo file access: ${S.outside.length ? S.outside.slice(0, 5).map((x) => `${x.tool} ${x.path}`).join(', ') : 'none'}`,
@@ -770,7 +802,7 @@ async function runLane(repoArg, task, opts = {}) {
   L(`== finished: ${S.result}${reason ? ' (' + reason + ')' : ''}`);
   save(true);
   process.stdout.write('\n' + md + '\n');
-  process.stdout.write(`CA_RESULT ${JSON.stringify({ lane: id, result: S.result, verdict: S.verdict || '', exit: finalExit, summaryPath: path.join(dir, 'summary.md') })}\n`);
+  process.stdout.write(`CA_RESULT ${JSON.stringify({ lane: id, result: S.result, verdict: S.verdict || '', exit: finalExit, ...(S.keysMessage ? { error: S.keysMessage } : {}), summaryPath: path.join(dir, 'summary.md') })}\n`);
   cleanup();
   process.exit(finalExit);
 }
@@ -1204,10 +1236,11 @@ async function cmdDoctor(args) {
   const { checks, fails } = await doctorData(args.filter((a) => !a.startsWith('--'))[0]);
   if (asJson) console.log(JSON.stringify({ checks }, null, 2));
   else {
-    const cols = ['name', 'status', 'detail', 'fix'];
-    const w = cols.map((c, i) => Math.max(['NAME', 'STATUS', 'DETAIL', 'FIX'][i].length, ...checks.map((r) => String(r[c]).length)));
-    console.log(['NAME', 'STATUS', 'DETAIL', 'FIX'].map((h, i) => h.padEnd(w[i])).join('  '));
-    for (const r of checks) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
+    // One readable line per row; the fix (if any) sits under it. No padded table.
+    for (const r of checks) {
+      console.log(`  ${String(r.status).padEnd(5)}  ${r.name}: ${r.detail}`);
+      if (r.status !== 'ok' && r.fix) console.log(`         fix: ${r.fix}`);
+    }
     console.log(`doctor: ${fails ? `not ready (${fails} fail)` : 'ready'}`);
   }
   if (fails) process.exit(1);
