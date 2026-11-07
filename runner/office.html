@@ -1996,6 +1996,7 @@ window.__office = {
       stations: allStations,
       overflow: (() => { const ids = model ? model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).map((l) => l.id) : []; return { count: ids.length, ids, open: ovOpen }; })(),
       window: { open: !win.hidden && !!winFor, laneId: winFor, kind: winFor === "lead" ? null : (winLane ? laneKind(winLane) : null), x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement), tokens: winTk, actions: [...$("winBtns").children].map((b) => b.dataset.action), suggest: (winLane && winLane.suggest) || "", noteOpen: !$("winNote").hidden },
+      win: { open: !win.hidden, sheet: narrow, rect: { x: wr.x, y: wr.y, w: wr.width, h: wr.height }, maxHeight: win.style.maxHeight || getComputedStyle(win).maxHeight },
       effects: effects.slice(),
       motion: PixelSprites.motion(),
       lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 })),
