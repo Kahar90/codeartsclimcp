@@ -47,6 +47,9 @@ try {
     if (!c) return false; await click(c.x, c.y); return true;
   };
   await send('Runtime.enable');
+  // CI runners often have system animations off (prefers-reduced-motion: reduce), which correctly turns
+  // the step effects off: pin motion on so the checks are deterministic; reduced motion is tested on its own.
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
 
   // ---------- Control room (the default route): what needs me, what runs, finished, ended ----------
   await size(1280, 800);

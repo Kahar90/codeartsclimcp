@@ -47,6 +47,9 @@ try {
   const size = (width, height) => send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   const keyEv = async (args) => { await send('Input.dispatchKeyEvent', { type: 'keyDown', ...args }); await send('Input.dispatchKeyEvent', { type: 'keyUp', ...args }); };
   await send('Runtime.enable');
+  // CI runners often have system animations off (prefers-reduced-motion: reduce), which correctly turns
+  // the step effects off: pin motion on so the checks are deterministic; reduced motion is tested on its own.
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
 
   const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
   const fmtTokens = (n) => n < 1000 ? String(Math.round(n)) : n < 1e6 ? (n < 1e4 ? (n / 1e3).toFixed(1) : Math.round(n / 1e3)) + 'k' : (n < 1e7 ? (n / 1e6).toFixed(2) : (n / 1e6).toFixed(1)) + 'M';
@@ -110,6 +113,12 @@ try {
   await ev('window.__office.demoAdvance("office-scene")');
   for (let i = 0; i < 25; i++) { await wait(200); s = await st(); if (s.effects.length > e0) break; } // poll: slow CI runners
   check('demoAdvance adds exactly one step effect', s.effects.length === e0 + 1 && s.effects[e0].type === 'step' && s.effects[e0].laneId === 'office-scene', JSON.stringify(s.effects.slice(e0)));
+  // accessibility: with reduced motion the same step adds no effect
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }); await wait(300);
+  s = await st(); const eReduced = s.effects.length;
+  await ev('window.__office.demoAdvance("office-scene")'); await wait(1500); s = await st();
+  check('prefers-reduced-motion: a step adds no effect', s.effects.length === eReduced, JSON.stringify(s.effects.slice(eReduced)));
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] }); await wait(300);
   const e1 = s.effects.length;
   s = await st();
   check('a second state() call adds no effects', s.effects.length === e1);
@@ -164,7 +173,7 @@ try {
   await wait(500);
   const frames = await ev('(function(){ var m = window.PixelSprites.manifest; var st = window.__office.state(); return st.stations.map(function(x){ var c = m.roles[x.station] && m.roles[x.station].clips[x.clip]; return { station: x.station, clip: x.clip, frame: x.frame, want: c ? (c.staticFrame || 0) : -1 }; }); })()');
   check('reduced motion freezes every sprite on its static frame', Array.isArray(frames) && frames.every((f) => f.frame === f.want), JSON.stringify(frames));
-  await send('Emulation.setEmulatedMedia', { features: [] });
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] }); // back to the pinned value, not the OS setting
 
   await size(390, 844); await wait(600);
   s = await st();
