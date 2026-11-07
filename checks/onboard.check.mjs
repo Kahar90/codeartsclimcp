@@ -14,6 +14,7 @@ const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg);
 // Every home dir is a temp dir, so onboard never touches the real user config (like scope.check).
 const home = path.join(tmp, 'home'); fs.mkdirSync(home);
 const appdata = path.join(tmp, 'appdata'); fs.mkdirSync(appdata);
+fs.mkdirSync(path.join(tmp, 'localappdata'), { recursive: true });
 const env = {
   ...process.env, HOME: home, USERPROFILE: home, APPDATA: appdata, LOCALAPPDATA: path.join(tmp, 'localappdata'),
   CODEX_HOME: path.join(home, '.codex'), CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CA_CLAUDE_CLI: 'none',
@@ -21,7 +22,7 @@ const env = {
   CA_SETTINGS: settings, CA_REGISTRY: reg, CA_DASH: '0',
 };
 delete env.XDG_CONFIG_HOME;
-const ca = (args, opts = {}) => { const t0 = Date.now(); const r = spawnSync(process.execPath, [CA, ...args], { env, encoding: 'utf8', timeout: opts.timeout || 90000, input: '' }); return { code: r.status, out: r.stdout || '', err: r.stderr || '', ms: Date.now() - t0 }; };
+const ca = (args, opts = {}) => { const t0 = Date.now(); const r = spawnSync(process.execPath, [CA, ...args], { cwd: tmp, env, encoding: 'utf8', timeout: opts.timeout || 90000, input: '' }); return { code: r.status, out: r.stdout || '', err: r.stderr || '', ms: Date.now() - t0 }; };
 const js = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 220) : ''}`);
 const mkrepo = (name, marker) => { const d = path.join(tmp, name); fs.mkdirSync(d); spawnSync('git', ['init', '-q'], { cwd: d }); spawnSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: d }); if (marker) fs.mkdirSync(path.join(d, marker), { recursive: true }); return d; };
@@ -72,7 +73,7 @@ check('non-git repo with --yes: git init + first commit', fs.existsSync(path.joi
 // missing CodeArts CLI: planned in dry run, installer runs with --yes (CA_INSTALL_CMD stub), fixed only when the exe exists
 const fakeExe = path.join(tmp, 'fake-cli', process.platform === 'win32' ? 'codearts.exe' : 'codearts');
 const cliEnv = { ...env, CODEARTS_EXE: fakeExe, CA_INSTALL_CMD: `node -e "require('fs').mkdirSync(process.argv[1],{recursive:true})" "${path.dirname(fakeExe)}"` };
-const onb = (args) => js(spawnSync(process.execPath, [CA, 'onboard', ...args], { env: cliEnv, encoding: 'utf8', timeout: 90000, input: '' }).stdout);
+const onb = (args) => js(spawnSync(process.execPath, [CA, 'onboard', ...args], { cwd: tmp, env: cliEnv, encoding: 'utf8', timeout: 90000, input: '' }).stdout);
 const cliRow = (jj) => jj && jj.steps.find((s) => s.name === 'codearts');
 j = (() => { const saved = cliEnv.CA_INSTALL_CMD; delete cliEnv.CA_INSTALL_CMD; try { return onb(['--repo', kiro, '--dry-run', '--json']); } finally { cliEnv.CA_INSTALL_CMD = saved; } })();
 check('missing CLI: dry run plans the official installer', cliRow(j)?.status === 'planned' && /install\.(ps1|sh)/.test(cliRow(j).fix) && !fs.existsSync(path.dirname(fakeExe)), JSON.stringify(cliRow(j)));

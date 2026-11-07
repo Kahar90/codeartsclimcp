@@ -17,13 +17,14 @@ const codexHome = path.join(home, '.codex');
 const claudeDir = path.join(home, '.claude');
 const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSON.stringify({ security: { trustedFolders: [] } }));
 const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg);
+fs.mkdirSync(path.join(tmp, 'localappdata'), { recursive: true });
 const env = {
   ...process.env, HOME: home, USERPROFILE: home, APPDATA: appdata, LOCALAPPDATA: path.join(tmp, 'localappdata'), XDG_CONFIG_HOME: '',
   CODEX_HOME: codexHome, CLAUDE_CONFIG_DIR: claudeDir, CA_CLAUDE_CLI: 'none',
   CA_SETTINGS: settings, CA_REGISTRY: reg, CA_DASH: '0',
 };
 delete env.XDG_CONFIG_HOME;
-const ca = (args) => { const r = spawnSync(process.execPath, [CA, ...args], { env, encoding: 'utf8', timeout: 90000, input: '' }); return { code: r.status, out: (r.stdout || '') + (r.stderr || ''), stdout: r.stdout || '' }; };
+const ca = (args) => { const r = spawnSync(process.execPath, [CA, ...args], { cwd: tmp, env, encoding: 'utf8', timeout: 90000, input: '' }); return { code: r.status, out: (r.stdout || '') + (r.stderr || ''), stdout: r.stdout || '' }; };
 const rd = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } };
 const js = (p) => { try { return JSON.parse(rd(p)); } catch { return null; } };
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 220) : ''}`);
