@@ -1556,10 +1556,17 @@ async function ensureDash() {
 function cmdDash(args) {
   const port = Number(args[0] || process.env.CA_DASH_PORT || 4777);
   const page = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8');
+  // DNS-rebinding guard: the dashboard drives lanes, so trust only loopback Host headers for this
+  // port. CA_DASH_HOSTS adds host or host:port names for a proxy in front of the dashboard.
+  const allowHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
+  for (const h of String(process.env.CA_DASH_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) { allowHosts.add(h); if (!h.includes(':')) allowHosts.add(`${h}:${port}`); }
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     try {
+      // A foreign Host header is a DNS-rebinding attempt: reject it before any route runs.
+      const reqHost = String(req.headers.host || '').toLowerCase();
+      if (!allowHosts.has(reqHost)) return json({ error: `forbidden host ${req.headers.host || '(none)'}; allow it with CA_DASH_HOSTS` }, 403);
       // Every POST under /api/ must be JSON: a cross-site form post cannot steer, stop, kick or resume.
       if (req.method === 'POST' && u.pathname.startsWith('/api/') && !/application\/json/i.test(String(req.headers['content-type'] || ''))) return json({ error: 'POST /api/ needs content-type application/json' }, 415);
       if (u.pathname === '/') { let html = page; try { html = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8'); } catch {} res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); }
