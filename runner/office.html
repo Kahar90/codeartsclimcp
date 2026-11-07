@@ -20,6 +20,9 @@ body.narrow .runstrip .pnow { flex: 1 1 100%; white-space: normal; overflow: vis
 .needs-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; background: rgba(255, 156, 156, 0.16); border: 1.5px solid var(--bad); color: var(--bad); font-weight: 650; font-size: 13px; text-decoration: none; white-space: nowrap; }
 .needs-pill:hover { background: rgba(255, 156, 156, 0.28) }
 .needs-pill b { font-weight: 800 }
+body.narrow .ca-counts { display: none }
+.np-mark { display: none }
+body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; font-weight: 800 } body.narrow .needs-pill { padding: 0 9px } /* phone: the Needs you pill matters more than the counts */
 #planSel { height: 28px; padding: 0 6px; background: var(--panel); color: var(--fg); border: 1px solid var(--border-2); border-radius: 6px; font: 13px var(--font); max-width: 260px; }
 #motionBtn { flex: none; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font: 600 13px var(--font); cursor: pointer; }
 #motionBtn[aria-pressed="true"] { color: var(--fg); border-color: var(--sel); }
@@ -150,7 +153,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
     <a class="ca-tab" href="/office" aria-current="page"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 2h5v5H2zM11 2h5v5h-5zM2 11h5v5H2zM11 11h5v5h-5z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Office</a>
     <a class="ca-tab" href="/"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2 16 6 9 10 2 6ZM2 10.5l7 4 7-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Lanes</a>
   </nav>
-  <span class="ca-top-fill"></span><a class="needs-pill" id="needsPill" href="/#/" hidden>Needs you <b id="needsPillN">0</b></a><span class="ca-counts" id="counts"></span>
+  <span class="ca-top-fill"></span><a class="needs-pill" id="needsPill" href="/#/" title="Lanes that need you: open the Control room" hidden><span class="np-word">Needs you</span><span class="np-mark" aria-hidden="true">!</span> <b id="needsPillN">0</b></a><span class="ca-counts" id="counts"></span>
 </header>
 <div class="runstrip" id="runstrip">
   <span class="ptitle" id="planTitle"></span>
