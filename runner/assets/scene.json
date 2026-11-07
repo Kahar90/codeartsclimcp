@@ -102,5 +102,58 @@
         "type": "escape"
       }
     ]
-  }
+  },
+  "hotdesks": [
+    {
+      "key": "hot1",
+      "role": "hot1",
+      "foot": [
+        470,
+        250
+      ],
+      "prop": "hotdesk",
+      "plate": "below"
+    },
+    {
+      "key": "hot2",
+      "role": "hot2",
+      "foot": [
+        455,
+        470
+      ],
+      "prop": "hotdesk",
+      "plate": "below"
+    },
+    {
+      "key": "hot3",
+      "role": "hot3",
+      "foot": [
+        840,
+        290
+      ],
+      "prop": "hotdesk",
+      "plate": "below"
+    },
+    {
+      "key": "hot4",
+      "role": "hot4",
+      "foot": [
+        480,
+        625
+      ],
+      "prop": "hotdesk",
+      "plate": "below"
+    },
+    {
+      "key": "hot5",
+      "role": "hot5",
+      "foot": [
+        1010,
+        615
+      ],
+      "prop": "hotdesk",
+      "plate": "below"
+    }
+  ],
+  "hotdeskNote": "Lanes beyond the three main stations sit at these hot desks (sprite role hotN, prop hotdesk drawn behind the worker). Foot anchors in stage pixels; compact plate below the foot. More lanes than desks go to the +N list."
 }

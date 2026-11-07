@@ -11,7 +11,14 @@ roles = {
     'builder': ('#79e3ef', '#306688', '#d2faff'),
     'artist': ('#ffc05a', '#ab5a36', '#ffe399'),
     'reviewer': ('#8cce83', '#46795d', '#c4f0a3'),
+    # Hot-desk workers: lanes beyond the three main stations. Builder robot body, own colour each.
+    'hot1': ('#ff9ec7', '#9c3d6e', '#ffd6ea'),
+    'hot2': ('#9fb4ff', '#3f4f9e', '#dbe3ff'),
+    'hot3': ('#c8f07a', '#5d7d2c', '#ecffc4'),
+    'hot4': ('#ffb07a', '#a3532a', '#ffe0c4'),
+    'hot5': ('#d4a6ff', '#6b3fa0', '#f0deff'),
 }
+shape_of = lambda role: 'builder' if role.startswith('hot') else role
 sequences = {
     'idle': [1800, 85, 115, 2300],
     'work': [125, 95, 90, 120, 100, 95, 110, 270],
@@ -22,13 +29,14 @@ sequences = {
 cell, stride, columns = 64, 66, 8
 
 def sprite(role, clip, frame):
+    shape = shape_of(role)
     im = Image.new('RGBA', (cell, cell))
     d = ImageDraw.Draw(im)
     color, dark, light = roles[role]
     blink = clip == 'idle' and frame == 1
     lift = [0, 1, 2, 3, 2, 1][frame] if clip == 'complete' else 0
     motion = [0,1,2,3,2,1,0,0][frame] if clip == 'work' else [0,2,4,2,0][frame] if clip == 'receive' else lift
-    y = -lift if role != 'builder' else 0
+    y = -lift if shape != 'builder' else 0
 
     def poly(points, fill, edge=outline):
         d.polygon(points, fill=fill, outline=edge)
@@ -47,11 +55,12 @@ def sprite(role, clip, frame):
     box((23,36+y,38,45+y),color,outline)
     line([(25,38+y),(35,38+y)],light,2)
 
-    if role == 'builder':
+    if shape == 'builder':
         line([(30,13),(30,7),(34,7)],outline,3)
         box((33,4,37,8),light,outline)
-        poly([(19,14),(36,11),(44,15),(47,20),(46,31),(41,36),(23,37),(15,32),(14,22)], '#91b3c5')
-        poly([(21,14),(36,13),(43,17),(44,27),(38,33),(23,33),(18,28),(18,21)],'#e2f1e9')
+        hot = role.startswith('hot')
+        poly([(19,14),(36,11),(44,15),(47,20),(46,31),(41,36),(23,37),(15,32),(14,22)], dark if hot else '#91b3c5')
+        poly([(21,14),(36,13),(43,17),(44,27),(38,33),(23,33),(18,28),(18,21)], color if hot else '#e2f1e9')
         poly([(23,19),(38,18),(42,21),(42,28),(38,31),(24,31),(21,28),(21,22)],'#133345')
         box((13,21,18,28),color,outline)
         if blink:
@@ -130,6 +139,30 @@ def sprite(role, clip, frame):
         box((50,15,51,16),'#ff987c')
     return im
 
+
+# Hot desk prop: a small isometric desk with one monitor, drawn behind a hot-desk worker.
+# Anchor = where the worker's foot anchor goes, so the monitor peeks out above the robot's head.
+def hotdesk():
+    W, H = 84, 74
+    im = Image.new('RGBA', (W, H)); d = ImageDraw.Draw(im)
+    top, side_l, side_r, leg = '#b46f3a', '#7a4426', '#5e321c', '#4a2716'
+    def poly(pts, fill): d.polygon(pts, fill=fill, outline=outline)
+    d.ellipse((6, 50, 78, 66), fill='#39263c55')                     # floor shadow
+    for x, y in ((12, 40), (40, 54), (70, 40), (42, 28)):             # legs
+        d.rectangle((x - 2, y, x + 1, y + 12), fill=leg, outline=outline)
+    poly([(8, 34), (42, 18), (76, 34), (42, 50)], top)                # desk top (iso diamond)
+    poly([(8, 34), (42, 50), (42, 55), (8, 39)], side_l)              # front-left edge
+    poly([(42, 50), (76, 34), (76, 39), (42, 55)], side_r)            # front-right edge
+    d.line([(14, 34), (42, 21), (70, 34)], fill='#d08a4e')            # top highlight
+    poly([(39, 22), (45, 22), (46, 29), (38, 29)], '#3b3f55')         # monitor stand
+    poly([(24, 3), (60, 3), (60, 24), (24, 24)], '#2a2f45')           # monitor bezel
+    d.rectangle((27, 6, 57, 21), fill='#14303f')                      # screen
+    for i, (x0, x1) in enumerate(((30, 46), (30, 52), (33, 49), (30, 42))):
+        d.line([(x0, 9 + i * 3), (x1, 9 + i * 3)], fill='#5fe3d0' if i != 2 else '#ffd591')
+    poly([(62, 26), (68, 26), (68, 33), (62, 33)], '#f0e6d8')         # mug
+    d.line([(68, 28), (70, 30)], fill=outline)
+    return im, [42, 66]
+
 manifest = {'cell':[64,64], 'pixelScale':'nearest', 'anchor':[32,57],
             'units':'px and ms', 'roles':{}}
 for role in roles:
@@ -145,4 +178,7 @@ for role in roles:
     path = f'atlases/{role}.png'
     atlas.save(root/path)
     manifest['roles'][role] = {'atlas':path, 'clips':clips}
+desk, anchor = hotdesk()
+desk.save(root/'atlases'/'hotdesk.png')
+manifest['props'] = {'hotdesk': {'image': 'atlases/hotdesk.png', 'anchor': anchor, 'size': list(desk.size)}}
 (root/'sprites.json').write_text(json.dumps(manifest,indent=2)+'\n')
