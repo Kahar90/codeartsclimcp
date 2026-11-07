@@ -252,7 +252,8 @@ const TOOLS = [
       if (a.stale) {
         const h = (a.older_than_h === undefined || a.older_than_h === null || a.older_than_h === '') ? 48 : Number(a.older_than_h);
         if (!Number.isFinite(h) || h <= 0) throw new ArgError('older_than_h');
-        return ['ack', '--stale', '--older-than', `${Math.round(h)}h`, ...(a.note ? ['--note', String(a.note)] : [])];
+        // In minutes: a fractional hour such as 0.3 must never round down to 0 and sweep every lane.
+        return ['ack', '--stale', '--older-than', `${Math.max(1, Math.round(h * 60))}m`, ...(a.note ? ['--note', String(a.note)] : [])];
       }
       if (a.lane !== undefined && a.lane !== null && a.lane !== '') return ['ack', needStr(a.lane, 'lane'), ...(a.note ? ['--note', String(a.note)] : [])];
       throw new ArgError('lane');
