@@ -89,7 +89,7 @@ check('onboard runs its smoke lane with CA_NO_PLAN=1', /CA_NO_PLAN/.test(fs.read
 
 // ---- 7. Office follows the working plan ----
 const chromePath = findChrome();
-if (!chromePath) results.push('PASS office part skipped: no Chrome found (set CHROME_PATH)');
+if (!chromePath) results.push('PASS SKIP office part: no Chrome found (set CHROME_PATH)');
 else {
   // fake running lanes registered straight into plans (the fake server lanes above already finished)
   const runLane = (rp, task) => { const dir = path.join(rp, 'tasks', `${task}.lane`); fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });

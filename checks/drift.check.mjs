@@ -76,7 +76,7 @@ const bucketOf = (env) => { const r = spawnSync(process.execPath, [CA, 'status',
 
 // ---- dashboard ----
 const chromePath = findChrome();
-if (!chromePath) results.push('PASS dashboard part skipped: no Chrome found (set CHROME_PATH)');
+if (!chromePath) results.push('PASS SKIP dashboard part: no Chrome found (set CHROME_PATH)');
 else {
   const { tmp, env } = setup();
   const dp = await free(), cp = await free();
