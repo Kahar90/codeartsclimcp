@@ -1,4 +1,4 @@
-MODEL: maas/glm-5.3
+MODEL: maas/deepseek-v4.1-flash
 You are working in a git repo (current directory): the Office view `runner/office.html` of the `ca` CodeArts lane
 runner (Pixel Workshop room with the lead and three worker stations). Goal: when more than three lanes exist, the
 extra lanes appear in the room as real sprites at hot desks instead of only a list: five hot desks, then a "+N more"
