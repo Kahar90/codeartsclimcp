@@ -137,6 +137,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
   <span class="pnow" id="nowLine" hidden></span>
   <span class="chip" id="leadChip" hidden></span>
   <span id="statusBadge"></span>
+  <span class="chip" id="tokenChip" hidden></span>
   <span class="topfill"></span>
   <select id="planSel" hidden aria-label="plan"></select>
   <button id="motionBtn" type="button" aria-pressed="true">Motion</button>
@@ -487,6 +488,12 @@ function renderTop() {
   $("leadChip").hidden = !p.lead;
   if (p.lead) $("leadChip").textContent = p.lead;
   $("statusBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+  const pt = CAUI.tokenTotal(p.tokens);
+  $("tokenChip").hidden = !pt;
+  if (pt) {
+    $("tokenChip").textContent = "Tokens " + CAUI.fmtTokens(pt);
+    $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).join(" \u00b7 ");
+  }
   const nPlans = mode === "demo" ? 1 : plansArr.length;
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
   $("counts").textContent = `${nPlans} plan${nPlans === 1 ? "" : "s"} \u00b7 ${nLanes} lane${nLanes === 1 ? "" : "s"}`;
@@ -570,7 +577,10 @@ function laneName(l) { return l.task || l.id; }
 function stationSub(l) {
   const st = CAUI.status(l.health);
   const p = l.progress || {};
-  return p.total ? st.label + " \u00b7 " + (p.done || 0) + "/" + p.total : st.label;
+  let s = p.total ? st.label + " \u00b7 " + (p.done || 0) + "/" + p.total : st.label;
+  const tt = CAUI.tokenTotal(l.tokens);
+  if (tt) s += " \u00b7 " + CAUI.fmtTokens(tt);
+  return s;
 }
 function holderReclaimable(id) {
   const l = model.lanes.find((x) => x.id === id);
