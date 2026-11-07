@@ -1509,6 +1509,16 @@ function cmdDash(args) {
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
+      if (u.pathname === '/api/auth') {
+        // Start the local key form (runner/auth.mjs) for the Connect keys button and hand back its
+        // URL. The child prints JSON only; key values never reach this process, the page or the logs.
+        // A route handler must never die(): a stale tab must not kill the dashboard.
+        if (req.method !== 'POST') return json({ error: 'use POST /api/auth' }, 405);
+        const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), 'auth', '--no-open', '--json'], { encoding: 'utf8', timeout: 20000, env: caEnv(), windowsHide: true });
+        let v = null; try { v = JSON.parse(String(r.stdout || '').trim()); } catch {}
+        if (!v) return json({ error: 'auth did not return JSON' }, 500);
+        return json({ ready: !!v.ready, url: v.url || '' });
+      }
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
