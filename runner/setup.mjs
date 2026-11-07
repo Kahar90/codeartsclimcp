@@ -12,6 +12,58 @@ const CA_MJS = path.resolve(HERE, 'ca.mjs').replace(/\\/g, '/');
 const WORKFLOW = fs.readFileSync(path.resolve(HERE, '..', 'docs', 'workflow.md'), 'utf8');
 const SERVER = { command: 'node', args: [CA_MJS, 'mcp'] };
 const HARNESSES = ['claude', 'kiro', 'cursor', 'codex', 'vscode', 'opencode'];
+// Machine-wide install bookkeeping: the manifest lists which harness was set up, at which scope,
+// which ca.mjs it points at and every file setup wrote or merged. `ca uninstall` replays it.
+const STATE_DIR = path.join(os.homedir(), '.config', 'codearts-lanes');
+const MANIFEST = path.join(STATE_DIR, 'installed.json');
+// Markers around the codearts-lanes workflow block in AGENTS.md and similar files.
+export const BLOCK_START = '<!-- codearts-lanes:start -->';
+export const BLOCK_END = '<!-- codearts-lanes:end -->';
+
+// Everything `ca setup <harness> --user` may write for one harness, with the JSON map key each
+// file uses. `ca uninstall` replays this so a harness that is not in the manifest is still cleaned
+// at its known user paths. Paths honour the same CLAUDE_CONFIG_DIR / CODEX_HOME overrides setup
+// writes with.
+const claudeDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(home(), '.claude');
+const codexHome = () => process.env.CODEX_HOME || path.join(home(), '.codex');
+export function userPaths(harness) {
+  if (harness === 'kiro') return {
+    json: [{ file: path.join(home(), '.kiro', 'settings', 'mcp.json'), mapKey: 'mcpServers', serverKey: 'codearts' }],
+    steering: [path.join(home(), '.kiro', 'steering', 'codearts-lanes.md')],
+  };
+  if (harness === 'cursor') return {
+    json: [{ file: path.join(home(), '.cursor', 'mcp.json'), mapKey: 'mcpServers', serverKey: 'codearts' }],
+  };
+  if (harness === 'vscode') return {
+    json: [{ file: path.join(vscodeUserDir(), 'mcp.json'), mapKey: 'servers', serverKey: 'codearts' }],
+  };
+  if (harness === 'codex') return {
+    codexToml: path.join(codexHome(), 'config.toml'),
+    blocks: [path.join(codexHome(), 'AGENTS.md')],
+  };
+  if (harness === 'opencode') return {
+    json: [{ file: path.join(home(), '.config', 'opencode', 'opencode.json'), mapKey: 'mcp', serverKey: 'codearts' }],
+    blocks: [path.join(home(), '.config', 'opencode', 'AGENTS.md')],
+  };
+  if (harness === 'claude') return {
+    json: [{ file: path.join(claudeDir(), '.claude.json'), mapKey: 'mcpServers', serverKey: 'codearts' }],
+    allow: [path.join(claudeDir(), 'settings.json')],
+    skillDir: path.join(claudeDir(), 'skills', 'codearts-build'),
+  };
+  return null;
+}
+
+// Merge this harness's user-scope record into installed.json: which ca.mjs it points at and every
+// file setup wrote or merged. Keeps the other harnesses' records.
+function recordManifest(harness, files) {
+  let man = {};
+  try { man = JSON.parse(fs.readFileSync(MANIFEST, 'utf8')); } catch {}
+  if (!man || typeof man !== 'object' || Array.isArray(man)) man = {};
+  if (!man.harnesses || typeof man.harnesses !== 'object' || Array.isArray(man.harnesses)) man.harnesses = {};
+  man.harnesses[harness] = { scope: 'user', caMjs: CA_MJS, files: [...new Set(files.map((p) => path.resolve(p)))], at: new Date().toISOString() };
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(MANIFEST, JSON.stringify(man, null, 2) + '\n');
+}
 
 function usage() {
   process.stderr.write(
@@ -48,15 +100,24 @@ const readText = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') 
 // A TOML basic string: escape backslashes (Windows paths) and double quotes.
 const tomlStr = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
+// Remove the codearts-lanes block (markers included) from a text file, keeping every other
+// line. Returns '' when the block was the whole file, so the caller can delete the file.
+export function stripBlock(text) {
+  const i = text.indexOf(BLOCK_START);
+  const j = text.indexOf(BLOCK_END);
+  if (i < 0 || j < i) return text;
+  const before = text.slice(0, i).replace(/\s+$/, '');
+  const after = text.slice(j + BLOCK_END.length).replace(/^\r?\n/, '').replace(/\s+$/, '');
+  return [before, after].filter(Boolean).join('\n\n');
+}
+
 // Put the workflow between the codearts-lanes markers, replacing an existing block or
 // appending one, and keeping the rest of the file untouched.
 function upsertBlock(text, body) {
-  const start = '<!-- codearts-lanes:start -->';
-  const end = '<!-- codearts-lanes:end -->';
-  const block = `${start}\n${body.replace(/\s+$/, '')}\n${end}\n`;
-  const i = text.indexOf(start);
-  const j = text.indexOf(end);
-  if (i >= 0 && j > i) return text.slice(0, i) + block + text.slice(j + end.length).replace(/^\r?\n/, '');
+  const block = `${BLOCK_START}\n${body.replace(/\s+$/, '')}\n${BLOCK_END}\n`;
+  const i = text.indexOf(BLOCK_START);
+  const j = text.indexOf(BLOCK_END);
+  if (i >= 0 && j > i) return text.slice(0, i) + block + text.slice(j + BLOCK_END.length).replace(/^\r?\n/, '');
   const head = text.replace(/\s+$/, '');
   return (head ? head + '\n\n' : '') + block;
 }
@@ -65,10 +126,9 @@ function upsertBlock(text, body) {
 const tomlHeader = (line) => { const m = line.match(/^\s*\[([^\]]+)\]/); return m ? m[1].trim() : null; };
 const isCodeartsTable = (name) => name === 'mcp_servers.codearts' || name.startsWith('mcp_servers.codearts.');
 
-// Replace (or append) the [mcp_servers.codearts] table and every [mcp_servers.codearts.*]
-// sub-table, keeping all other content byte for byte. Each table runs until the next header
-// that is not one of them.
-function upsertCodexToml(text, block) {
+// Drop every [mcp_servers.codearts] and [mcp_servers.codearts.*] table, keeping all other
+// content byte for byte. Each table runs until the next header that is not one of them.
+export function stripCodexToml(text) {
   const lines = text.split('\n');
   const kept = [];
   let i = 0;
@@ -86,12 +146,18 @@ function upsertCodexToml(text, block) {
     kept.push(lines[i]);
     i++;
   }
-  const body = kept.join('\n').replace(/\s+$/, '');
+  return kept.join('\n').replace(/\s+$/, '');
+}
+
+// Replace (or append) the [mcp_servers.codearts] table and every [mcp_servers.codearts.*]
+// sub-table, keeping all other content byte for byte.
+function upsertCodexToml(text, block) {
+  const body = stripCodexToml(text);
   return (body ? body + '\n\n' : '') + block;
 }
 
 // Read-only lanes tools that are safe to auto-approve: they never start or change a lane.
-const AUTO_APPROVE = ['ca_doctor', 'ca_status', 'ca_summary', 'ca_tail', 'ca_wait'];
+export const AUTO_APPROVE = ['ca_doctor', 'ca_status', 'ca_summary', 'ca_tail', 'ca_wait'];
 
 // The user-level config dir for a harness: home-based with --user, repo-based otherwise.
 const home = () => os.homedir();
@@ -113,7 +179,7 @@ function addJSON(plan, errors, file, mapKey, serverKey, value) {
 
 // Claude Code skill: our header (front matter + tool names) followed by the lead workflow.
 // A SKILL.md without our marker line is the user's own: never overwritten, only noted.
-const SKILL_MARKER = 'generated by `ca setup claude`';
+export const SKILL_MARKER = 'generated by `ca setup claude`';
 const SKILL = fs.readFileSync(path.resolve(HERE, '..', 'templates', 'claude-skill.md'), 'utf8').replace(/\s+$/, '')
   + '\n\n' + WORKFLOW.replace(/^# .*\r?\n+/, '');
 function addSkill(plan, notes, file) {
@@ -181,6 +247,7 @@ function buildPlan(harness, repo, flags) {
   const plan = [];
   const errors = [];
   const notes = [];
+  const extra = []; // user files written outside the plan (the claude CLI adds the server itself)
 
   if (harness === 'kiro') {
     const dir = flags.user ? path.join(home(), '.kiro') : path.join(repo, '.kiro');
@@ -224,6 +291,7 @@ function buildPlan(harness, repo, flags) {
         notes.push(`claude: MCP server already in ${userJson}`);
       } else if (!flags.dryRun && process.env.CA_CLAUDE_CLI !== 'none' && claudeCliAdd()) {
         notes.push('claude: MCP server added with the claude CLI');
+        extra.push(userJson);
       } else {
         addJSON(plan, errors, userJson, 'mcpServers', 'codearts', entry);
       }
@@ -262,7 +330,7 @@ function buildPlan(harness, repo, flags) {
       : 'opencode: the codearts tools load in this repo; AGENTS.md carries the workflow.');
   }
 
-  return { plan, errors, notes };
+  return { plan, errors, notes, extra };
 }
 
 export default async function setup(args) {
@@ -275,7 +343,7 @@ export default async function setup(args) {
     process.exitCode = 2;
     return;
   }
-  const { plan, errors, notes } = buildPlan(harness, repo, { dryRun: flags.has('--dry-run'), write: flags.has('--write'), user: flags.has('--user') });
+  const { plan, errors, notes, extra = [] } = buildPlan(harness, repo, { dryRun: flags.has('--dry-run'), write: flags.has('--write'), user: flags.has('--user') });
 
   if (errors.length) {
     for (const e of errors) {
@@ -303,5 +371,6 @@ export default async function setup(args) {
     }
     process.stdout.write(`${p.action} ${p.path}\n`);
   }
+  if (flags.has('--user')) recordManifest(harness, [...plan.map((p) => p.path), ...extra]);
   for (const n of notes) process.stdout.write(`${n}\n`);
 }
