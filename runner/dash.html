@@ -256,6 +256,9 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .cr-proj-nm { font-weight: 700 }
 .cr-proj-cnt { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto }
 .cr-proj-cnt .ca-badge { height: 20px; font-size: 11.5px }
+.crumb { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 6px }
+.lane-bucket { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px }
+.lane-bucket .cr-why-big { color: var(--muted); font-size: 14px; overflow-wrap: anywhere }
 @media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
 /* ---------- freshness, stale banner, notifications ---------- */
@@ -688,6 +691,7 @@ function crTile(b, n) {
   return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}">${crIcon(b.key)}<span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></button>`;
 }
 function crBadge(key) { const m = crMeta(key); return `<span class="ca-badge s-${m.tone} buk">${crIcon(key)}${esc(m.word)}</span>`; }
+function crDot(key) { const m = crMeta(key); return `<span class="ca-dot s-${m.tone}" title="${esc(m.word)}"></span>`; }
 // "running 24m, step 3/8", "stuck 6m", "finished 2h ago": a phrase, never just a colour.
 function crTime(l) {
   const b = laneBucket(l), p = l.progress || {};
@@ -809,7 +813,7 @@ function renderRail() {
   const loose = lanes.filter((l) => !inPlan.has(l.id));
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
   const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
-  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${dot(CAUI.status(l.health))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
+  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
   const attention = lanes.filter((l) => laneBucket(l) === 'attention').length;
   let h = `<div class="rail-card cr${route.kind === '' ? ' sel' : ''}" data-go="/">
     <div class="rail-row"><span class="ca-dot" style="color:var(--sel)"></span><span class="rail-title">Control room</span>${attention ? `<span class="ca-badge s-bad">${attention}</span>` : ''}</div>
@@ -941,7 +945,8 @@ function renderLane(d, keep) {
   const evtsBody = evts.length ? evts.slice(0, 20).map((e) => `<div class="small"><span class="mute">${esc(clock(e.at))}</span> <span style="color:${e.c}">${esc(e.t)}</span></div>`).join('') : '<div class="small">none</div>';
   const ctx = (k, title, sum, body) => `<div class="ctxrow"><button type="button" data-ctx="${k}" aria-expanded="${openCtx(k)}"><span class="ci">&#9654;</span>${title}<span class="sum">${sum}</span></button><div class="ctxbody" ${openCtx(k) ? '' : 'style="display:none"'}>${body}</div></div>`;
   $('view').innerHTML = `<div class="pad has-bar" style="flex:1">
-    ${plan ? `<a class="backlink" href="#/plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a>` : ''}
+    <div class="crumb"><a class="backlink" href="#/">&larr; Control room</a>${plan ? `<a class="backlink" href="#/plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a>` : ''}</div>
+    <div class="lane-bucket" data-bucket="${esc(d.bucket || laneBucket(d))}">${crBadge(d.bucket || laneBucket(d))}${d.bucketWhy ? `<span class="cr-why-big">${esc(d.bucketWhy)}</span>` : ''}</div>
     <div class="idrow"><span class="spot" data-spot="lane:${esc(d.id)}" data-role="${d.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.875" data-work="${d.running ? 1 : 0}"></span><h1>${esc(d.task)}</h1>${CAUI.badge(st)}${d.verdict ? `<span class="ca-badge s-${d.verdict === 'ready' ? 'done' : 'warn'}">review: ${esc(d.verdict)}</span>` : ''}</div>
     ${metrics}
     ${contLine(d.continues ? d : wl)}
