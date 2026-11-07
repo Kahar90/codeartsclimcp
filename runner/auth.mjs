@@ -165,7 +165,7 @@ function isSet(k) {
   if (process.env.CA_CREDENTIALS_ONLY === '1') return !!readCreds()[k];
   if (process.env[k] || readCreds()[k]) return true;
   if (process.platform !== 'win32') return false;
-  const r = spawnSync('powershell', ['-NoProfile', '-Command', `[bool][Environment]::GetEnvironmentVariable('${k}','User')`], { encoding: 'utf8', windowsHide: true });
+  const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-Command', `[bool][Environment]::GetEnvironmentVariable('${k}','User')`], { encoding: 'utf8', windowsHide: true });
   return /true/i.test(r.stdout || '');
 }
 const status = () => Object.fromEntries(KEYS.map((k) => [k, isSet(k)]));
