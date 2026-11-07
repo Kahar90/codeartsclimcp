@@ -242,6 +242,20 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .ca-badge.buk { gap: 5px }
 .ca-badge.buk .buk-ico { width: 13px; height: 13px }
 button.btn.tiny { padding: 5px 10px; font-size: 12px }
+.cr-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px }
+.cr-group { display: inline-flex; border: 1px solid var(--border-2); border-radius: var(--radius-sm); overflow: hidden }
+.cr-gbtn { background: var(--panel); border: 0; color: var(--muted); font: 600 12.5px var(--font); padding: 7px 12px; cursor: pointer }
+.cr-gbtn + .cr-gbtn { border-left: 1px solid var(--border-2) }
+.cr-gbtn.on { background: var(--sel); color: #171320 }
+.cr-chips { display: flex; flex-wrap: wrap; gap: 6px }
+.cr-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--border-2); border-radius: 999px; color: var(--muted); font: 600 12px var(--font); padding: 5px 11px; cursor: pointer }
+.cr-chip:hover { border-color: var(--sel) }
+.cr-chip.on { border-color: var(--sel); background: var(--sel-bg); color: var(--sel-ink) }
+.cr-chip .ca-badge { height: 18px; padding: 0 7px; font-size: 11px }
+.cr-proj-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2) }
+.cr-proj-nm { font-weight: 700 }
+.cr-proj-cnt { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto }
+.cr-proj-cnt .ca-badge { height: 20px; font-size: 11.5px }
 @media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
 /* ---------- motion ---------- */
@@ -642,9 +656,14 @@ function laneBucket(l) {
   if (r === 'done' || r === 'continued') return 'done';
   return 'ended';
 }
-let crFilter = ''; // '' = show all; a bucket key filters the list
-const crOpen = new Set(['attention', 'running']); // sections expanded; Done and Ended start collapsed
-let crSeenOpen = false; // the "Seen earlier" block inside Done
+// Small localStorage helpers: a remembered control room never throws on a locked-down browser.
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+let crFilter = lsGet('ca-cr-filter', '') || ''; // '' = show all; a bucket key filters the list
+let crProject = lsGet('ca-cr-project', '') || ''; // '' = all projects; else a project key
+let crGroup = lsGet('ca-cr-group', 'status') === 'project' ? 'project' : 'status';
+const crOpen = new Set(String(lsGet('ca-cr-open', 'attention,running')).split(',').filter(Boolean)); // expanded sections
+let crSeenOpen = lsGet('ca-cr-seen', '') === '1'; // the "Seen earlier" block inside Done
 function crCounts() {
   const c = { attention: 0, running: 0, done: 0, ended: 0 };
   for (const l of lanes) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; }
@@ -682,6 +701,10 @@ function crRow(l) {
     <div class="cr-row-foot">${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${p.total || 0} steps</span><span class="cr-meta">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</span>${sug}${seenBtn}</div>
   </div>`;
 }
+const projKey = (l) => (l.project && l.project.key) || '';
+const projName = (l) => (l.project && (l.project.name || l.project.key)) || '';
+function crProjectKeys() { const m = new Map(); for (const l of lanes) { const k = projKey(l); if (k && !m.has(k)) m.set(k, projName(l)); } return m; }
+function crBucketCounts(list) { const c = { attention: 0, running: 0, done: 0, ended: 0 }; for (const l of list) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; } return c; }
 function crSection(b, ls) {
   const open = crOpen.has(b.key) || crFilter === b.key;
   let body = ls.map(crRow).join('');
@@ -693,17 +716,35 @@ function crSection(b, ls) {
   if (!ls.length) body = '<div class="small" style="padding:10px 14px">none</div>';
   return `<section class="cr-sec" data-bucket="${b.key}"><button type="button" class="cr-sec-h" data-crsec="${b.key}" aria-expanded="${open}"><span class="tri">&#9654;</span>${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></button>${open ? body : ''}</section>`;
 }
+const CR_RANK = { attention: 0, running: 1, done: 2, ended: 3 };
+function crProjectBlock(key, name, ls) {
+  const cnt = crBucketCounts(ls);
+  const sorted = [...ls].sort((a, b) => (CR_RANK[laneBucket(a)] ?? 9) - (CR_RANK[laneBucket(b)] ?? 9));
+  const summary = CR_BUCKETS.filter((b) => cnt[b.key]).map((b) => `<span class="ca-badge s-${b.tone}">${cnt[b.key]} ${esc(b.word)}</span>`).join(' ');
+  return `<section class="cr-sec" data-project="${esc(key)}"><div class="cr-proj-h"><span class="cr-proj-nm">${esc(name)}</span><span class="cr-proj-cnt">${summary}</span></div>${sorted.map(crRow).join('') || '<div class="small" style="padding:10px 14px">none</div>'}</section>`;
+}
+function crStatusView(shown) { return CR_BUCKETS.map((b) => (crFilter && b.key !== crFilter) ? '' : crSection(b, shown.filter((l) => laneBucket(l) === b.key))).join(''); }
+function crProjectView(shown) {
+  return [...crProjectKeys()].filter(([k]) => !crProject || k === crProject).map(([k, n]) => crProjectBlock(k, n, shown.filter((l) => projKey(l) === k))).join('') || '<div class="small" style="padding:10px 0">No projects.</div>';
+}
 function renderControl() {
   const c = crCounts();
-  const picked = crFilter ? lanes.filter((l) => laneBucket(l) === crFilter) : lanes;
-  const secs = CR_BUCKETS.map((b) => (crFilter && b.key !== crFilter) ? '' : crSection(b, picked.filter((l) => laneBucket(l) === b.key))).join('');
+  const shown = lanes.filter((l) => (!crFilter || laneBucket(l) === crFilter) && (!crProject || projKey(l) === crProject));
+  const tiles = CR_BUCKETS.map((b) => crTile(b, c[b.key] || 0)).join('');
+  const chips = `<button type="button" class="cr-chip${crProject === '' ? ' on' : ''}" data-crproj="" aria-pressed="${crProject === ''}">All projects</button>` +
+    [...crProjectKeys()].map(([k, n]) => { const a = lanes.filter((l) => projKey(l) === k && laneBucket(l) === 'attention').length; return `<button type="button" class="cr-chip${crProject === k ? ' on' : ''}" data-crproj="${esc(k)}" aria-pressed="${crProject === k}">${esc(n)}${a ? ` <span class="ca-badge s-bad">${a}</span>` : ''}</button>`; }).join('');
+  const groups = ['status', 'project'].map((g) => `<button type="button" class="cr-gbtn${crGroup === g ? ' on' : ''}" data-crgroup="${g}" aria-pressed="${crGroup === g}">${g === 'status' ? 'By status' : 'By project'}</button>`).join('');
+  const body = crGroup === 'project' ? crProjectView(shown) : crStatusView(shown);
   $('view').innerHTML = `<div class="pad">
-    <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · pick a tile to filter</div></div>
-    <div class="crtiles" role="group" aria-label="Lane buckets">${CR_BUCKETS.map((b) => crTile(b, c[b.key] || 0)).join('')}</div>
-    <div class="cr-list">${secs || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div></div>`;
-  for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; renderControl(); };
-  for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); renderControl(); };
-  for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; renderControl(); };
+    <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · ${crGroup === 'project' ? 'by project' : 'by status'}</div></div>
+    <div class="crtiles" role="group" aria-label="Lane buckets">${tiles}</div>
+    <div class="cr-controls"><div class="cr-group" role="group" aria-label="Group lanes">${groups}</div><div class="cr-chips">${chips}</div></div>
+    <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div></div>`;
+  for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; lsSet('ca-cr-filter', crFilter); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); lsSet('ca-cr-open', [...crOpen].join(',')); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
+  for (const g of $('view').querySelectorAll('[data-crgroup]')) g.onclick = () => { crGroup = g.dataset.crgroup; lsSet('ca-cr-group', crGroup); renderControl(); };
+  for (const p of $('view').querySelectorAll('[data-crproj]')) p.onclick = () => { crProject = crProject === p.dataset.crproj ? '' : p.dataset.crproj; lsSet('ca-cr-project', crProject); renderControl(); };
   for (const x of $('view').querySelectorAll('[data-ack-id]')) x.onclick = () => setSeen(x.dataset.ackId, x.dataset.ackMark === '1');
   syncBarPad();
 }
