@@ -26,6 +26,65 @@ export const KEYS = ['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK', 'MAAS_API_KEY'];
 const REQUIRED = ['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK'];
 const PORTAL = 'https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth';
 
+// ---- keys at rest ----------------------------------------------------------
+// On Windows the credentials file holds DPAPI-encrypted values (CurrentUser scope, through
+// PowerShell), so the plain keys never sit on disk. Values travel through the environment, never
+// the command line. On other platforms the file stays plain JSON with mode 0600.
+const PROTECT_PS = [
+  "$ErrorActionPreference = 'Stop'",
+  '$names = ConvertFrom-Json $env:CA_VAULT_NAMES',
+  '$n = @($names).Count',
+  '$o = [ordered]@{}',
+  'for ($i = 0; $i -lt $n; $i++) {',
+  '  $val = [Environment]::GetEnvironmentVariable("CA_VAULT_$i")',
+  '  $sec = ConvertTo-SecureString $val -AsPlainText -Force',
+  '  $o[[string]$i] = ConvertFrom-SecureString $sec',
+  '}',
+  'ConvertTo-Json $o -Compress',
+].join('\n');
+const UNPROTECT_PS = [
+  "$ErrorActionPreference = 'Stop'",
+  '$names = ConvertFrom-Json $env:CA_VAULT_NAMES',
+  '$n = @($names).Count',
+  '$o = [ordered]@{}',
+  'for ($i = 0; $i -lt $n; $i++) {',
+  '  $blob = [Environment]::GetEnvironmentVariable("CA_VAULT_$i")',
+  '  $sec = ConvertTo-SecureString $blob',
+  '  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)',
+  '  $o[[string]$i] = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)',
+  '  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)',
+  '}',
+  'ConvertTo-Json $o -Compress',
+].join('\n');
+
+function psResult(names, r) {
+  if (!r || r.status !== 0) return null;
+  let j; try { j = JSON.parse(r.stdout); } catch { return null; }
+  const out = {};
+  for (let i = 0; i < names.length; i++) {
+    if (typeof j[String(i)] !== 'string') return null;
+    out[names[i]] = j[String(i)];
+  }
+  return out;
+}
+
+// One PowerShell call for the whole map: values go in CA_VAULT_0, CA_VAULT_1, ... (never the
+// command line), and the encrypted map comes back as JSON on stdout. null on any failure.
+function protect(map) {
+  const names = Object.keys(map);
+  const env = { ...process.env, CA_VAULT_NAMES: JSON.stringify(names) };
+  names.forEach((n, i) => { env[`CA_VAULT_${i}`] = map[n]; });
+  const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', PROTECT_PS], { encoding: 'utf8', windowsHide: true, env });
+  return psResult(names, r);
+}
+function unprotect(map) {
+  const names = Object.keys(map);
+  const env = { ...process.env, CA_VAULT_NAMES: JSON.stringify(names) };
+  names.forEach((n, i) => { env[`CA_VAULT_${i}`] = map[n]; });
+  const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', UNPROTECT_PS], { encoding: 'utf8', windowsHide: true, env });
+  return psResult(names, r);
+}
+
 export function readCreds() {
   try {
     const v = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8').replace(/^﻿/, ''));
