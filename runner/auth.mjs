@@ -327,7 +327,8 @@ export default async function auth(args) {
   const token = crypto.randomBytes(18).toString('base64url');
   const portFile = path.join(os.tmpdir(), `ca-auth-${process.pid}-${Date.now()}.port`);
   const child = spawn(process.execPath, [path.join(HERE, 'ca.mjs'), 'auth', '--serve', portFile],
-    { env: { ...process.env, CA_AUTH_TOKEN: token }, detached: true, stdio: 'ignore', windowsHide: true });
+    // cwd = temp: the form lives up to 15 min and must not lock the user's repo folder on Windows.
+    { cwd: os.tmpdir(), env: { ...process.env, CA_AUTH_TOKEN: token }, detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
   let port = '';
   for (let i = 0; i < 50 && !port; i++) { await new Promise((r) => setTimeout(r, 100)); try { port = fs.readFileSync(portFile, 'utf8').trim(); } catch {} }
