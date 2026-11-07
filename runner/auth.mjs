@@ -103,12 +103,15 @@ button{margin-top:22px;width:100%;padding:11px;border:0;border-radius:8px;backgr
 <label>Secret key (SK) ${have.CODEARTS_CLI_SK ? '<small>already set, leave blank to keep</small>' : ''}</label><input name="CODEARTS_CLI_SK" type="password" autocomplete="off" ${have.CODEARTS_CLI_SK ? '' : 'required'}>
 <p style="margin:8px 0 0"><small>Create them at <a href="${PORTAL}" target="_blank" rel="noopener">CodeArts CLI auth settings</a>.</small></p>
 <label>MaaS API key <small>optional, enables the faster builder models${have.MAAS_API_KEY ? '; already set' : ''}</small></label><input name="MAAS_API_KEY" type="password" autocomplete="off">
+<p style="margin:8px 0 0"><small>Create one in the ModelArts Studio (MaaS) console under API Key Management (Singapore region). <a href="https://support.huaweicloud.com/intl/en-us/usermanual-maas-modelarts/maas-modelarts-0073.html" target="_blank" rel="noopener">Open the guide</a>.</small></p>
 <button>Save keys</button><p id="m" style="margin:12px 0 0"></p></form></main>
 <script>
-document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const m=document.getElementById('m');
+document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const m=document.getElementById('m');m.className='';m.textContent='';
 const body=Object.fromEntries(new FormData(e.target));
 try{const r=await fetch(location.pathname+'/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-if(!r.ok)throw new Error(await r.text());
+const j=await r.json().catch(()=>({}));
+if(!r.ok||j.ok===false)throw new Error(j.error||'save failed');
+if(j.warning){m.textContent=j.warning;return;}
 document.getElementById('c').innerHTML='<h1 class="done">Keys saved</h1><p>You can close this tab and go back to your coding agent. It continues on its own.</p>';}
 catch(err){m.className='err';m.textContent='Could not save: '+err.message;}};
 </script></body></html>`;
