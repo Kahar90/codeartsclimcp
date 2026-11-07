@@ -90,6 +90,21 @@ body.narrow #winTail { display: none; }
 #winSend { flex: none; height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 14.5px var(--font); cursor: pointer; }
 #winSend:disabled, #winInput:disabled { opacity: 0.55; cursor: default; }
 #winErr { padding: 0 18px 14px; color: var(--bad); font-size: 13.5px; }
+#winCtl { display: flex; flex-direction: column; gap: 7px; }
+.ctl-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ctl-btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 13px var(--font); cursor: pointer; }
+.ctl-btn:hover { border-color: var(--sel); }
+.ctl-btn.primary { background: var(--sel); border-color: var(--sel); color: #201331; }
+.ctl-why { color: var(--amber); font-size: 12.5px; }
+#winNote { display: flex; flex-direction: column; gap: 7px; }
+#noteText { resize: vertical; min-height: 46px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--code-bg); color: var(--fg); font: 13.5px/1.4 var(--font); }
+.note-btns { display: flex; gap: 6px; }
+#winChips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px; }
+.qchip { height: 24px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 12px var(--font); cursor: pointer; }
+.qchip:hover { color: var(--fg); border-color: var(--sel); }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60; max-width: min(420px, calc(100vw - 32px)); padding: 9px 16px; border-radius: 8px; background: var(--raise); border: 1px solid var(--sel); color: var(--fg); font: 600 13.5px var(--font); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+#toast.bad { border-color: var(--bad); color: var(--bad); }
+#toast[hidden] { display: none !important; }
 @keyframes win-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes win-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
 #win.win-in { animation: win-in 140ms ease-out; }
@@ -114,7 +129,7 @@ body.narrow .plate { display: none !important; }
 body.narrow #links { display: none; }
 body.narrow #overflow { display: none; }
 body.narrow #win:not([hidden]) { display: flex; flex-direction: column; width: calc(100% - 24px); max-height: min(55vh, calc(100% - 24px)); }
-body.narrow .win-head, body.narrow #winForm, body.narrow #winErr { flex: none; }
+body.narrow .win-head, body.narrow #winForm, body.narrow #winErr, body.narrow #winChips { flex: none; }
 body.narrow #winBody { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 body.narrow { height: auto; min-height: 100%; overflow-y: auto; scrollbar-width: none; }
 body.narrow::-webkit-scrollbar { display: none; }
@@ -175,8 +190,20 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
         <div id="winNow" hidden></div>
         <ul id="winSteps"></ul>
         <a id="winLink" hidden>Open in Lanes</a>
+        <div id="winCtl" hidden>
+          <div id="winBtns" class="ctl-row"></div>
+          <div id="winWhy" class="ctl-why" hidden></div>
+          <div id="winNote" hidden>
+            <textarea id="noteText" rows="2" placeholder="Note for the worker, optional" aria-label="Note for the worker, optional"></textarea>
+            <div class="note-btns">
+              <button type="button" id="noteSend" class="ctl-btn primary">Send</button>
+              <button type="button" id="noteCancel" class="ctl-btn">Cancel</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div id="winTail" aria-hidden="true"></div>
+      <div id="winChips" hidden></div>
       <form id="winForm" hidden>
         <input id="winInput" placeholder="Steer this lane" aria-label="Steer this lane">
         <button id="winSend" type="submit">Send</button>
@@ -186,6 +213,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
   </div>
 </main>
 <div id="stlist" hidden></div>
+<div id="toast" hidden></div>
 <script src="/assets/workshop.js"></script>
 <script>
 "use strict";
@@ -802,6 +830,94 @@ function syncComposer(l) {
   $("winInput").disabled = !run;
   $("winSend").disabled = !run || sendInFlight;
 }
+const CTL_ORDER = ["skip-wait", "kick", "fresh", "restart-server", "resume", "attach", "stop"];
+let ctlSig = "", noteAction = null, ctlInFlight = false, toastTimer = 0;
+function ctlButtonIds(l) {
+  const set = new Set(l.actions || []);
+  const ids = CTL_ORDER.filter((a) => set.has(a));
+  const sug = l.suggest || "";
+  return sug && set.has(sug) ? [sug, ...ids.filter((a) => a !== sug)] : ids;
+}
+function toast(msg, bad) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.toggle("bad", !!bad);
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+}
+function closeNote() { noteAction = null; $("winNote").hidden = true; $("noteText").value = ""; }
+function openNote(action) { noteAction = action; $("noteText").value = ""; $("winNote").hidden = false; $("noteText").focus(); }
+async function runControl(id, action, extra) {
+  if (ctlInFlight) return;
+  ctlInFlight = true;
+  let r = null;
+  try { r = await sendControl(id, action, extra); } finally { ctlInFlight = false; }
+  if (r && r.ok) toast(r.message || "done", false);
+  else toast((r && r.error) || "control failed", true);
+  tick();
+}
+function onControl(action) {
+  if (!winFor || winFor === "lead" || ctlInFlight) return;
+  const def = CAUI.ACTIONS[action] || {};
+  if (def.danger && !confirm(def.danger)) return;
+  if (def.note) { openNote(action); return; }
+  runControl(winFor, action, {});
+}
+function renderControls(l) {
+  const ids = ctlButtonIds(l);
+  const sig = winFor + "|" + ids.join(",") + "|" + (l.suggest || "");
+  if (sig !== ctlSig) {
+    ctlSig = sig;
+    const box = $("winBtns");
+    box.innerHTML = "";
+    for (const a of ids) {
+      const def = CAUI.ACTIONS[a];
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ctl-btn" + (a === l.suggest ? " primary" : "");
+      b.textContent = def.label;
+      b.title = def.title;
+      b.dataset.action = a;
+      b.addEventListener("click", () => onControl(a));
+      box.appendChild(b);
+    }
+    closeNote();
+  }
+  $("winCtl").hidden = !ids.length;
+  const why = ids.length ? (l.why || "") : "";
+  $("winWhy").hidden = !why;
+  $("winWhy").textContent = why;
+}
+function renderChips(l) {
+  const box = $("winChips");
+  const run = !!(l && l.running);
+  box.hidden = !run;
+  if (!run) return;
+  if (!box.childElementCount) {
+    for (const qs of CAUI.QUICK_STEERS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "qchip";
+      b.textContent = qs.label;
+      b.title = qs.text;
+      b.addEventListener("click", () => {
+        if (!winFor || winFor === "lead") return;
+        $("winInput").value = qs.text;
+        drafts.set(winFor, qs.text);
+      });
+      box.appendChild(b);
+    }
+  }
+}
+function hideControls() {
+  ctlSig = "";
+  $("winBtns").innerHTML = "";
+  $("winCtl").hidden = true;
+  $("winWhy").hidden = true;
+  closeNote();
+  $("winChips").hidden = true;
+}
 function renderTokensRow(tokens, by) {
   const total = CAUI.tokenTotal(tokens);
   const row = $("winTokens");
@@ -822,6 +938,7 @@ function renderWinContent(keepInput) {
     $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
     $("winMeta").textContent = "Orchestrator";
     renderTokensRow(p.tokens, p.tokensBy);
+    hideControls();
     $("winCont").hidden = true;
     $("winGoal").hidden = !p.goal;
     $("winGoal").textContent = p.goal || "";
@@ -851,6 +968,8 @@ function renderWinContent(keepInput) {
   $("winLink").hidden = false;
   $("winLink").href = "/#/lane/" + encodeURIComponent(l.id);
   $("winForm").hidden = false;
+  renderControls(l);
+  renderChips(l);
   const err = errs.get(l.id);
   $("winErr").hidden = !err;
   $("winErr").textContent = err || "";
@@ -940,6 +1059,7 @@ function openWin(id, anchor, kb) {
   winAnchor = anchor || null;
   setTriggerAria(winAnchor, true);
   renderWinContent(false);
+  closeNote();
   win.hidden = false;
   positionWin();
   win.classList.remove("win-in", "win-out");
@@ -998,6 +1118,14 @@ demoHooks.press = (id) => {
 };
 demoHooks.escape = () => winHooks.close();
 $("winX").addEventListener("click", () => closeWin(true));
+$("noteSend").addEventListener("click", () => {
+  if (!winFor || winFor === "lead" || !noteAction || ctlInFlight) return;
+  const id = winFor, action = noteAction;
+  const val = $("noteText").value;
+  closeNote();
+  runControl(id, action, action === "resume" ? { note: val } : { text: val });
+});
+$("noteCancel").addEventListener("click", closeNote);
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && !$("win").hidden) { ev.preventDefault(); closeWin(true); }
 });
