@@ -76,6 +76,7 @@ body.narrow #winTail { display: none; }
 .win-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px 10px; }
 #winTitle { font-weight: 700; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #winBadge { flex: none; }
+#winKind { flex: none; color: var(--muted); font-size: 13px; }
 #winX { margin-left: auto; flex: none; width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 15px var(--font); cursor: pointer; padding: 0; }
 #winBody { padding: 0 18px 14px; display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; }
 #winMeta { color: var(--muted); font-size: 14px; }
@@ -201,6 +202,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
       <div class="win-head">
         <b id="winTitle"></b>
         <span id="winBadge"></span>
+        <span id="winKind" hidden></span>
         <button id="winX" type="button" aria-label="Close">&#x2715;</button>
       </div>
       <div id="winBody">
@@ -798,19 +800,21 @@ function assignStations() {
     for (const stKey of WORKER_STATIONS) {
       if (stationLane[stKey]) continue;
       const nm = SCENE.stations[stKey] && SCENE.stations[stKey].name;
-      const named = nm && lanes.find((l) => l.id === nm && !laneStation.has(l.id));
-      const pick = named || lanes.find((l) => l.running && !laneStation.has(l.id)) || lanes.find((l) => !laneStation.has(l.id));
+      let pick = nm && lanes.find((l) => l.id === nm && !laneStation.has(l.id) && kindMatches(l, stKey));
+      if (!pick) pick = lanes.find((l) => l.running && !laneStation.has(l.id) && kindMatches(l, stKey)) || lanes.find((l) => !laneStation.has(l.id) && kindMatches(l, stKey));
+      if (!pick) pick = (nm && lanes.find((l) => l.id === nm && !laneStation.has(l.id))) || lanes.find((l) => l.running && !laneStation.has(l.id)) || lanes.find((l) => !laneStation.has(l.id));
       if (pick) assign(pick.id, stKey);
     }
   } else {
     for (const l of lanes) {
       if (laneStation.has(l.id) || !l.running || prevRunning.get(l.id)) continue;
-      const victim = WORKER_STATIONS.find((stKey) => !stationLane[stKey] || holderReclaimable(stationLane[stKey]));
+      const open = WORKER_STATIONS.filter((stKey) => !stationLane[stKey] || holderReclaimable(stationLane[stKey]));
+      const victim = open.find((stKey) => kindMatches(l, stKey)) || open[0];
       if (victim) assign(l.id, victim);
     }
     for (const stKey of WORKER_STATIONS) {
       if (stationLane[stKey]) continue;
-      const pick = lanes.find((l) => !laneStation.has(l.id) && l.running) || lanes.find((l) => !laneStation.has(l.id));
+      const pick = lanes.find((l) => !laneStation.has(l.id) && l.running && kindMatches(l, stKey)) || lanes.find((l) => !laneStation.has(l.id) && kindMatches(l, stKey)) || lanes.find((l) => !laneStation.has(l.id) && l.running) || lanes.find((l) => !laneStation.has(l.id));
       if (pick) assign(pick.id, stKey);
     }
   }
@@ -906,16 +910,19 @@ function renderHotDesks() {
     const l = id && model.lanes.find((x) => x.id === id);
     const desk = desks[hd.key];
     const hit = hotHits[hd.key];
+    const plate = $("plate-" + hd.key);
     if (!l) {
       setStation(hd.key, null);
       if (desk) desk.style.display = "none";
       if (hit) { hit.style.display = "none"; hit.dataset.lane = ""; }
+      if (plate) plate.title = "";
       continue;
     }
     setHotLook(hd, l);
     setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
     if (desk) desk.style.display = "";
     if (hit) { hit.style.display = ""; hit.dataset.lane = l.id; }
+    if (plate) plate.title = kindDef(l).label + " \u00b7 " + laneName(l);
   }
   if (hotLookDirty) { hotLookDirty = false; layoutStations(); }
 }
@@ -1288,6 +1295,7 @@ function renderWinContent(keepInput) {
     const p = model.plan;
     $("winTitle").textContent = leadName(p);
     $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+    $("winKind").hidden = true;
     $("winMeta").textContent = "Orchestrator";
     renderTokensRow(p.tokens, p.tokensBy);
     hideControls();
@@ -1307,6 +1315,8 @@ function renderWinContent(keepInput) {
   const pr = l.progress || {};
   $("winTitle").textContent = laneName(l);
   $("winBadge").innerHTML = CAUI.badge(CAUI.status(l.health));
+  $("winKind").hidden = false;
+  $("winKind").textContent = kindDef(l).label;
   const mm = l.models && (l.models.build || Object.values(l.models)[0]);
   $("winMeta").textContent = [mm ? CAUI.shortModel(mm) : "", pr.total ? pr.done + " / " + pr.total + " steps" : ""].filter(Boolean).join(" \u00b7 ");
   renderTokensRow(l.tokens, l.tokensBy);
