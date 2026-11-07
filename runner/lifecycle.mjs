@@ -171,3 +171,49 @@ export async function update(args) {
   }
   return 0;
 }
+
+// The ca.mjs path a recorded harness config points at (args[0]), read from its real config file.
+function serverArg0(harness) {
+  const d = userPaths(harness);
+  if (!d) return null;
+  if (d.codexToml) {
+    let text; try { text = fs.readFileSync(d.codexToml, 'utf8'); } catch { return null; }
+    const block = text.match(/\[mcp_servers\.codearts\]\s*\r?\n([\s\S]*?)(?=\r?\n\[|$)/);
+    const a = block && block[1].match(/args\s*=\s*\[\s*"((?:[^"\\]|\\.)*)"/);
+    return a ? a[1].replace(/\\\\/g, '\\') : null;
+  }
+  for (const j of d.json || []) {
+    let obj = null; try { obj = JSON.parse(fs.readFileSync(j.file, 'utf8')); } catch {}
+    const a = obj && obj[j.mapKey] && obj[j.mapKey][j.serverKey] && obj[j.mapKey][j.serverKey].args;
+    if (Array.isArray(a) && a.length) return a[0];
+  }
+  return null;
+}
+
+// Doctor rows for the install lifecycle: every recorded harness config still points at this ca.mjs,
+// and the installed CodeArts version matches the one that last passed the smoke test.
+export function lifecycleRows() {
+  const rows = [];
+  const recorded = Object.keys(readManifest().harnesses);
+  if (!recorded.length) rows.push({ name: 'harness config', status: 'ok', detail: 'no machine-wide setup recorded', fix: '' });
+  else {
+    const missing = recorded.filter((h) => { const a = serverArg0(h); return !a || !fs.existsSync(a); });
+    if (!missing.length) rows.push({ name: 'harness config', status: 'ok', detail: `${recorded.length} recorded harness config(s) point at ${CA_MJS}`, fix: '' });
+    else rows.push({
+      name: 'harness config', status: 'warn',
+      detail: missing.map((h) => `${h} points at a missing ca.mjs`).join('; '),
+      fix: `ca update (or ca onboard --yes --harness ${missing[0]})`,
+    });
+  }
+
+  if (fs.existsSync(EXE)) {
+    const r = spawnSync(EXE, ['--version'], { encoding: 'utf8', timeout: 20000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const first = (s) => (String(s || '').split(/\r?\n/).find((l) => l.trim()) || '').trim();
+    const installed = first(r.stdout) || first(r.stderr);
+    let smoke = null; try { smoke = JSON.parse(fs.readFileSync(SMOKE, 'utf8')); } catch {}
+    if (!smoke || !smoke.version) rows.push({ name: 'codearts version', status: 'warn', detail: 'no smoke test recorded yet', fix: 'ca onboard --yes --smoke' });
+    else if (String(smoke.version) === installed) rows.push({ name: 'codearts version', status: 'ok', detail: `${installed} matches the last smoke test`, fix: '' });
+    else rows.push({ name: 'codearts version', status: 'warn', detail: `${installed} was never smoke-tested (last passed: ${smoke.version})`, fix: 'ca onboard --yes --smoke' });
+  }
+  return rows;
+}

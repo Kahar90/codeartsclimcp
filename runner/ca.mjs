@@ -1268,6 +1268,13 @@ async function doctorData(repoArg) {
   const chromePath = chromeCands.find((c) => fs.existsSync(c));
   add('chrome', chromePath ? 'ok' : 'warn', chromePath || 'not found (optional, used by browser checks)', chromePath ? '' : 'install Google Chrome for the office and sprite checks');
 
+  // Install lifecycle: recorded harness configs still pointing at this ca.mjs, and the installed
+  // CodeArts version vs the last smoke-tested one. A broken lifecycle.mjs must never break doctor.
+  try {
+    const { lifecycleRows } = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href);
+    for (const row of lifecycleRows()) rows.push(row);
+  } catch {}
+
   const fails = rows.filter((r) => r.status === 'fail').length;
   return { checks: rows, fails };
 }
