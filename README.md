@@ -88,6 +88,8 @@ a file only your user can read) and are never written to the repo or shown to th
 - [Reference](docs/reference.md): every command, exit codes, lane health, models,
   troubleshooting.
 - [Lead workflow](docs/workflow.md): how the agent plans, briefs and verifies lanes.
+- [Real-client checklist](docs/client-checklist.md): the 10-minute manual test for Kiro, Cursor
+  and VS Code.
 - [AGENTS.md](AGENTS.md) and [INSTALL.md](INSTALL.md): instructions written for coding agents.
 
 Contributing: `npm run check` runs every contract check in `checks/` (fake lanes, no paid model
