@@ -1464,7 +1464,7 @@ async function cmdDoctor(args) {
     }
     console.log(`doctor: ${fails ? `not ready (${fails} fail)` : 'ready'}`);
   }
-  if (fails) process.exit(1);
+  if (fails) { await updateNotice(args); process.exit(1); }
 }
 async function cmdMcp() {
   const f = path.join(HERE, 'mcp.mjs');
@@ -1913,7 +1913,7 @@ function cmdDash(args) {
           json({ ok: true, restarting: true, output: out.trim().slice(0, 2000) });
           res.on('finish', () => {
             try { srv.close(); } catch {}
-            try { spawn(process.execPath, [fileURLToPath(import.meta.url), 'dash', String(port)], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env }).unref(); } catch {}
+            try { spawn(process.execPath, [fileURLToPath(import.meta.url), 'dash', String(port)], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CA_DASH_RECLAIM: '1' } }).unref(); } catch {}
             setTimeout(() => process.exit(0), 50);
           });
           return;
@@ -1988,12 +1988,12 @@ function cmdDash(args) {
   // Loopback by default (the dashboard drives lanes); CA_DASH_HOST only moves it within the machine.
   const dashHost = process.env.CA_DASH_HOST || '127.0.0.1';
   const listenStarted = Date.now();
-  const listenDash = () => srv.listen(port, dashHost, () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
+  const listenDash = () => srv.listen(port, dashHost, () => { delete process.env.CA_DASH_RECLAIM; console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`); });
   srv.on('error', (e) => {
     if (e.code !== 'EADDRINUSE') throw e;
     // A POST /api/update restart spawns a fresh dash that must reclaim the same port once the old
     // process releases it: retry for up to 10 s (the port is briefly busy), then give up.
-    if (Date.now() - listenStarted < 10000) { setTimeout(listenDash, 250); return; }
+    if (process.env.CA_DASH_RECLAIM === '1' && Date.now() - listenStarted < 10000) { setTimeout(listenDash, 250); return; }
     console.log(`ca dash is already running: http://127.0.0.1:${port}`); process.exit(0);
   });
   listenDash();
