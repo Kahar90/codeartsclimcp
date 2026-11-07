@@ -47,7 +47,21 @@ check('vscode: unparsable existing file is not overwritten, exit 1 with the snip
 // claude
 r = ca(['setup', 'claude', repo]); const m = js(path.join(repo, '.mcp.json'));
 check('claude: project .mcp.json', r.code === 0 && isServer(m?.mcpServers?.codearts), r.out);
-check('claude: prints the user-scope alternative', /claude mcp add/.test(r.out));
+check('claude: says to restart and type /codearts-build', /\/codearts-build/.test(r.out) && /restart/i.test(r.out), r.out);
+const skillP = path.join(repo, '.claude', 'skills', 'codearts-build', 'SKILL.md'); const skill = rd(skillP) || '';
+check('claude: installs the /codearts-build skill in the repo', /^---\r?\nname: codearts-build\r?\ndescription: .+\r?\n---/.test(skill) && /mcp__codearts__ca_doctor/.test(skill) && /ca_lane_start/.test(skill) && /ca_wait/.test(skill), skill.slice(0, 200));
+check('claude: skill is portable (no machine-specific paths)', !/[A-Z]:[\\/]/.test(skill) && !/ca-office|codeartsclimcp/.test(skill));
+const sl = js(path.join(repo, '.claude', 'settings.local.json'));
+check('claude: settings.local.json enables the server and allows read-only tools only', sl?.enabledMcpjsonServers?.includes('codearts') && ['ca_status', 'ca_wait', 'ca_summary'].every((t) => sl.permissions.allow.includes(`mcp__codearts__${t}`)) && !sl.permissions.allow.some((t) => /ca_(lane_start|steer|stop)/.test(t)), JSON.stringify(sl));
+fs.writeFileSync(path.join(repo, '.claude', 'settings.local.json'), JSON.stringify({ enabledMcpjsonServers: ['other'], permissions: { allow: ['Bash(ls)'] }, model: 'x' }));
+r = ca(['setup', 'claude', repo]); ca(['setup', 'claude', repo]); const sl2 = js(path.join(repo, '.claude', 'settings.local.json'));
+check('claude: rerun merges settings, keeps other entries, no duplicates', sl2.model === 'x' && sl2.enabledMcpjsonServers.join() === 'other,codearts' && sl2.permissions.allow[0] === 'Bash(ls)' && sl2.permissions.allow.filter((t) => t === 'mcp__codearts__ca_status').length === 1, JSON.stringify(sl2));
+fs.writeFileSync(skillP, '---\nname: codearts-build\n---\nmy own\n');
+r = ca(['setup', 'claude', repo]);
+check('claude: a user-edited skill (no marker) is never overwritten', rd(skillP).includes('my own') && /kept your own skill/.test(r.out), r.out);
+const claudeHome = path.join(tmp, 'claude-home');
+r = spawnSync(process.execPath, [CA, 'setup', 'claude', repo, '--user'], { env: { ...env, CLAUDE_CONFIG_DIR: claudeHome }, encoding: 'utf8' });
+check('claude --user: also installs the skill in the user skills dir and prints claude mcp add', /name: codearts-build/.test(rd(path.join(claudeHome, 'skills', 'codearts-build', 'SKILL.md')) || '') && /claude mcp add/.test(r.stdout), r.stdout + r.stderr);
 
 // codex: print by default, --write appends once
 r = ca(['setup', 'codex', repo]);

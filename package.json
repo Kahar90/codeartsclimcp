@@ -11,7 +11,8 @@
     "templates",
     "docs",
     "bin",
-    "scripts"
+    "scripts",
+    "!docs/images"
   ],
   "engines": {
     "node": ">=20"

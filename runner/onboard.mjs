@@ -17,6 +17,14 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA_MJS = path.join(HERE, 'ca.mjs');
 const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
+const EXE = process.env.CODEARTS_EXE || path.join(CA_HOME, 'installers', 'bin', process.platform === 'win32' ? 'codearts.exe' : 'codearts');
+const INSTALL_BASE = 'https://apsoutheast1-cloudide-marketplace.obs.ap-southeast-1.myhuaweicloud.com/codearts/cli_tui/install_script';
+// The official installer. CA_INSTALL_CMD overrides it (a shell command line; used by the checks).
+const INSTALL = process.env.CA_INSTALL_CMD
+  ? { cmd: process.env.CA_INSTALL_CMD, args: [], shell: true, show: process.env.CA_INSTALL_CMD }
+  : process.platform === 'win32'
+    ? { cmd: 'powershell', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `irm ${INSTALL_BASE}/install.ps1 | iex`], show: `irm ${INSTALL_BASE}/install.ps1 | iex` }
+    : { cmd: 'bash', args: ['-c', `curl -fsSL ${INSTALL_BASE}/install.sh | bash`], show: `curl -fsSL ${INSTALL_BASE}/install.sh | bash` };
 const SETTINGS = process.env.CA_SETTINGS || path.join(CA_HOME, 'cli-data', 'settings.json');
 const HARNESSES = ['kiro', 'cursor', 'claude', 'codex', 'vscode', 'opencode'];
 // Marker -> harness, first match wins (.claude/CLAUDE.md -> claude, .codex/AGENTS.md -> codex).
@@ -24,7 +32,7 @@ const MARKERS = [['kiro', '.kiro'], ['cursor', '.cursor'], ['claude', '.claude']
 const HARNESS_NEXT = {
   kiro: 'In Kiro chat: #codearts-lanes then describe the goal',
   cursor: 'In Cursor chat: @codearts-lanes then describe the goal',
-  claude: 'In Claude Code: /codearts-build <goal> (or the codearts_build MCP prompt)',
+  claude: 'Restart Claude Code in this repo (or run /mcp), then type: /codearts-build <goal>',
   codex: 'In Codex: ask it to follow AGENTS.md CodeArts lanes section',
   vscode: 'In VS Code chat (agent mode): use the codearts MCP tools',
   opencode: 'In opencode: ask it to follow the CodeArts lanes section of AGENTS.md (codearts MCP tools)',
@@ -87,15 +95,16 @@ export default async function onboard(args) {
   if (!Array.isArray(docChecks) || !docChecks.length) {
     add(envRows, 'doctor', 'fail', `could not run doctor: ${oneLine(dr.stderr || dr.error?.message || 'no JSON output', 160)}`, `node ca.mjs doctor --json ${repo}`);
   } else {
-    const psLine = (k) => `[Environment]::SetEnvironmentVariable('${k}', '<value>', 'User')`;
-    const credFix = (what, ...keys) => [`${what} at ${PORTAL}`, ...keys.map((k) => `PowerShell: ${psLine(k)}`), 'open a new terminal so the new value is visible'].join('\n');
+    const credFix = (what) => [`run: ca auth   (opens a local form for the human; then: ca auth --wait)`, `${what} at ${PORTAL}`].join('\n');
     for (const c of docChecks) {
+      if (/^trusted folder$/i.test(c.name)) continue; // section 2 checks and fixes it
       let fix = c.fix || '';
-      if (/^credentials$/i.test(c.name) && c.status !== 'ok') fix = credFix('create an AK/SK', 'CODEARTS_CLI_AK', 'CODEARTS_CLI_SK');
-      else if (/^maas key$/i.test(c.name) && c.status !== 'ok') fix = credFix('create a MaaS API key', 'MAAS_API_KEY');
+      if (/^credentials$/i.test(c.name) && c.status !== 'ok') fix = credFix('the human creates an AK/SK');
+      else if (/^maas key$/i.test(c.name) && c.status !== 'ok') fix = 'optional: ca auth --force (the form takes a MaaS API key from the Huawei Cloud ModelArts MaaS console)';
       add(envRows, c.name, c.status, c.detail || '', fix);
     }
     if (interactive) await offerSecrets(envRows);
+    await offerInstall(envRows, { yes, dry, interactive, asJson });
   }
 
   // ---- 2. repository: git repo with a commit, trusted folder ----
@@ -174,8 +183,10 @@ export default async function onboard(args) {
         else {
           const lines = (r.stdout || '').split(/\r?\n/).filter(Boolean);
           const acts = lines.map((l) => l.match(/^(wrote|updated|unchanged) (.+)$/)).filter(Boolean);
-          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l));
-          const detail = [acts.map((m) => `${m[1]} ${m[2]}`).join(', '), ...notes.map((n) => oneLine(n, 140))].filter(Boolean).join('; ');
+          // "restart ..." notes repeat the Next line; paths inside the repo are shown relative.
+          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l) && !/^\w+: restart /.test(l));
+          const rel = (p) => { const r = path.relative(repo, p); return r && !r.startsWith('..') && !path.isAbsolute(r) ? r : p; };
+          const detail = [acts.map((m) => `${m[1]} ${rel(m[2])}`).join(', '), ...notes.map((n) => oneLine(n, 140))].filter(Boolean).join('; ');
           add(harnessRows, 'harness setup', acts.some((m) => m[1] !== 'unchanged') ? 'fixed' : 'ok', detail || `ca setup ${harness} ran`);
         }
       } else add(harnessRows, 'harness setup', 'planned', `ca setup ${harness} ${repo} writes the MCP server and rules config`, 'ca onboard --yes');
@@ -295,6 +306,25 @@ function storeUserEnv(name, value) {
     `[Environment]::SetEnvironmentVariable('${name}', $env:CA_ONBOARD_SECRET, 'User')`],
     { env: { ...process.env, CA_ONBOARD_SECRET: value }, timeout: 20000 });
   return r.status === 0;
+}
+
+// Missing CodeArts CLI: run the official installer with --yes (or after y/N on a TTY),
+// plan it with --dry-run. The row turns fixed only when the executable really exists.
+async function offerInstall(rows, { yes, dry, interactive, asJson }) {
+  const r = rows.find((x) => x.name.toLowerCase() === 'codearts' && x.status === 'fail' && /not found/.test(x.detail));
+  if (!r) return;
+  if (dry) { r.status = 'planned'; r.detail = `not installed; ca onboard --yes runs the official installer`; r.fix = INSTALL.show; return; }
+  let doFix = yes;
+  if (!doFix && interactive) doFix = await confirm('Install the CodeArts Agent CLI now (official Huawei Cloud installer)?');
+  if (!doFix) { r.fix = `${INSTALL.show}\nor: ca onboard --yes`; return; }
+  if (!asJson) process.stdout.write(`installing the CodeArts CLI: ${INSTALL.show}\n`);
+  const res = spawnSync(INSTALL.cmd, INSTALL.args, { stdio: asJson ? ['ignore', 'ignore', 'pipe'] : 'inherit', shell: !!INSTALL.shell, timeout: 600000, windowsHide: true, encoding: 'utf8' });
+  if (fs.existsSync(EXE)) {
+    r.status = 'fixed'; r.detail = `installed at ${EXE}`; r.fix = '';
+  } else {
+    r.detail = `installer ${res.status === 0 ? 'finished' : `failed (exit ${res.status ?? res.error?.code ?? '?'})`} but ${EXE} is still missing`;
+    r.fix = `run it by hand and read its output: ${INSTALL.show}`;
+  }
 }
 
 // Interactive only: for a failing/warning credentials or maas key row, offer to type the

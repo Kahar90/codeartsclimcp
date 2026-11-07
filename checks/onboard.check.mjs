@@ -60,6 +60,20 @@ check('non-git repo: git step planned in dry run', j && j.steps.some((s) => /git
 r = ca(['onboard', '--repo', nogit, '--harness', 'cursor', '--yes', '--json']);
 check('non-git repo with --yes: git init + first commit', fs.existsSync(path.join(nogit, '.git')) && spawnSync('git', ['log', '--oneline'], { cwd: nogit, encoding: 'utf8' }).stdout.trim().length > 0);
 
+// missing CodeArts CLI: planned in dry run, installer runs with --yes (CA_INSTALL_CMD stub), fixed only when the exe exists
+const fakeExe = path.join(tmp, 'fake-cli', process.platform === 'win32' ? 'codearts.exe' : 'codearts');
+const cliEnv = { ...env, CODEARTS_EXE: fakeExe, CA_INSTALL_CMD: `node -e "require('fs').mkdirSync(process.argv[1],{recursive:true})" "${path.dirname(fakeExe)}"` };
+const onb = (args) => js(spawnSync(process.execPath, [CA, 'onboard', ...args], { env: cliEnv, encoding: 'utf8', timeout: 90000, input: '' }).stdout);
+const cliRow = (jj) => jj && jj.steps.find((s) => s.name === 'codearts');
+j = (() => { const saved = cliEnv.CA_INSTALL_CMD; delete cliEnv.CA_INSTALL_CMD; try { return onb(['--repo', kiro, '--dry-run', '--json']); } finally { cliEnv.CA_INSTALL_CMD = saved; } })();
+check('missing CLI: dry run plans the official installer', cliRow(j)?.status === 'planned' && /install\.(ps1|sh)/.test(cliRow(j).fix) && !fs.existsSync(path.dirname(fakeExe)), JSON.stringify(cliRow(j)));
+j = onb(['--repo', kiro, '--yes', '--json']);
+check('missing CLI: --yes runs the installer, still fails while the exe is missing', fs.existsSync(path.dirname(fakeExe)) && cliRow(j)?.status === 'fail' && /still missing/.test(cliRow(j).detail), JSON.stringify(cliRow(j)));
+cliEnv.CA_INSTALL_CMD = `node -e "require('fs').writeFileSync(process.argv[1],'')" "${fakeExe}"`;
+j = onb(['--repo', kiro, '--yes', '--json']);
+check('missing CLI: fixed once the installer puts the exe in place', ['fixed', 'warn', 'ok'].includes(cliRow(j)?.status) && cliRow(j).status !== 'fail', JSON.stringify(cliRow(j)));
+check('trusted folder is reported once (repository section only)', j && j.steps.filter((s) => s.name === 'trusted folder').length === 1);
+
 // human output
 r = ca(['onboard', '--repo', kiro, '--dry-run']);
 check('plain output: numbered sections and a clear final line', /1\./.test(r.out) && /2\./.test(r.out) && /(ready|not ready)/i.test(r.out), r.out.slice(-200));
