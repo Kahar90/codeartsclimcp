@@ -32,6 +32,11 @@
 //        ca steer <lane> <message>         queue a message into the running session
 //        ca attach <lane>                  open the CodeArts TUI on the live session (watch + type)
 //        ca stop <lane>                    abort the session and end the lane
+//        ca kick <lane> [--fresh|--server|--now] [message]  unstick a stuck turn: retry it (default),
+//                                  start a fresh session, restart the codearts server or skip a backoff
+//        ca resume <lane> [--note "<text>"] [--dry-run]  continue a paused, failed, stopped or DEAD
+//                                  lane in place (same id, tokens and history; the note waits in
+//                                  the lane folder; --dry-run prints the argv without spawning)
 //        ca dash [port]                    local web dashboard of all lanes (default 4777)
 //        ca gc                             forget lanes finished more than 3 days ago
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
@@ -53,6 +58,8 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
+import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
+import { laneActions, laneBucket } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +98,7 @@ const dur = (ms) => {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
 };
 const oneLine = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+const compact = (n) => { n = Number(n) || 0; if (n < 1000) return String(n); if (n < 1e6) { const v = n / 1000; return `${v < 10 ? v.toFixed(1) : Math.round(v)}k`.replace('.0k', 'k'); } return `${(n / 1e6).toFixed(n < 1e7 ? 2 : n < 1e8 ? 1 : 0)}M`; };
 const readJSON = (f, d = null) => { for (let i = 0; i < 3; i++) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return d; } } return d; };
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const killTree = (pid) => { if (!pid) return; if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} } } };
@@ -224,6 +232,7 @@ async function runLane(repoArg, task, opts = {}) {
   if (opts.resume && !(prev && prev.result && prev.result !== 'done')) die(`nothing to resume: lane ${id} has no paused, stopped or failed run`, 2);
   if (!resumed) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
+  fs.rmSync(path.join(dir, 'KICK'), { force: true }); // a stale kick must not fire at once on resume
   fs.mkdirSync(REG, { recursive: true });
   fs.writeFileSync(path.join(REG, `${id}.json`), JSON.stringify({ id, dir, repo, task }, null, 2));
 
@@ -261,12 +270,16 @@ async function runLane(repoArg, task, opts = {}) {
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
     lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
     config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes },
-    tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, steps: 0 }, commits: 0, steps: stepCount, checks,
+    tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
+    commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
+    const by = (r) => ({ ...emptyTokens(), ...(resumed.tokensBy?.[r] || {}) });
+    const byModel = {}; for (const [m, t] of Object.entries(resumed.tokensByModel || {})) byModel[m] = { ...emptyTokens(), ...t };
     Object.assign(S, { startedAt: resumed.startedAt || T0, runStartedAt: T0, runs, resumes: runs.length, tokens: { ...S.tokens, ...(resumed.tokens || {}) },
+      tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }] });
   }
@@ -291,7 +304,12 @@ async function runLane(repoArg, task, opts = {}) {
   // ---- event tracking ----
   const sess = {}; // sid -> { busy, sawBusy, lastAct, tools: Map, error, aborting }
   const sx = (sid) => (sess[sid] ||= { busy: false, sawBusy: false, lastAct: now(), tools: new Map(), error: null, aborting: false });
+  const builderSessions = new Set(); // every session that ran the brief (build or fix): tokens bill as build
+  const countedSteps = new Set();    // step-finish part ids already billed (a reconnect replays events)
+  const roleOf = (sid) => (sid === S.reviewSession ? 'review' : builderSessions.has(sid) ? 'build' : 'other');
   const roles = new Map();       // messageID -> role
+  const msgModel = new Map();    // messageID -> providerID/modelID of assistant messages
+  const sessionModel = new Map(); // sid -> the model the runner sent there (fallback when a message carries none)
   const parts = new Map();       // partID -> { type, text, logged }
   const sent = new Set();        // texts we sent (to tell TUI-typed steering apart)
   const seenUser = new Set();    // user partIDs already logged
@@ -328,6 +346,7 @@ async function runLane(repoArg, task, opts = {}) {
       }
       case 'message.updated': {
         const info = pr.info || {}; if (info.id) roles.set(info.id, info.role);
+        if (info.id && info.role === 'assistant' && info.providerID && info.modelID) msgModel.set(info.id, `${info.providerID}/${info.modelID}`);
         if (info.role === 'assistant' && info.error && sid && !(sx(sid).aborting && /Abort/i.test(info.error.name || ''))) sx(sid).error = info.error;
         break;
       }
@@ -371,7 +390,13 @@ async function runLane(repoArg, task, opts = {}) {
           if (sid === S.activeSession && s) { const t = [...s.tools.values()][0]; S.activity = t ? `tool ${t.tool}: ${oneLine(t.input, 80)}` : 'thinking'; S.tools = [...s.tools.values()].map((x) => ({ tool: x.tool, input: oneLine(x.input, 120), since: x.since })); }
         } else if (part.type === 'step-finish') {
           for (const k of parts.keys()) flushPart(k);
-          const tk = part.tokens || {}; S.tokens.input += tk.input || 0; S.tokens.output += tk.output || 0; S.tokens.reasoning += tk.reasoning || 0; S.tokens.cacheRead += tk.cache?.read || 0; S.tokens.steps++;
+          if (part.id && !countedSteps.has(part.id)) {
+            countedSteps.add(part.id);
+            const model = msgModel.get(part.messageID) || sessionModel.get(sid) || 'codearts/hidden';
+            addStepTokens(S.tokens, part.tokens);
+            addStepTokens(S.tokensBy[roleOf(sid)], part.tokens);
+            addStepTokens((S.tokensByModel[model] ||= emptyTokens()), part.tokens);
+          }
         }
         break;
       }
@@ -408,6 +433,7 @@ async function runLane(repoArg, task, opts = {}) {
   // ---- session helpers ----
   const newSession = async (title) => (await server.api('POST', '/session', { title })).id;
   const send = async (sid, text, model, agent) => {
+    if (model) sessionModel.set(sid, model);
     sent.add(text.trim()); const s = sx(sid); s.error = null; s.sawBusy = false; s.lastAct = now(); s.sentAt = now();
     S.activeSession = sid; S.busy = true;
     S.turnStartAt = now(); S.lastToolAt = 0; S.lastTextAt = 0;
@@ -420,6 +446,15 @@ async function runLane(repoArg, task, opts = {}) {
     s.tools.clear(); s.busy = false; s.aborting = false;
   };
   const stopFile = path.join(dir, 'STOP');
+  // A kick is a human decision delivered by file: {at, mode: turn|fresh|server|now, text, by}.
+  // The supervisor consumes it at the next poll (2 s) or during a backoff wait.
+  const kickFile = path.join(dir, 'KICK');
+  const takeKick = () => {
+    if (!fs.existsSync(kickFile)) return null;
+    const k = readJSON(kickFile);
+    try { fs.rmSync(kickFile, { force: true }); } catch {}
+    return k && k.mode ? k : { mode: 'turn', text: '', by: 'unknown', at: now() };
+  };
   let curModel = BUILD, curAgent;
   const pumpInbox = async (sid) => {
     let files = []; try { files = fs.readdirSync(path.join(dir, 'inbox')).filter((f) => f.endsWith('.txt')).sort(); } catch {}
@@ -439,6 +474,17 @@ async function runLane(repoArg, task, opts = {}) {
     for (;;) {
       await sleep(2000);
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
+      const k = takeKick();
+      if (k) {
+        L(`== kick (${k.mode}) from ${k.by}${k.text ? ': ' + oneLine(k.text, 160) : ''}`);
+        await abort(sid);
+        if (k.mode === 'server') {
+          killTree(server.child?.pid);
+          for (let i = 0; i < 15 && server.alive; i++) await sleep(1000);
+          return { kind: 'server-died', kicked: true, mode: 'server', text: k.text || '', by: k.by };
+        }
+        return { kind: 'kick', mode: k.mode, text: k.text || '', by: k.by };
+      }
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
       await pumpInbox(sid);
@@ -481,20 +527,48 @@ async function runLane(repoArg, task, opts = {}) {
     if (/timeout|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket|\b50[0234]\b|Cannot connect|network/i.test(m)) return 'transport';
     return 'other';
   };
+  let pendingKick = null; // a kick consumed during backoff: its mode applies to the resume
   const waitInterruptible = async (sec, label) => {
     const until = now() + sec * 1000;
-    while (now() < until) { if (fs.existsSync(stopFile)) return false; S.activity = `${label}: ${dur(until - now())} left`; save(); await sleep(1000); }
+    while (now() < until) {
+      if (fs.existsSync(stopFile)) return false;
+      const k = takeKick();
+      if (k) { L(`== backoff skipped by ${k.by}`); pendingKick = k; return true; }
+      S.activity = `${label}: ${dur(until - now())} left`; save(); await sleep(1000);
+    }
     return true;
   };
 
   // Drive a phase until its turn ends cleanly; resume interrupted turns in the same session.
   async function drive(sid, model, agent, label, resumeText, freshSession) {
     curModel = model; curAgent = agent;
+    if (label === 'build' || label === 'fix') builderSessions.add(sid);
     let interruptions = 0, sameSessionFails = 0;
     for (;;) {
       const o = await waitTurn(sid);
       if (o.kind === 'idle') return { ok: true, sid };
       if (o.kind === 'stopped' || o.kind === 'timeout') return { ok: false, sid, reason: o.kind };
+      if (o.kind === 'kick' || (o.kind === 'server-died' && o.kicked)) {
+        // A kick is a human decision, not a failure: no retry count, no backoff.
+        const kmode = o.mode || 'server';
+        S.interruptions.push({ at: now(), phase: label, kind: 'kick', what: `kick (${kmode}) from ${o.by}${o.text ? ': ' + oneLine(o.text, 160) : ''}` }); save(true);
+        if (o.kind === 'server-died') {
+          L('== kick: codearts server killed; restarting'); phase('restart', 'restarting codearts server');
+          try { await server.start(); S.server = { url: server.url, pw: server.pw, pid: server.child.pid, version: server.version }; } catch (err) { return { ok: false, sid, reason: `server restart failed: ${err.message}` }; }
+        }
+        phase(label, 'resuming after kick');
+        const extra = o.text ? `\n\nMessage from the lead: ${o.text}` : '';
+        if (kmode === 'fresh' && freshSession) {
+          sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
+          if (label === 'build' || label === 'fix') builderSessions.add(sid);
+          say(`kick: switching to a fresh session ${sid}`);
+          await send(sid, freshSession('kick', o.text || 'the lead asked for a clean restart') + extra, model, agent);
+        } else {
+          await send(sid, resumeText('kick', `${kmode} kick from ${o.by}`) + extra, model, agent);
+        }
+        if (label === 'build' || label === 'fix') S.buildSession = sid;
+        continue;
+      }
       const cls = o.kind === 'error' ? classify(o.error) : o.kind;
       const what = o.kind === 'error' ? `${o.error.name || 'error'}: ${oneLine(o.error.data?.message || o.error.message || '', 200)}` : (o.what || o.kind);
       S.interruptions.push({ at: now(), phase: label, kind: cls, what }); save(true);
@@ -510,10 +584,25 @@ async function runLane(repoArg, task, opts = {}) {
       phase('backoff');
       if (!(await waitInterruptible(backoff, `backoff after ${cls}`))) return { ok: false, sid, reason: 'stopped' };
       phase(label, 'resuming');
-      if (o.kind === 'think') {
+      const kick = pendingKick; pendingKick = null;
+      if (kick?.mode === 'server') {
+        L('== kick: codearts server killed; restarting'); phase('restart', 'restarting codearts server');
+        try { await server.start(); S.server = { url: server.url, pw: server.pw, pid: server.child.pid, version: server.version }; } catch (err) { return { ok: false, sid, reason: `server restart failed: ${err.message}` }; }
+        phase(label, 'resuming after kick');
+      }
+      const extra = kick?.text ? `\n\nMessage from the lead: ${kick.text}` : '';
+      if (kick && kick.mode === 'fresh' && freshSession) {
+        sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
+        if (label === 'build' || label === 'fix') builderSessions.add(sid);
+        say(`kick: switching to a fresh session ${sid}`);
+        await send(sid, freshSession('kick', kick.text || 'the lead asked for a clean restart') + extra, model, agent);
+      } else if (kick) {
+        await send(sid, resumeText('kick', `${kick.mode} kick from ${kick.by}`) + extra, model, agent);
+      } else if (o.kind === 'think') {
         await send(sid, o.nudge, model, agent);
       } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
+        if (label === 'build' || label === 'fix') builderSessions.add(sid);
         say(`switching to a fresh session ${sid}`); await send(sid, freshSession(cls, what), model, agent);
       } else {
         await send(sid, resumeText(cls, what), model, agent);
@@ -565,16 +654,20 @@ async function runLane(repoArg, task, opts = {}) {
     if (PRE_DIRTY.size) { S.preDirty = [...PRE_DIRTY].slice(0, 20); say(`note: ${PRE_DIRTY.size} file(s) were already dirty before the lane (excluded from the git gate): ${S.preDirty.slice(0, 5).join(', ')}`); }
 
     // BUILD
-    let sid = await newSession(`${task} build`); S.buildSession = sid; S.attempt = 1;
+    let sid = await newSession(`${task} build`); S.buildSession = sid; builderSessions.add(sid); S.attempt = 1;
     phase('build', 'sending brief'); L(`== build (${BUILD}) session ${sid}; ${checks.length} CHECK lines, ${stepCount} steps`);
     let first = brief;
     if (resumed) {
       const done = git(repo, 'log', '--reverse', '--format=%h %s', `${START}..HEAD`);
-      const nf = path.join(repo, 'tasks', `${task}.resume.md`); const notes = fs.existsSync(nf) ? fs.readFileSync(nf, 'utf8').trim() : '';
+      const nf = path.join(repo, 'tasks', `${task}.resume.md`); let notes = fs.existsSync(nf) ? fs.readFileSync(nf, 'utf8').trim() : '';
+      const rnf = path.join(dir, 'resume-note.txt'); const rn = fs.existsSync(rnf) ? fs.readFileSync(rnf, 'utf8').trim() : '';
+      if (rn) { try { fs.rmSync(rnf, { force: true }); } catch {} notes = `${rn}\n${notes}`.trim(); }
+      S.resumedBy = process.env.CA_RESUMED_BY || '';
       first += `\n\n---\nRESUMED RUN ${S.resumes + 1}. The previous run ended ${resultOf(resumed)}${resumed.reason ? ' (' + resumed.reason + ')' : ''}. These commits are already in the repo; do not redo them:\n${done || '(none)'}\n`
         + (notes ? `\nNotes from the lead (apply these first, commit each as "fix: <summary>"):\n${notes}\n` : '')
         + 'Then continue with the first numbered step that has no "step N:" commit, keeping the same commit subjects.';
-      say(`resuming run ${S.resumes + 1} from ${START.slice(0, 7)} (${done ? done.split(/\r?\n/).length : 0} commits kept${notes ? ', lead notes from ' + path.basename(nf) : ''})`);
+      say(`resuming run ${S.resumes + 1} from ${START.slice(0, 7)} (${done ? done.split(/\r?\n/).length : 0} commits kept${notes ? ', lead notes' : ''})`);
+      if (S.resumedBy) say(`resumed by ${S.resumedBy}`);
     }
     await send(sid, first, BUILD);
     for (;;) {
@@ -629,9 +722,11 @@ async function runLane(repoArg, task, opts = {}) {
   const log = git(repo, 'log', '--oneline', `${START}..HEAD`);
   const left = dirty();
   const reviewBody = review ? (() => { const ls = review.split(/\r?\n/); const i = ls.findIndex((l) => /^\s*1\.\s/.test(l)); return ls.slice(i >= 0 ? i : Math.max(0, ls.length - 16)).filter((l) => l.trim() && !/^\s*VERDICT:/i.test(l)).slice(0, 24).join('\n'); })() : '';
+  const modelBits = Object.entries(S.tokensByModel).map(([m, t]) => `${m} ${tokenTotal(t)}`).join(', ');
+  const byModel = modelBits ? ` | by model: ${modelBits}` : '';
   const md = [
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
-    `models: build ${BUILD}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps`,
+    `models: build ${BUILD}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}${byModel}`,
     `commits ${S.commits} (brief has ${stepCount} numbered lines):`, log || '(none)',
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
@@ -703,18 +798,24 @@ function findLane(q) {
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
   return { lane: l.id, health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
-    commits: `${s.commits}/${s.steps}`, steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
+    commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
 const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
 // A status row for scripts: every laneRow field plus identity, result, progress and file paths.
 function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '',
-    progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: s.tokens || {},
+    progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
     summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
+function tokensByView(s) {
+  return { build: withTotal(s.tokensBy?.build), review: withTotal(s.tokensBy?.review), other: withTotal(s.tokensBy?.other) };
+}
+function tokensByModelView(s) {
+  const out = {}; for (const [m, t] of Object.entries(s.tokensByModel || {})) out[m] = withTotal({ ...emptyTokens(), ...t }); return out;
+}
 function printRows(rows) {
-  const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'steers', 'interrupts', 'verdict', 'now'];
+  const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
   const w = cols.map((c) => Math.max(c.length, ...rows.map((r) => String(r[c]).length)));
   console.log(cols.map((c, i) => c.toUpperCase().padEnd(w[i])).join('  '));
   for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
@@ -733,7 +834,7 @@ function cmdSummary(args) {
   if (args.includes('--json')) {
     const pg = stepProgress(s);
     console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', verdict: s.verdict || '',
-      elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: s.tokens || {}, commits: s.commitLog || [], steps: pg.list,
+      elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), commits: s.commitLog || [], steps: pg.list,
       gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
     return;
   }
@@ -780,6 +881,80 @@ function cmdStop(args) {
   fs.writeFileSync(path.join(l.dir, 'STOP'), String(now()));
   if (!alive(l.s.pid)) { killTree(l.s.server?.pid); const s = l.s; s.result = s.result || 'stopped'; s.phase = 'finished'; s.finishedAt = s.finishedAt || now(); s.activity = 'stopped (supervisor had died)'; fs.writeFileSync(path.join(l.dir, 'state.json'), JSON.stringify(s, null, 2)); console.log(`supervisor was gone; killed its server and marked ${l.id} stopped`); return; }
   console.log(`stop requested for ${l.id}; the supervisor aborts the session and writes the summary within a few seconds`);
+}
+// A resume logged on the plan that owns the lane, so the lead sees who continued what.
+function noteResume(l, by, note) {
+  for (const r of plans()) {
+    const p = readJSON(r.file) || {};
+    const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+    if (!(p.lanes || []).some((pl) => laneId(path.resolve(base, pl.repo || '.'), pl.task) === l.id)) continue;
+    (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Resumed ${l.id} from the ${by}${note ? ': ' + note : ''}` });
+    try { fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n'); } catch {}
+    return r.id;
+  }
+  return null;
+}
+// Resume a paused, failed, stopped or DEAD lane from anywhere (CLI, dashboard, MCP).
+// CA_RESUME_DRY=1 answers with the argv without spawning (checks, cautious leads).
+function resumeLane(l, { note = '', by = 'ca resume' } = {}) {
+  const s = l.s;
+  if (s.result === 'done') return { error: `lane ${l.id} is done; nothing to resume`, code: 409 };
+  if (!s.result && alive(s.pid)) return { error: `lane ${l.id} is still running (pid ${s.pid}); steer or stop it instead`, code: 409 };
+  if (!fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`))) return { error: `brief missing: tasks/${l.task}.md in ${l.repo}`, code: 409 };
+  if (!s.result && !alive(s.pid)) {
+    // DEAD supervisor: kill its server and close the old run before starting a new one.
+    killTree(s.server?.pid);
+    s.result = s.result || 'stopped'; s.phase = 'finished'; s.finishedAt = s.finishedAt || now(); s.activity = 'stopped (supervisor had died)';
+    try { fs.writeFileSync(path.join(l.dir, 'state.json'), JSON.stringify(s, null, 2)); } catch {}
+  }
+  if (note) { try { fs.mkdirSync(l.dir, { recursive: true }); fs.appendFileSync(path.join(l.dir, 'resume-note.txt'), `[${new Date().toISOString()} ${by}] ${note}\n`); } catch {} }
+  noteResume(l, by, note);
+  const argv = [fileURLToPath(import.meta.url), 'lane', l.repo, l.task, '--resume'];
+  if (process.env.CA_RESUME_DRY === '1') return { ok: true, dry: true, argv, message: `would resume ${l.id} with: ${argv.join(' ')}` };
+  const logFile = path.join(l.repo, 'tasks', `${l.task}.lane.log`);
+  const out = fs.openSync(logFile, 'a');
+  const child = spawn(process.execPath, argv, { detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, CA_RESUMED_BY: by } });
+  child.unref();
+  return { ok: true, dry: false, argv, message: `resumed ${l.id} (pid ${child.pid}); log: ${logFile}` };
+}
+function cmdResume(args) {
+  const ni = args.indexOf('--note');
+  const note = ni >= 0 ? args.slice(ni + 1).filter((a) => a !== '--dry-run').join(' ').trim() : '';
+  const q = args.slice(0, ni >= 0 ? ni : args.length).find((a) => !a.startsWith('--'));
+  if (!q) die('usage: ca resume <lane> [--note "<text>"] [--dry-run]', 2);
+  if (args.includes('--dry-run')) process.env.CA_RESUME_DRY = '1';
+  const l = findLane(q);
+  const r = resumeLane(l, { note, by: 'ca resume' });
+  if (r.error) die(r.error, 2);
+  console.log(`CA_RESUME ${JSON.stringify({ lane: l.id, ok: true, dry: !!r.dry, argv: r.argv, message: r.message })}`);
+}
+// Queue a kick for a stuck turn. The supervisor consumes the file within 2 s (or at the next
+// backoff poll): turn/now retry the turn, fresh starts a clean session, server restarts
+// codearts serve, now also skips a backoff wait. Refused when the lane cannot act on it.
+function kickLane(l, { mode = 'turn', text = '', by = 'ca kick' } = {}) {
+  const s = l.s;
+  const need = { turn: ['kick'], now: ['kick', 'skip-wait'], fresh: ['fresh'], server: ['restart-server'] }[mode];
+  if (!need) return { error: `unknown kick mode "${mode}" (turn, fresh, server or now)`, code: 400 };
+  if (s.result) return { error: `lane ${l.id} already ${resultOf(s)}; use ca resume ${l.id} to continue it`, code: 409 };
+  if (!alive(s.pid)) return { error: `lane ${l.id} is DEAD (supervisor not running); use ca resume ${l.id} instead`, code: 409 };
+  const { actions } = laneActions({ s, alive: true, health: health(s), canResume: true });
+  if (!need.some((n) => actions.includes(n))) return { error: `kick (${mode}) is not allowed while ${l.id} is in phase ${s.phase} (allowed: ${actions.join(', ') || 'nothing; wait or stop'})`, code: 409 };
+  fs.mkdirSync(l.dir, { recursive: true });
+  const file = path.join(l.dir, 'KICK');
+  fs.writeFileSync(file, JSON.stringify({ at: now(), mode, text, by }));
+  return { ok: true, file };
+}
+function cmdKick(args) {
+  const flags = { '--fresh': 'fresh', '--server': 'server', '--now': 'now' };
+  let mode = 'turn'; const rest = [];
+  for (const a of args) { if (flags[a]) mode = flags[a]; else rest.push(a); }
+  const [q, ...msg] = rest;
+  if (!q) die('usage: ca kick <lane> [--fresh|--server|--now] [message]', 2);
+  const l = findLane(q);
+  const r = kickLane(l, { mode, text: msg.join(' ').trim(), by: 'ca kick' });
+  if (r.error) die(r.error, 2);
+  console.log(`CA_KICK ${JSON.stringify({ lane: l.id, ok: true, mode, file: r.file })}`);
+  console.log(`kick (${mode}) queued for ${l.id}; the supervisor applies it within 2 s (phase ${l.s.phase}). Follow: ca tail ${l.id} -f`);
 }
 function cmdGc() {
   for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); fs.rmSync(path.join(REG, 'final', `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
@@ -1011,11 +1186,26 @@ function stepProgress(s, steps = s.stepList || []) {
   const list = steps.map((st) => ({ ...st, state: done.has(st.n) ? 'done' : st.n === cur ? 'current' : s.result ? 'open' : 'pending', commit: done.get(st.n) || '' }));
   return { list, done: list.filter((x) => x.state === 'done').length, total: list.length, current: list.find((x) => x.state === 'current') || null };
 }
+// The project a lane belongs to: a worktree reports the main repo (its .git common dir's parent).
+const projectCache = new Map();
+function projectOf(repo) {
+  if (projectCache.has(repo)) return projectCache.get(repo);
+  let main = repo;
+  const out = git(repo, 'rev-parse', '--git-common-dir');
+  if (out && path.basename(path.resolve(repo, out)).toLowerCase() === '.git') main = path.dirname(path.resolve(repo, out));
+  const v = { key: main, name: path.basename(main) };
+  projectCache.set(repo, v);
+  return v;
+}
 function laneView(l) {
   const s = l.s; const pg = stepProgress(s);
-  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: s.tokens, tools: s.tools || [], models: s.models, session: s.activeSession,
-    reason: s.reason || '', running: !s.result && alive(s.pid), result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
-    startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0 };
+  const isAlive = alive(s.pid); const h = health(s);
+  const { actions, suggest, why } = laneActions({ s, alive: isAlive, health: h, canResume: fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`)) });
+  const { bucket, reason: bucketWhy } = laneBucket({ s, alive: isAlive, health: h });
+  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
+    reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
+    startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
+    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1026,11 +1216,11 @@ function laneFromLog(file, ref, briefFile) {
   const result = head[1].trim().toLowerCase(); const reason = head[2] || '';
   const commitLog = [...tail.matchAll(/^([0-9a-f]{7,40}) (.+?)\r?$/gm)].map((m) => ({ hash: m[1], subject: m[2] })).reverse();
   let stepList = []; try { stepList = [...fs.readFileSync(briefFile, 'utf8').matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) })); } catch {}
-  const tk = tail.match(/tokens in (\d+) out (\d+)/); const vd = tail.match(/^VERDICT: (.+?)\r?$/m);
+  const tk = tail.match(/tokens in (\d+) out (\d+)(?: \(cache read (\d+)\))? over (\d+) steps/); const vd = tail.match(/^VERDICT: (.+?)\r?$/m);
   let mt = 0; try { mt = fs.statSync(file).mtimeMs; } catch {}
   const secs = [...head[3].matchAll(/(\d+)([hms])/g)].reduce((a, m) => a + Number(m[1]) * { h: 3600, m: 60, s: 1 }[m[2]], 0);
   const s = { result, reason, phase: 'finished', activity: result, verdict: vd && vd[1] !== 'none' ? vd[1] : null, commitLog, commits: commitLog.length, stepList, steps: stepList.length,
-    tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [] };
+    tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]), reasoning: 0, cacheRead: Number(tk[3] || 0), steps: Number(tk[4] || 0) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [] };
   return { ...ref, s };
 }
 function planView(r) {
@@ -1084,8 +1274,13 @@ function planView(r) {
   if (counts.notStarted && state !== 'running') bits.push(`${counts.notStarted} not started`);
   if (counts.dropped) bits.push(`${counts.dropped} dropped`);
   if (state === 'waiting' || state === 'attention' || state === 'paused') bits.push(`idle ${dur(idle)}`);
+  // Plan tokens: every lane counts, folded (continued) ones included; per agent like the lane views.
+  const tokens = sumTokens(planned.map((x) => x.tokens));
+  const tokensBy = { build: sumTokens(planned.map((x) => x.tokensBy?.build)), review: sumTokens(planned.map((x) => x.tokensBy?.review)), other: sumTokens(planned.map((x) => x.tokensBy?.other)) };
+  const modelKeys = [...new Set(planned.flatMap((x) => Object.keys(x.tokensByModel || {})))];
+  const tokensByModel = Object.fromEntries(modelKeys.map((m) => [m, sumTokens(planned.map((x) => x.tokensByModel?.[m]))]));
   return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', lead: p.lead || 'Claude', status: p.status || '', now: p.now || '',
-    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed',
+    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel,
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
 }
@@ -1112,6 +1307,8 @@ function cmdDash(args) {
     const u = new URL(req.url, 'http://x');
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     try {
+      // Every POST under /api/ must be JSON: a cross-site form post cannot steer, stop, kick or resume.
+      if (req.method === 'POST' && u.pathname.startsWith('/api/') && !/application\/json/i.test(String(req.headers['content-type'] || ''))) return json({ error: 'POST /api/ needs content-type application/json' }, 415);
       if (u.pathname === '/') { let html = page; try { html = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8'); } catch {} res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); }
       if (u.pathname === '/office') { let html = ''; try { html = fs.readFileSync(path.join(HERE, 'office.html'), 'utf8'); } catch {} if (html) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); } }
       if (u.pathname.startsWith('/assets/')) {
@@ -1129,9 +1326,16 @@ function cmdDash(args) {
         return json({ version: Math.max(0, ...files.map((f) => { try { return Math.round(fs.statSync(f).mtimeMs); } catch { return 0; } })) });
       }
       if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
+      if (u.pathname === '/api/overview') {
+        // The office view in one call: attention buckets and lanes not finished over 3 days ago.
+        const ls = lanes().filter((l) => !l.s.result || now() - (l.s.finishedAt || 0) < 3 * 24 * 3600e3).map(laneView);
+        const counts = { attention: 0, running: 0, done: 0, ended: 0 };
+        for (const v of ls) counts[v.bucket] = (counts[v.bucket] || 0) + 1;
+        return json({ counts, lanes: ls });
+      }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
-      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach)$/);
+      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
         const l = all.find((x) => x.id === q) || all.find((x) => x.task === q) || all.find((x) => x.id.includes(q));
@@ -1145,6 +1349,20 @@ function cmdDash(args) {
         }
         if (m[2] === 'summary') { const f = path.join(l.dir, 'summary.md'); return json({ text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '' }); }
         if (req.method === 'POST' && m[2] === 'steer') { let b = ''; for await (const c of req) b += c; const text = JSON.parse(b || '{}').text?.trim(); if (!text) return json({ error: 'empty' }, 400); steer(l, text); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'kick') {
+          let b = ''; for await (const c of req) b += c;
+          const body = JSON.parse(b || '{}');
+          const r = kickLane(l, { mode: String(body.mode || 'turn'), text: String(body.text || '').trim(), by: 'dashboard' });
+          if (r.error) return json({ error: r.error }, r.code || 409);
+          return json({ ok: true, mode: String(body.mode || 'turn'), file: r.file });
+        }
+        if (req.method === 'POST' && m[2] === 'resume') {
+          let b = ''; for await (const c of req) b += c;
+          const body = JSON.parse(b || '{}');
+          const r = resumeLane(l, { note: String(body.note || '').trim(), by: 'dashboard' });
+          if (r.error) return json({ error: r.error }, r.code || 409);
+          return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
+        }
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
         if (req.method === 'POST' && m[2] === 'attach') {
           // Open a new console window with the CodeArts TUI on the live session.
@@ -1158,7 +1376,8 @@ function cmdDash(args) {
     } catch (err) { json({ error: String(err.message || err) }, 500); }
   });
   srv.on('error', (e) => { if (e.code === 'EADDRINUSE') { console.log(`ca dash is already running: http://127.0.0.1:${port}`); process.exit(0); } throw e; });
-  srv.listen(port, '127.0.0.1', () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
+  // Loopback by default (the dashboard drives lanes); CA_DASH_HOST only moves it within the machine.
+  srv.listen(port, process.env.CA_DASH_HOST || '127.0.0.1', () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
 }
 
 function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(code); }
@@ -1166,7 +1385,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
