@@ -3,7 +3,7 @@
   "goal": "Token counts per agent, per lane and per task (plan), and quick controls in the dashboard and Office view to retry, restart, resume or steer a stuck lane without opening the harness.",
   "lead": "Claude Opus 5.5",
   "status": "running",
-  "now": "Wave 1 running; wave 2 (Control room) briefed and waiting for the merge.",
+  "now": "Wave 2 running: Control room (overview) on flash.",
   "waves": [
     {
       "name": "Wave 1 · Backend and UIs",
@@ -68,11 +68,26 @@
     }
   ],
   "next": [
-    "Merge the three lanes into master and run every check",
-    "Launch wave 2 (overview) from merged master",
-    "Real lane test: kick a running probe lane (turn, server) and resume a stopped one from the dashboard",
-    "Look at screenshots of both pages",
-    "Copy runner files to the live skill and add lessons"
+    {
+      "text": "Merge the three lanes into master and run every check",
+      "done": true
+    },
+    {
+      "text": "Launch wave 2 (overview) from merged master",
+      "done": true
+    },
+    {
+      "text": "Real lane test: kick a running probe lane (turn, server) and resume a stopped one from the dashboard",
+      "done": true
+    },
+    {
+      "text": "Look at screenshots of both pages",
+      "done": false
+    },
+    {
+      "text": "Copy runner files to the live skill and add lessons",
+      "done": false
+    }
   ],
   "decisions": [
     {
@@ -98,6 +113,10 @@
     {
       "at": "2026-11-07T08:22:00.366Z",
       "text": "User wants tokens by model (Opus lead, MaaS flash, GLM). Steered controls lane to add tokensByModel per lane; wave 2 adds lead usage from the Claude Code transcript (leadSession) and the by-model tables."
+    },
+    {
+      "at": "2026-11-07T09:04:32.548Z",
+      "text": "Wave 1 merged (3 lanes, all 13 check suites green). Real lane test on the dev runner: dashboard Retry turn, Restart server and Resume-with-note all worked; found and fixed a stale STOP file that ended a resumed run at once. Also fixed: state.json now written atomically (lanes flickered out of status), resume log fd leak."
     }
   ],
   "risks": [
