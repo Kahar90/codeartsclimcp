@@ -804,9 +804,22 @@ function findLane(q) {
   if (!hit) die(`no lane matches "${q}". Lanes: ${all.map((l) => l.id).join(', ') || '(none)'}`, 2);
   return hit;
 }
+// Server side acknowledgement of finished lanes (Control room). acks.json maps a lane id to the
+// finishedAt that was acknowledged, so a lane resumed and finished again reads as unseen.
+const ACKS = path.join(REG, 'acks.json');
+let acksCache = {}, acksMtime = -1;
+function readAcks() {
+  try { const m = fs.statSync(ACKS).mtimeMs; if (m !== acksMtime) { acksCache = readJSON(ACKS, {}) || {}; acksMtime = m; } }
+  catch { acksCache = {}; acksMtime = -1; }
+  return acksCache;
+}
+function writeAcks(a) { try { fs.mkdirSync(REG, { recursive: true }); fs.writeFileSync(ACKS, JSON.stringify(a, null, 2) + '\n'); } catch {} acksMtime = -1; }
+function laneSeen(id, finishedAt) { return !!(finishedAt && readAcks()[id] === finishedAt); }
+function setAck(id, seen, finishedAt) { const a = { ...readAcks() }; if (seen && finishedAt) a[id] = finishedAt; else delete a[id]; writeAcks(a); }
+function bucketOf(l) { const s = l.s; return laneBucket({ s, alive: alive(s.pid), health: health(s) }).bucket; }
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
-  return { lane: l.id, health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
+  return { lane: l.id, bucket: bucketOf(l), health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
     commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
 const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
@@ -824,13 +837,16 @@ function tokensByModelView(s) {
   const out = {}; for (const [m, t] of Object.entries(s.tokensByModel || {})) out[m] = withTotal({ ...emptyTokens(), ...t }); return out;
 }
 function printRows(rows) {
-  const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
+  const cols = ['lane', 'bucket', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
   const w = cols.map((c) => Math.max(c.length, ...rows.map((r) => String(r[c]).length)));
   console.log(cols.map((c, i) => c.toUpperCase().padEnd(w[i])).join('  '));
   for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
 }
 function cmdStatus(args) {
-  const ls = lanes().filter((l) => args.includes('--all') || !l.s.result || now() - (l.s.finishedAt || 0) < 24 * 3600e3);
+  // Control room order: what needs a human first (attention), then running, done, ended.
+  const rank = { attention: 0, running: 1, done: 2, ended: 3 };
+  const all = lanes().filter((l) => args.includes('--all') || !l.s.result || now() - (l.s.finishedAt || 0) < 24 * 3600e3);
+  const ls = all.map((l) => ({ l, b: bucketOf(l) })).sort((a, b) => (rank[a.b] ?? 9) - (rank[b.b] ?? 9)).map((x) => x.l);
   if (args.includes('--json')) { console.log(JSON.stringify(ls.map(statusRow), null, 2)); return; }
   const rows = ls.map(laneRow);
   if (!rows.length) { console.log('no lanes (ca status --all for older ones)'); return; }
@@ -1214,7 +1230,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
-    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo) };
+    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), seen: laneSeen(l.id, s.finishedAt) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1344,7 +1360,7 @@ function cmdDash(args) {
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
-      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume)$/);
+      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
         const l = all.find((x) => x.id === q) || all.find((x) => x.task === q) || all.find((x) => x.id.includes(q));
@@ -1373,6 +1389,13 @@ function cmdDash(args) {
           return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
         }
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'ack') {
+          // Mark a finished lane seen (or unseen again) for this finishedAt; a later finish is unseen anew.
+          let b = ''; for await (const c of req) b += c;
+          const body = JSON.parse(b || '{}');
+          setAck(l.id, body.seen !== false, l.s.finishedAt || null);
+          return json({ ok: true, seen: laneSeen(l.id, l.s.finishedAt || null) });
+        }
         if (req.method === 'POST' && m[2] === 'attach') {
           // Open a new console window with the CodeArts TUI on the live session.
           const s = l.s; if (s.result || !s.server) return json({ error: 'lane not running' }, 400);
