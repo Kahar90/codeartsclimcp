@@ -57,6 +57,14 @@ const UNPROTECT_PS = [
   'ConvertTo-Json $o -Compress',
 ].join('\n');
 
+// Windows PowerShell 5.1 started from a PowerShell 7 process inherits pwsh 7's PSModulePath and then
+// cannot load its own Microsoft.PowerShell.Security module (ConvertTo-SecureString): drop it so 5.1
+// computes its default module path.
+function psEnv(extra) {
+  const env = { ...process.env, ...extra };
+  for (const k of Object.keys(env)) if (/^psmodulepath$/i.test(k)) delete env[k];
+  return env;
+}
 // Why the last DPAPI call failed (one line, never contains a key value), for the save warning.
 let lastVaultError = '';
 function psResult(names, r) {
@@ -77,14 +85,14 @@ function psResult(names, r) {
 // command line), and the encrypted map comes back as JSON on stdout. null on any failure.
 function protect(map) {
   const names = Object.keys(map);
-  const env = { ...process.env, CA_VAULT_NAMES: JSON.stringify(names) };
+  const env = psEnv({ CA_VAULT_NAMES: JSON.stringify(names) });
   names.forEach((n, i) => { env[`CA_VAULT_${i}`] = map[n]; });
   const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', PROTECT_PS], { encoding: 'utf8', windowsHide: true, env });
   return psResult(names, r);
 }
 function unprotect(map) {
   const names = Object.keys(map);
-  const env = { ...process.env, CA_VAULT_NAMES: JSON.stringify(names) };
+  const env = psEnv({ CA_VAULT_NAMES: JSON.stringify(names) });
   names.forEach((n, i) => { env[`CA_VAULT_${i}`] = map[n]; });
   const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', UNPROTECT_PS], { encoding: 'utf8', windowsHide: true, env });
   return psResult(names, r);

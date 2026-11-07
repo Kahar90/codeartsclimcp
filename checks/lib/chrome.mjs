@@ -35,4 +35,7 @@ export function chromeProfileDir(name) {
   return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), `ca-${name}-profile-`));
 }
 
-export const chromeFlags = process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage'] : [];
+// Never throttle timers or animation frames: CI runners (Windows, macOS) can treat the headless
+// window as backgrounded, and the dashboards' step effects and polls then never fire.
+const noThrottle = ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'];
+export const chromeFlags = process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage', ...noThrottle] : noThrottle;

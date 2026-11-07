@@ -50,6 +50,9 @@ try {
   check('ca_wait on a done lane: result JSON with exit 0', !m.result?.isError && j && j.exit === 0 && Array.isArray(j.lanes) && j.lanes[0].result === 'done', text(m).slice(0, 200));
   const t0 = Date.now(); m = await call('ca_wait', { lanes: ['slow'], timeout_s: 2 }, 30000); j = parse(text(m));
   check('ca_wait timeout says still running, not an error', !m.result?.isError && j && j.exit === 124 && j.timedOut === true && Date.now() - t0 < 20000, text(m).slice(0, 200));
+  // MCP clients (Codex, opencode) cancel a tool call after about 60 s: a huge timeout_s must still answer in time.
+  const t1 = Date.now(); m = await call('ca_wait', { lanes: ['slow'], timeout_s: 3000 }, 90000); j = parse(text(m));
+  check('ca_wait with timeout_s 3000 still answers within 60 s (still running, exit 124)', !m.result?.isError && j?.exit === 124 && Date.now() - t1 < 60000, `${Date.now() - t1} ms ${text(m).slice(0, 120)}`);
   m = await call('ca_steer', { lane: 'good', message: 'x' }); check('ca_steer on a finished lane is a tool error', m.result?.isError === true, text(m).slice(0, 120));
   m = await call('ca_summary', { lane: 'nope' }); check('unknown lane is a tool error with the CLI message', m.result?.isError === true && /no lane matches/.test(text(m)), text(m).slice(0, 120));
   m = await call('ca_kick', { lane: 'slow', mode: 'fresh', message: 'start clean' });

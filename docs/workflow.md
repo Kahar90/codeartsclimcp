@@ -31,8 +31,9 @@ summaries, not transcripts.
 
 ## 4. Run and watch
 - `ca_lane_start {repo, task}` (CLI: `ca lane <repo> <task> --detach`). It returns at once.
-- `ca_wait {lanes, timeout_s}` blocks until every lane has a result or the timeout passes
-  (exit 124: still running, call it again). Do not poll `ca_status` in a loop.
+- `ca_wait {lanes, timeout_s}` blocks until every lane has a result or the timeout passes (at
+  most 55 s per call, so your MCP client never times out; exit 124: still running, call it again
+  right away). A lane takes minutes: expect several calls. Do not poll `ca_status` in a loop.
 - The human watches the dashboard (http://127.0.0.1:4777, Office view at /office) or attaches the
   CodeArts TUI with `ca attach <lane>`.
 - Health values: running, running tool, quiet (>60 s silent), STALLED (watchdog will abort and
