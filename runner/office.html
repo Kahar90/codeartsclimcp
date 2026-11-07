@@ -1289,8 +1289,15 @@ window.__office = {
         plate: { x: plate.x, y: plate.y, w: plate.width, h: plate.height },
         done: l && l.progress ? (l.progress.done || 0) : 0,
         total: l && l.progress ? (l.progress.total || 0) : 0,
+        tokens: key === "lead" ? CAUI.tokenTotal(model && model.plan.tokens) : CAUI.tokenTotal(l && l.tokens),
+        suggest: l ? (l.suggest || "") : "",
       };
     });
+    const winLane = winFor && winFor !== "lead" && model ? model.lanes.find((x) => x.id === winFor) : null;
+    const winSrc = winFor === "lead" ? (model && model.plan) : winLane;
+    const winTk = winSrc
+      ? (() => { const parts = CAUI.tokenSplit(winSrc.tokensBy); return { total: CAUI.tokenTotal(winSrc.tokens), build: parts[0].total, review: parts[1].total, other: parts[2].total }; })()
+      : null;
     return {
       mode,
       plan: (model && model.plan && model.plan.title) || "",
@@ -1298,10 +1305,13 @@ window.__office = {
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
       stations,
       overflow: model ? model.lanes.filter((l) => !laneStation.has(l.id)).map((l) => l.id) : [],
-      window: { open: !win.hidden && !!winFor, laneId: winFor, x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement) },
+      window: { open: !win.hidden && !!winFor, laneId: winFor, x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement), tokens: winTk, actions: [...$("winBtns").children].map((b) => b.dataset.action), suggest: (winLane && winLane.suggest) || "", noteOpen: !$("winNote").hidden },
       effects: effects.slice(),
       motion: PixelSprites.motion(),
       lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 })),
+      planTokens: CAUI.tokenTotal(model && model.plan.tokens),
+      controls: demoControls.slice(),
+      quickSteers: $("winChips").hidden ? 0 : $("winChips").childElementCount,
     };
   },
   press(id) {
