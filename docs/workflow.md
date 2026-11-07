@@ -7,8 +7,9 @@ summaries, not transcripts.
 
 ## 1. Preflight
 - `ca_doctor` (or `ca doctor`). Fix every `fail` row before starting; `warn` rows are optional.
-- The repo must be a git repo with a first commit. Know its check commands (tests, typecheck,
-  lint); if there are none, plan a step that adds one.
+- The repo must be a git repo with a first commit: if it is not, run `git init` and
+  `git commit --allow-empty -m "first commit"` yourself (`ca lane` trusts the folder by itself).
+  Know its check commands (tests, typecheck, lint); if there are none, plan a step that adds one.
 
 ## 2. Plan
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.

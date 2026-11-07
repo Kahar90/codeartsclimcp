@@ -4,10 +4,10 @@
 
 | Command | What it does |
 |---|---|
-| `ca onboard [--harness h] [--repo d] [--yes] [--smoke] [--dry-run] [--json]` | guided first-run setup |
+| `ca onboard [--harness h] [--repo d] [--repo-only] [--yes] [--smoke] [--dry-run] [--json]` | guided setup, once per machine (`--repo-only`: config in this repo only) |
 | `ca auth [--wait [--timeout S]] [--status] [--stdin] [--force] [--no-open] [--json]` | keys through a local browser form (never through chat), stored in a user-only file |
 | `ca doctor [--json] [repo]` | preflight: node, codearts, credentials, MaaS key, git, trust, shell, dashboard |
-| `ca setup <harness> [repo] [--dry-run] [--write] [--user]` | MCP + rules config for claude, kiro, cursor, codex, opencode, vscode |
+| `ca setup <harness> [repo] [--dry-run] [--user]` | MCP + rules config for claude, kiro, cursor, codex, opencode, vscode (`--user`: machine-wide) |
 | `ca init <repo> <task> [--goal ..] [--force]` | scaffold `tasks/<task>.md` from the brief template |
 | `ca lane <repo> <task> [--detach] [--resume]` | run a lane (foreground, or detached with a log file) |
 | `ca wait <lane...> [--timeout S] [--json] [--quiet]` | block until lanes finish; exit code = worst result |
@@ -60,7 +60,8 @@ lead workflow in [workflow.md](workflow.md)).
 
 Run `ca doctor`; every failing row has a fix line. Common ones:
 
-- **Credentials missing** (exit 3): `ca auth`.
+- **Credentials missing or rejected** (exit 3): `ca auth` (or `ca auth --force` to replace a
+  rejected key); the summary names the key (AK/SK or MaaS).
 - **CodeArts CLI not found**: `ca onboard --yes` installs it.
 - **Folder not trusted**: `ca onboard --yes` adds the repo to the CodeArts trusted folders.
 - **Harness does not show the tools**: restart or reload the harness after setup (Claude

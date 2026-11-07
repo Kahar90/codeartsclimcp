@@ -1,156 +1,33 @@
 {
-  "title": "Token counters and lane controls",
-  "goal": "Token counts per agent, per lane and per task (plan), and quick controls in the dashboard and Office view to retry, restart, resume or steer a stuck lane without opening the harness.",
+  "title": "Onboarding: one setup per machine, clear failures",
+  "goal": "Make installing and using CodeArts lanes as easy as possible for a new user on any harness: one prompt, one keys form, then any repo works; wrong keys explained in seconds; a first-run dashboard that says what to do.",
   "lead": "Claude Opus 5.5",
-  "status": "done",
-  "now": "Closed: all waves merged and deployed",
+  "status": "running",
+  "now": "Wave 1 running: scope, keys, firstrun",
   "waves": [
     {
-      "name": "Wave 1 · Backend and UIs",
-      "lanes": [
-        "controls",
-        "lanes-ctl",
-        "office-ctl"
-      ],
-      "note": "UIs work against demo fixtures with the shared CAUI helpers; backend is held to checks/controls.check.mjs."
-    },
-    {
-      "name": "Wave 2 · Control room",
-      "lanes": [
-        "overview"
-      ],
-      "note": "Starts after wave 1 merges (shares dash.html). Status buckets, projects, freshness, notifications."
-    },
-    {
-      "name": "Wave 3 · Office crowd",
-      "lanes": [
-        "office-crowd"
-      ],
-      "note": "After the Control room merges (both touch office.html). Lanes 4 to 8 sit at hot desks as sprites, +N pill beyond."
+      "name": "Wave 1 · Setup scope, keys, first-run page",
+      "lanes": ["scope", "keys", "firstrun"],
+      "note": "Contract checks written first (checks/scope.check.mjs, checks/authfast.check.mjs). No shared files except a small route in ca.mjs (keys and firstrun touch different parts)."
     }
   ],
   "lanes": [
-    {
-      "task": "controls",
-      "repo": "../ca-office-wt-controls",
-      "model": "maas/glm-5.3",
-      "why": "Token accounting by agent, laneActions, KICK in the supervisor, ca kick/resume, API, MCP",
-      "files": [
-        "runner/ca.mjs",
-        "runner/tokens.mjs",
-        "runner/controls.mjs",
-        "runner/mcp.mjs"
-      ]
-    },
-    {
-      "task": "lanes-ctl",
-      "repo": "../ca-office-wt-lanes-ctl",
-      "model": "maas/glm-5.3",
-      "why": "Lanes page: token blocks, controls bar, one-click suggested action, quick steer chips",
-      "files": [
-        "runner/dash.html",
-        "checks/lanes.check.mjs"
-      ]
-    },
-    {
-      "task": "office-ctl",
-      "repo": "../ca-office-wt-office-ctl",
-      "model": "maas/glm-5.3",
-      "why": "Office: window tokens and controls, nameplate tokens and attention badge, plan total",
-      "files": [
-        "runner/office.html",
-        "checks/office.check.mjs"
-      ]
-    },
-    {
-      "task": "overview",
-      "repo": "../ca-office-wt-overview",
-      "model": "maas/glm-5.3",
-      "why": "Control room home: needs you / running / done / ended across repos, ack, tab title, notifications",
-      "files": [
-        "runner/dash.html",
-        "runner/ca.mjs",
-        "runner/office.html"
-      ]
-    },
-    {
-      "task": "office-crowd",
-      "repo": "../ca-office-wt-office-crowd",
-      "model": "maas/glm-5.3",
-      "why": "Hot desks for lanes beyond three, attention-first seating, +N pill",
-      "files": [
-        "runner/office.html",
-        "checks/office.check.mjs"
-      ]
-    }
+    { "task": "scope", "repo": "../ca-office-wt-scope", "model": "maas/deepseek-v4.1-flash", "why": "Machine-wide setup by default, Codex MCP always written, smoke test outside the user's repo", "files": ["runner/setup.mjs", "runner/onboard.mjs", "templates/claude-skill.md", "checks/onboard.check.mjs"] },
+    { "task": "keys", "repo": "../ca-office-wt-keys", "model": "maas/deepseek-v4.1-flash", "why": "Rejected AK/SK or MaaS key ends the lane in seconds with a plain message; MaaS key verified on save; readable doctor", "files": ["runner/authsignal.mjs", "runner/ca.mjs", "runner/auth.mjs", "checks/auth.check.mjs"] },
+    { "task": "firstrun", "repo": "../ca-office-wt-firstrun", "model": "maas/deepseek-v4.1-flash", "why": "First-run dashboard: one setup prompt, how to ask for work, Connect keys button, readable rows, no overflow", "files": ["runner/dash.html", "runner/ca.mjs", "checks/lanes.check.mjs"] }
   ],
   "next": [
-    {
-      "text": "Merge the three lanes into master and run every check",
-      "done": true
-    },
-    {
-      "text": "Launch wave 2 (overview) from merged master",
-      "done": true
-    },
-    {
-      "text": "Real lane test: kick a running probe lane (turn, server) and resume a stopped one from the dashboard",
-      "done": true
-    },
-    {
-      "text": "Look at screenshots of both pages",
-      "done": true
-    },
-    {
-      "text": "Copy runner files to the live skill and add lessons",
-      "done": true
-    }
+    "Merge the three lanes, run every check on master",
+    "Real fresh-user rerun: npm pack install in a fake home, onboard for claude and codex, smoke test, wrong-key run",
+    "Update README, INSTALL.md, docs/manual-setup.md and docs/workflow.md for machine-wide setup",
+    "Deploy to the live skill, push master to origin main"
   ],
   "decisions": [
-    {
-      "at": "2026-11-07T00:00:00Z",
-      "text": "Wrote the shared CAUI helpers (tokens, ACTIONS, QUICK_STEERS, control) and checks/controls.check.mjs myself before the briefs so all three lanes share one contract."
-    },
-    {
-      "at": "2026-11-07T00:00:00Z",
-      "text": "Dashboard resume notes go to the lane folder (resume-note.txt), not tasks/, so a builder's git add -A never commits them."
-    },
-    {
-      "at": "2026-11-07T07:44:08.669Z",
-      "text": "User asked for a clear per-lane status view across projects. Steered the controls lane to add laneBucket (attention/running/done/ended) and project; the Control room UI is wave 2 after dash.html merges."
-    },
-    {
-      "at": "2026-11-07T07:44:08.670Z",
-      "text": "Pushed to origin/main (fixed an accidental new master branch on the remote)."
-    },
-    {
-      "at": "2026-11-07T08:10:48.834Z",
-      "text": "lanes-ctl failed on GLM 5.3: 4 think-watchdog aborts (8 min plans, 0 edits). Resumed in place on deepseek-v4.1-flash with lead notes forcing one edit per sub-change."
-    },
-    {
-      "at": "2026-11-07T08:22:00.366Z",
-      "text": "User wants tokens by model (Opus lead, MaaS flash, GLM). Steered controls lane to add tokensByModel per lane; wave 2 adds lead usage from the Claude Code transcript (leadSession) and the by-model tables."
-    },
-    {
-      "at": "2026-11-07T09:04:32.548Z",
-      "text": "Wave 1 merged (3 lanes, all 13 check suites green). Real lane test on the dev runner: dashboard Retry turn, Restart server and Resume-with-note all worked; found and fixed a stale STOP file that ended a resumed run at once. Also fixed: state.json now written atomically (lanes flickered out of status), resume log fd leak."
-    },
-    {
-      "at": "2026-11-07T09:42:00.403Z",
-      "text": "User wants lanes beyond three as sprites in the Office. Lead drew the art (5 coloured hot-desk robots + hot desk prop, slots checked against nameplates in a composite preview); wiring goes to wave 3."
-    },
-    {
-      "at": "2026-11-07T11:13:12.767Z",
-      "text": "All waves merged, 14 check suites green, deployed to the live skill. Lead fixed after review: plates covered by depth-sorted sprites, Needs you pill shown at 0 and blind to lanes without a bucket. Flash is now the default builder everywhere (user decision)."
-    },
-    {
-      "at": "2026-11-07T11:13:15.689Z",
-      "text": "Plan closed: all waves merged and deployed."
-    }
+    { "at": "2026-11-07T12:20:00.000Z", "text": "Fresh-user walkthrough found: smoke repo created inside the user's repo, Codex MCP never written by onboard, wrong keys look like an IAM outage and retry for 70 s, doctor table unreadable, first-run panel glued rows and overflow, setup needed again in every repo." },
+    { "at": "2026-11-07T12:22:00.000Z", "text": "User chose machine-wide setup by default (--repo-only keeps the per-repo files)." }
   ],
   "risks": [
-    "Kick and resume touch the supervisor loop: only a real lane proves them, the contract check is source level there.",
-    "GLM 5.3 UI lanes took 60 to 90 min before; LANE_TIMEOUT is 7200."
-  ],
-  "leadSession": "C:\\Users\\n00958341\\.claude\\projects\\D--Coding-codearts-testing\\983ee374-8523-49aa-9fe1-86fe4fc0da44.jsonl"
+    "Kiro, Cursor and VS Code user-level paths come from their docs; they cannot be signed in here to test.",
+    "Writing ~/.claude.json directly races with a running Claude Code; the claude CLI is preferred."
+  ]
 }

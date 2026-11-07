@@ -10,14 +10,15 @@ and gets a review. You read one summary and decide.
 
 ## Set it up in one prompt
 
-Open your coding agent in your project and send this:
+Open your coding agent and send this:
 
 ```text
-Set up CodeArts lanes in this repo by following
+Set up CodeArts lanes by following
 https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md
 ```
 
-That's it. Your agent installs everything, connects itself and runs a short test lane.
+That's it. Your agent installs everything, connects itself and runs a short test lane. Setup
+is once per machine: every repo works afterwards, nothing to set up per project.
 
 **Your only step:** a browser tab opens and asks for your Huawei Cloud keys. Create an AK/SK at
 [CodeArts CLI auth settings](https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth),
@@ -30,14 +31,15 @@ CodeArts CLI, git, config) the agent handles.
 
 ## Use it
 
-Restart your coding agent once after setup, then ask for what you want built:
+Restart your coding agent once after setup, then, in any repo, ask for what you want built:
 
 | Your agent | Type |
 |---|---|
 | Claude Code | `/codearts-build add a /health endpoint with a test` |
 | Kiro | `#codearts-lanes add a /health endpoint with a test` |
-| Cursor | `@codearts-lanes add a /health endpoint with a test` |
-| Codex, opencode, VS Code | `Use CodeArts lanes to add a /health endpoint with a test` |
+| Cursor, Codex, opencode, VS Code | `Use CodeArts lanes to add a /health endpoint with a test` |
+
+A folder that is not a git repo yet is fine: your agent makes it one before the first lane.
 
 Your agent splits the goal into small steps, starts one or more lanes, waits, checks the
 result and reports back with what was built, the commits and the review verdict.

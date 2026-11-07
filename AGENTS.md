@@ -38,19 +38,24 @@ On Windows set them persistently from PowerShell, then open a new terminal:
 Or let the guided setup do it (asks for the keys with hidden input in a terminal):
 
 ```sh
-cd <your git repo>
-ca onboard --yes --smoke   # fixes folder trust and git, configures the detected harness, 25 s probe lane
+ca onboard --yes --harness <h> --smoke   # once per machine: CLI, harness config (user level), trust, a short probe lane
 ```
 
-## 2. Connect your harness (once per repo)
+## 2. Connect your harness (once per machine)
 
-Run the line for your harness inside the target repo. Each one merges into existing config,
-is safe to rerun and accepts `--dry-run`.
+`ca setup <harness> --user` (what `ca onboard` runs) writes user-level config so every repo
+works; without `--user` it writes the per-repo files below. Each one merges into existing
+config, is safe to rerun and accepts `--dry-run`. User-level paths: Claude Code user MCP server +
+`~/.claude/skills/codearts-build`, Kiro `~/.kiro/settings/mcp.json` + `~/.kiro/steering/`, Cursor
+`~/.cursor/mcp.json`, Codex `~/.codex/config.toml` + `~/.codex/AGENTS.md`, opencode
+`~/.config/opencode/{opencode.json,AGENTS.md}`, VS Code the user-profile `mcp.json`.
+
+Per repo:
 
 | Harness | Command | What it writes |
 |---|---|---|
 | Claude Code | `ca setup claude` (`--user`: skill for every project too) | `.mcp.json`, `.claude/skills/codearts-build/SKILL.md` (the `/codearts-build` skill), `.claude/settings.local.json` (server enabled, read-only tools allowed) |
-| Codex | `ca setup codex --write` | `[mcp_servers.codearts]` in `~/.codex/config.toml` (read-only tools pre-approved) + an AGENTS.md section |
+| Codex | `ca setup codex` | `[mcp_servers.codearts]` in `~/.codex/config.toml` (read-only tools pre-approved) + an AGENTS.md section |
 | Cursor | `ca setup cursor` | `.cursor/mcp.json` + `.cursor/rules/codearts-lanes.mdc` |
 | Kiro | `ca setup kiro` | `.kiro/settings/mcp.json` + `.kiro/steering/codearts-lanes.md` |
 | opencode | `ca setup opencode` | `opencode.json` (`mcp.codearts`) + an AGENTS.md section |
