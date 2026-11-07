@@ -37,7 +37,7 @@ try {
   srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   m = await rpc('ping', {}); check('ping', m.result && !m.error);
   m = await rpc('tools/list', {}); const tools = m.result?.tools || [];
-  const want = ['ca_doctor', 'ca_init', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_kick', 'ca_resume', 'ca_ack', 'ca_lead_tokens', 'ca_plan', 'ca_plan_list', 'ca_plan_close', 'ca_gc', 'ca_note'];
+  const want = ['ca_doctor', 'ca_init', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_kick', 'ca_resume', 'ca_ack', 'ca_lead_tokens', 'ca_plan', 'ca_plan_list', 'ca_plan_close', 'ca_gc', 'ca_note', 'ca_update_check', 'ca_update'];
   check('tools/list has every tool', want.every((w) => tools.some((x) => x.name === w)), tools.map((x) => x.name).join(','));
   check('tools have descriptions and object schemas', tools.length && tools.every((x) => x.description && x.description.length > 15 && x.inputSchema?.type === 'object'));
   check('required args declared', tools.find((x) => x.name === 'ca_steer')?.inputSchema?.required?.includes('lane'));

@@ -9,6 +9,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readUpdateCache, compareVersions } from './lifecycle.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = path.join(HERE, 'ca.mjs');
@@ -61,11 +62,22 @@ const INSTRUCTIONS = [
   'The human watches the dashboard at http://127.0.0.1:4777 (Office view at /office).',
 ].join(' ');
 
+// Append one sentence when a newer codearts-lanes is known, so the agent can tell the user once.
+function updateInstructionSuffix() {
+  try {
+    if (process.env.CA_NO_UPDATE_CHECK === '1') return '';
+    const c = readUpdateCache();
+    if (c && c.available && c.latest && compareVersions(c.latest, c.current || '0.0.0') > 0) {
+      return ` An update of codearts-lanes is available (${c.current} -> ${c.latest}); tell the user once and offer ca_update.`;
+    }
+  } catch {}
+  return '';
+}
 methods.initialize = (params) => ({
   protocolVersion: PROTOCOLS.includes(params.protocolVersion) ? params.protocolVersion : PROTOCOLS[0],
   capabilities: { tools: {}, prompts: {} },
   serverInfo: { name: 'codearts-lanes', version: VERSION },
-  instructions: INSTRUCTIONS,
+  instructions: INSTRUCTIONS + updateInstructionSuffix(),
 });
 methods.ping = () => ({});
 
@@ -335,6 +347,22 @@ const TOOLS = [
     build: () => ['gc'],
   },
   {
+    name: 'ca_update_check',
+    description: 'Check whether a newer codearts-lanes release exists (ca update --check --json) and return current, latest, available, what is new in each newer version and the install command. Read-only: it never installs anything.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    ok: [0],
+    timeout: 30000,
+    build: () => ['update', '--check', '--json'],
+  },
+  {
+    name: 'ca_update',
+    description: 'Reinstall codearts-lanes to the latest version (ca update --json) and refresh the recorded harness setup. Use it when the user asks to update; afterwards the agent and any open dashboard must be restarted so they load the new version.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    ok: [0],
+    timeout: 600000,
+    build: () => ['update', '--json'],
+  },
+  {
     name: 'ca_note',
     description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use it to keep the dashboard current while lanes run.',
     inputSchema: {
@@ -424,7 +452,7 @@ async function cliResult(tool, cliArgs) {
 
 // MCP annotations per tool: read-only tools are safe to auto-approve; the two that end work
 // (ca_stop, ca_plan_close) are destructive; every other tool changes state without destroying it.
-const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list']);
+const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list', 'ca_update_check']);
 const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close']);
 const annotationsFor = (name) => (READ_ONLY_TOOLS.has(name)
   ? { readOnlyHint: true }
