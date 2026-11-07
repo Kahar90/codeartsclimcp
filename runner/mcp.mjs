@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = path.join(HERE, 'ca.mjs');
 const WORKFLOW = path.resolve(HERE, '..', 'docs', 'workflow.md');
-const VERSION = '1.0.0';
+let VERSION = '0.0.0';
+try { VERSION = JSON.parse(fs.readFileSync(path.resolve(HERE, '..', 'package.json'), 'utf8')).version || '0.0.0'; } catch { VERSION = '0.0.0'; }
 
 // ---------- stdio: only JSON-RPC lines on stdout, all logging on stderr ----------
 let closing = false;
