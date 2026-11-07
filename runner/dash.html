@@ -308,6 +308,31 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .ca-stale { display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255, 156, 156, 0.14); border-bottom: 1px solid var(--bad); color: var(--bad); font: 650 13px var(--font); padding: 8px 14px }
 @media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l { display: none } }
 
+/* ---------- button feel ---------- */
+button.btn, .chip, .crtile, .ca-tab, .rail-card, .rail-fin, .etab, .cr-gbtn, .cr-chip, .ca-notify, .qchip {
+  transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+button.btn:hover, .chip:hover, .crtile:hover, .ca-tab:hover, .rail-card:hover, .rail-fin:hover, .etab:hover, .cr-gbtn:hover, .cr-chip:hover, .ca-notify:hover, .qchip:hover {
+  background: var(--raise);
+}
+button.btn:active, .chip:active, .crtile:active, .ca-tab:active, .rail-card:active, .rail-fin:active, .etab:active, .cr-gbtn:active, .cr-chip:active, .ca-notify:active, .qchip:active {
+  transform: translateY(1px) scale(0.98);
+}
+button.btn:disabled, .crtile:disabled, .etab:disabled, .cr-gbtn:disabled, .cr-chip:disabled, .ca-notify:disabled, .qchip:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+.ca-tab[aria-current="page"]:hover { background: #7a4fae; border-color: #9b6dd0; color: #fff; }
+.rail-card.sel:hover { background: var(--sel-bg); border-color: var(--sel); }
+.rail-fin.sel:hover { background: var(--sel-bg); border-color: var(--sel); }
+.crtile.on:hover { background: var(--sel-bg); border-color: var(--sel); }
+.cr-gbtn.on:hover { background: var(--sel); color: #171320; }
+.cr-chip.on:hover { background: var(--sel-bg); border-color: var(--sel); color: var(--sel-ink); }
+.ca-notify.on:hover { background: var(--sel-bg); border-color: var(--sel); color: var(--sel-ink); }
+.etab[aria-selected="true"]:hover { background: var(--panel); }
+@media (max-width: 640px) {
+  button.btn, button.btn.tiny, .crtile { min-height: 32px; }
+}
+
 /* ---------- motion ---------- */
 @keyframes rowflash { 0% { background: var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel) } 100% { background: transparent; box-shadow: none } }
 .flash { animation: rowflash 1.6s ease-out 1 }
