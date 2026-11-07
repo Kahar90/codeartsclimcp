@@ -227,6 +227,7 @@ async function runLane(repoArg, task, opts = {}) {
   if (opts.resume && !(prev && prev.result && prev.result !== 'done')) die(`nothing to resume: lane ${id} has no paused, stopped or failed run`, 2);
   if (!resumed) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
+  fs.rmSync(path.join(dir, 'KICK'), { force: true }); // a stale kick must not fire at once on resume
   fs.mkdirSync(REG, { recursive: true });
   fs.writeFileSync(path.join(REG, `${id}.json`), JSON.stringify({ id, dir, repo, task }, null, 2));
 
@@ -433,6 +434,15 @@ async function runLane(repoArg, task, opts = {}) {
     s.tools.clear(); s.busy = false; s.aborting = false;
   };
   const stopFile = path.join(dir, 'STOP');
+  // A kick is a human decision delivered by file: {at, mode: turn|fresh|server|now, text, by}.
+  // The supervisor consumes it at the next poll (2 s) or during a backoff wait.
+  const kickFile = path.join(dir, 'KICK');
+  const takeKick = () => {
+    if (!fs.existsSync(kickFile)) return null;
+    const k = readJSON(kickFile);
+    try { fs.rmSync(kickFile, { force: true }); } catch {}
+    return k && k.mode ? k : { mode: 'turn', text: '', by: 'unknown', at: now() };
+  };
   let curModel = BUILD, curAgent;
   const pumpInbox = async (sid) => {
     let files = []; try { files = fs.readdirSync(path.join(dir, 'inbox')).filter((f) => f.endsWith('.txt')).sort(); } catch {}
@@ -452,6 +462,17 @@ async function runLane(repoArg, task, opts = {}) {
     for (;;) {
       await sleep(2000);
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
+      const k = takeKick();
+      if (k) {
+        L(`== kick (${k.mode}) from ${k.by}${k.text ? ': ' + oneLine(k.text, 160) : ''}`);
+        await abort(sid);
+        if (k.mode === 'server') {
+          killTree(server.child?.pid);
+          for (let i = 0; i < 15 && server.alive; i++) await sleep(1000);
+          return { kind: 'server-died', kicked: true, mode: 'server', text: k.text || '', by: k.by };
+        }
+        return { kind: 'kick', mode: k.mode, text: k.text || '', by: k.by };
+      }
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
       await pumpInbox(sid);
@@ -494,9 +515,15 @@ async function runLane(repoArg, task, opts = {}) {
     if (/timeout|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket|\b50[0234]\b|Cannot connect|network/i.test(m)) return 'transport';
     return 'other';
   };
+  let pendingKick = null; // a kick consumed during backoff: its mode applies to the resume
   const waitInterruptible = async (sec, label) => {
     const until = now() + sec * 1000;
-    while (now() < until) { if (fs.existsSync(stopFile)) return false; S.activity = `${label}: ${dur(until - now())} left`; save(); await sleep(1000); }
+    while (now() < until) {
+      if (fs.existsSync(stopFile)) return false;
+      const k = takeKick();
+      if (k) { L(`== backoff skipped by ${k.by}`); pendingKick = k; return true; }
+      S.activity = `${label}: ${dur(until - now())} left`; save(); await sleep(1000);
+    }
     return true;
   };
 
@@ -509,6 +536,27 @@ async function runLane(repoArg, task, opts = {}) {
       const o = await waitTurn(sid);
       if (o.kind === 'idle') return { ok: true, sid };
       if (o.kind === 'stopped' || o.kind === 'timeout') return { ok: false, sid, reason: o.kind };
+      if (o.kind === 'kick' || (o.kind === 'server-died' && o.kicked)) {
+        // A kick is a human decision, not a failure: no retry count, no backoff.
+        const kmode = o.mode || 'server';
+        S.interruptions.push({ at: now(), phase: label, kind: 'kick', what: `kick (${kmode}) from ${o.by}${o.text ? ': ' + oneLine(o.text, 160) : ''}` }); save(true);
+        if (o.kind === 'server-died') {
+          L('== kick: codearts server killed; restarting'); phase('restart', 'restarting codearts server');
+          try { await server.start(); S.server = { url: server.url, pw: server.pw, pid: server.child.pid, version: server.version }; } catch (err) { return { ok: false, sid, reason: `server restart failed: ${err.message}` }; }
+        }
+        phase(label, 'resuming after kick');
+        const extra = o.text ? `\n\nMessage from the lead: ${o.text}` : '';
+        if (kmode === 'fresh' && freshSession) {
+          sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
+          if (label === 'build' || label === 'fix') builderSessions.add(sid);
+          say(`kick: switching to a fresh session ${sid}`);
+          await send(sid, freshSession('kick', o.text || 'the lead asked for a clean restart') + extra, model, agent);
+        } else {
+          await send(sid, resumeText('kick', `${kmode} kick from ${o.by}`) + extra, model, agent);
+        }
+        if (label === 'build' || label === 'fix') S.buildSession = sid;
+        continue;
+      }
       const cls = o.kind === 'error' ? classify(o.error) : o.kind;
       const what = o.kind === 'error' ? `${o.error.name || 'error'}: ${oneLine(o.error.data?.message || o.error.message || '', 200)}` : (o.what || o.kind);
       S.interruptions.push({ at: now(), phase: label, kind: cls, what }); save(true);
@@ -524,7 +572,21 @@ async function runLane(repoArg, task, opts = {}) {
       phase('backoff');
       if (!(await waitInterruptible(backoff, `backoff after ${cls}`))) return { ok: false, sid, reason: 'stopped' };
       phase(label, 'resuming');
-      if (o.kind === 'think') {
+      const kick = pendingKick; pendingKick = null;
+      if (kick?.mode === 'server') {
+        L('== kick: codearts server killed; restarting'); phase('restart', 'restarting codearts server');
+        try { await server.start(); S.server = { url: server.url, pw: server.pw, pid: server.child.pid, version: server.version }; } catch (err) { return { ok: false, sid, reason: `server restart failed: ${err.message}` }; }
+        phase(label, 'resuming after kick');
+      }
+      const extra = kick?.text ? `\n\nMessage from the lead: ${kick.text}` : '';
+      if (kick && kick.mode === 'fresh' && freshSession) {
+        sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
+        if (label === 'build' || label === 'fix') builderSessions.add(sid);
+        say(`kick: switching to a fresh session ${sid}`);
+        await send(sid, freshSession('kick', kick.text || 'the lead asked for a clean restart') + extra, model, agent);
+      } else if (kick) {
+        await send(sid, resumeText('kick', `${kick.mode} kick from ${kick.by}`) + extra, model, agent);
+      } else if (o.kind === 'think') {
         await send(sid, o.nudge, model, agent);
       } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
