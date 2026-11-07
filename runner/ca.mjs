@@ -1395,7 +1395,9 @@ function planView(r) {
     else if (!cur) tokensByModel[m] = e;
   }
   const missing = Object.entries(tokensByModel).filter(([, e]) => e.source === 'none').map(([m]) => m);
-  const tokens = sumTok(Object.values(tokensByModel).filter((e) => e.source !== 'none'));
+  // Every lane's aggregate counts (the sum the plan shows), plus the lead's known spend. 'none' rows stay
+  // unknown rather than a false 0, so a lane that never reported usage is not silently dropped from the total.
+  const tokens = sumTok([sumTokens(planned.map((x) => x.tokens)), ...Object.values(leadModel).filter((e) => e.source !== 'none')]);
   tokens.complete = missing.length === 0; tokens.missing = missing; tokens.count = Object.keys(tokensByModel).length;
   return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
     state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead: { tokensByModel: leadModel },
