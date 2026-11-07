@@ -1420,6 +1420,27 @@ async function cmdMcp() {
 // Lane repo paths are relative to the plan's repo (the folder that holds tasks/).
 const PLANS = path.join(REG, 'plans');
 const planId = (file) => path.basename(path.dirname(path.dirname(path.resolve(file)))).replace(/[^\w.-]+/g, '_');
+// A plan with status done or closed is closed (never appended to, only archived and replaced).
+const planClosed = (p) => !!(p && /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || ''));
+// A lane is in a plan when a lane entry has the same task and its repo resolves to the lane's repo.
+const planListsLane = (plan, main, repo, task) => !!(plan && (plan.lanes || []).some((l) => l && l.task === task && path.resolve(main, l.repo || '.') === path.resolve(repo)));
+// Register a plan file under <REG>/plans/<planId>.json (what `ca plan <file>` writes; idempotent).
+function registerPlan(file) {
+  const f = path.resolve(file); const id = planId(f);
+  fs.mkdirSync(PLANS, { recursive: true });
+  fs.writeFileSync(path.join(PLANS, `${id}.json`), JSON.stringify({ id, file: f }, null, 2));
+  return id;
+}
+// Bind a lane `ca lane` is starting to its repo's plan. CA_NO_PLAN=1 (smoke lanes) is left alone.
+// A plan the lead wrote is only ever appended to; a lane already listed is not added twice.
+function ensurePlan(repo, task, briefText) {
+  if (process.env.CA_NO_PLAN === '1') return null;
+  const main = projectOf(repo).key;
+  const planFile = path.join(main, 'tasks', 'plan.json');
+  const existing = readJSON(planFile);
+  if (existing && !planClosed(existing) && planListsLane(existing, main, repo, task)) { registerPlan(planFile); return planFile; }
+  return planFile;
+}
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
   return files.map((f) => readJSON(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
