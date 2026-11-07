@@ -927,7 +927,7 @@ function renderHotDesks() {
     setHotLook(hd, l);
     setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
     if (desk) desk.style.display = "";
-    if (hit) { hit.style.display = ""; hit.dataset.lane = l.id; }
+    if (hit) { if (hit.dataset.lane !== l.id || hit.style.display === "none") hotLookDirty = true; hit.style.display = ""; hit.dataset.lane = l.id; }
     if (plate) plate.title = kindDef(l).label + " \u00b7 " + laneName(l);
   }
   if (hotLookDirty) { hotLookDirty = false; layoutStations(); }
@@ -969,8 +969,10 @@ function layoutStations() {
     if (hit && sp) {
       hit.style.left = sp.el.style.left;
       hit.style.top = sp.el.style.top;
-      hit.style.width = sp.el.offsetWidth + "px";
-      hit.style.height = sp.el.offsetHeight + "px";
+      // The sprite library sets its size inline; offsetWidth is 0 while the sprite (or its desk) is hidden,
+      // which left every click area 0 x 0 on a live dashboard.
+      hit.style.width = sp.el.style.width || sp.el.offsetWidth + "px";
+      hit.style.height = sp.el.style.height || sp.el.offsetHeight + "px";
     }
     const plate = $("plate-" + key);
     plate.style.left = (ox + f[0] * k) + "px";
@@ -999,8 +1001,8 @@ function layoutStations() {
     if (hb && sp) {
       hb.style.left = sp.el.style.left;
       hb.style.top = sp.el.style.top;
-      hb.style.width = sp.el.offsetWidth + "px";
-      hb.style.height = sp.el.offsetHeight + "px";
+      hb.style.width = sp.el.style.width || sp.el.offsetWidth + "px";
+      hb.style.height = sp.el.style.height || sp.el.offsetHeight + "px";
     }
     const plate = $("plate-" + hd.key);
     if (plate) {
