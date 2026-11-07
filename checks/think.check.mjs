@@ -92,6 +92,10 @@ const thinking = sandbox.window.CAUI && sandbox.window.CAUI.status('thinking');
 check('CAUI.status("thinking").key === "warn"', !!thinking && thinking.key === 'warn', thinking && thinking.key);
 const dash = fs.readFileSync(path.join(ROOT, 'runner', 'dash.html'), 'utf8');
 check('dash.html styles "thinking" as a warning', /thinking/.test(dash));
+// Two real lanes (GLM 5.3 on big existing UI files) failed with 4 thinking stalls and 0 edits; flash finished both.
+// Proven on a real lane 2026-11-07: THINK_S=60, 2 stalls, switched to flash, done.
+check('repeated thinking stalls switch the builder to the fallback model', /thinkStalls >= 2/.test(src) && /FALLBACK_MODEL/.test(src) && /THINK_FALLBACK_MODEL/.test(src) && /buildModel = model/.test(src));
+check('fix rounds and the summary use the switched model', /send\(sid, g\.message, buildModel\)/.test(src) && /model switch: /.test(src));
 
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;

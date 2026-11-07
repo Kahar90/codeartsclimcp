@@ -46,7 +46,8 @@
 //        ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]
 //                                  report the lead's own token use on the plan (any harness; --add accumulates)
 //        ca help | -h | --help             this usage
-//        Env knobs: STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
+//        Env knobs: THINK_FALLBACK_MODEL (builder model after 2 thinking stalls; brief line FALLBACK_MODEL:, none disables)
+//        STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
 //        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
 //        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
@@ -85,7 +86,10 @@ const CFG = {
   get review() { return process.env.REVIEW_MODEL || (HAS_MAAS() ? 'maas/glm-5.3' : 'huaweicloud-maas/GLM-5.1'); },
   stall: num('STALL_S', 240),          // model silent this long while busy -> abort + resume
   toolStall: num('TOOL_STALL_S', 900), // one tool call running this long -> abort + resume
-  think: num('THINK_S', 480),          // busy this long with no tool call or answer text -> abort + nudge
+  think: num('THINK_S', 480),
+  // After 2 thinking stalls in a build or fix phase, switch the builder to this model (same session, context kept).
+  // GLM 5.3 got stuck re-planning big existing UI files twice; flash finished both lanes. '' or 'none' disables.
+  get thinkFallback() { return process.env.THINK_FALLBACK_MODEL ?? (HAS_MAAS() ? 'maas/deepseek-v4.1-flash' : ''); },          // busy this long with no tool call or answer text -> abort + nudge
   retries: num('MAX_RETRIES', 3),      // interruptions (stall, transport, crash) per phase
   fixes: num('MAX_FIXES', 3),          // gate failures fed back to the builder
   laneTimeout: num('LANE_TIMEOUT', 5400),
@@ -272,6 +276,8 @@ async function runLane(repoArg, task, opts = {}) {
   const stepList = [...brief.matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) }));
   const stepCount = stepList.length;
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
+  const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
+  let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
   const REVIEW = (brief.match(/^\s*REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.review;
   const START = (resumed && resumed.start) || git(repo, 'rev-parse', 'HEAD');
   const dirtyAll = () => git(repo, 'status', '--porcelain').split(/\r?\n/).filter((l) => l && !/^.. "?(tasks\/|\.codeartsdoer)/.test(l));
@@ -556,7 +562,7 @@ async function runLane(repoArg, task, opts = {}) {
   async function drive(sid, model, agent, label, resumeText, freshSession) {
     curModel = model; curAgent = agent;
     if (label === 'build' || label === 'fix') builderSessions.add(sid);
-    let interruptions = 0, sameSessionFails = 0;
+    let interruptions = 0, sameSessionFails = 0, thinkStalls = 0;
     for (;;) {
       const o = await waitTurn(sid);
       if (o.kind === 'idle') return { ok: true, sid };
@@ -612,6 +618,11 @@ async function runLane(repoArg, task, opts = {}) {
       } else if (kick) {
         await send(sid, resumeText('kick', `${kick.mode} kick from ${kick.by}`) + extra, model, agent);
       } else if (o.kind === 'think') {
+        if (++thinkStalls >= 2 && (label === 'build' || label === 'fix') && FALLBACK && FALLBACK !== 'none' && FALLBACK !== model) {
+          say(`thinking stalled ${thinkStalls} times on ${model}: switching the builder to ${FALLBACK} (same session, context kept)`);
+          S.modelSwitches = [...(S.modelSwitches || []), { at: now(), from: model, to: FALLBACK, why: `${thinkStalls} thinking stalls` }];
+          model = FALLBACK; curModel = model; buildModel = model; S.models.build = model; thinkStalls = 0; interruptions = 0; save(true);
+        }
         await send(sid, o.nudge, model, agent);
       } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
@@ -684,7 +695,7 @@ async function runLane(repoArg, task, opts = {}) {
     }
     await send(sid, first, BUILD);
     for (;;) {
-      const r = await drive(sid, BUILD, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
+      const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
       sid = r.sid; S.buildSession = sid;
       if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; break; }
       if (await pumpInbox(sid)) continue; // a steer arrived right at the end: let the builder handle it
@@ -693,7 +704,7 @@ async function runLane(repoArg, task, opts = {}) {
       if (g.ok) { reason = ''; exitCode = 0; break; }
       if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
       say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-      phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, BUILD);
+      phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
     }
     syncCommits();
 
@@ -739,12 +750,13 @@ async function runLane(repoArg, task, opts = {}) {
   const byModel = modelBits ? ` | by model: ${modelBits}` : '';
   const md = [
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
-    `models: build ${BUILD}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}${byModel}`,
+    `models: build ${buildModel}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}${byModel}`,
     `commits ${S.commits} (brief has ${stepCount} numbered lines):`, log || '(none)',
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
     `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}`,
+    ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
     `steering: ${S.steers.length ? S.steers.map((x) => `[${x.by}] ${oneLine(x.text, 160)}`).join(' / ') : 'none'}`,
     `outside-repo file access: ${S.outside.length ? S.outside.slice(0, 5).map((x) => `${x.tool} ${x.path}`).join(', ') : 'none'}`,
     `permissions: ${S.permissions.length ? S.permissions.map((x) => `${x.kind}->${x.reply}`).join(', ') : 'none asked'}`,
