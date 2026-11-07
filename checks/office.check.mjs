@@ -186,6 +186,38 @@ try {
   check('demo=big seats all 8 lanes at the main stations and hot desks', s.overflow.count === 0, s.overflow.ids.join(','));
   await shot('5-big');
 
+  await size(1280, 800); await wait(400);
+  await send('Page.navigate', { url: base + '/office?demo=crowd' }); await wait(1800);
+  s = await stReady();
+  check('demo=crowd has 10 lanes', s && s.lanes.length === 10, s && String(s.lanes.length));
+  check('demo=crowd seats 8 lane sprites plus the lead', s.stations.filter((x) => x.laneId).length === 9 && s.stations.filter((x) => x.station !== 'lead' && x.laneId).length === 8, s.stations.filter((x) => x.laneId).map((x) => x.station + ':' + x.laneId).join(','));
+  const hotSeated = s.stations.filter((x) => /^hot/.test(x.station));
+  check('demo=crowd puts five extra lanes at the hot desks', hotSeated.length === 5 && hotSeated.every((x) => x.laneId), hotSeated.map((x) => x.station + ':' + x.laneId).join(','));
+  check('demo=crowd seats both needs-you lanes and keeps them out of the pill', ['cli-dx', 'mcp'].every((id) => s.stations.some((x) => x.laneId === id)) && ['cli-dx', 'mcp'].every((id) => !s.overflow.ids.includes(id)), s.overflow.ids.join(','));
+  check('demo=crowd draws a desk under every seated hot worker', hotSeated.length > 0 && hotSeated.every((x) => x.desk === true), hotSeated.map((x) => x.station + ':' + x.desk).join(','));
+  check('demo=crowd nameplates stay inside the stage', platesIn(s));
+  check('demo=crowd nameplates do not overlap', noOverlap(s));
+  check('demo=crowd pill shows the two overflow lanes', s.overflow.count === 2 && s.overflow.ids.join(',') === 'docs-site,perf-pass', JSON.stringify(s.overflow.ids));
+  await shot('8-crowd');
+
+  await ev('window.__office.press("cli-dx")'); await wait(300);
+  s = await st();
+  check('demo=crowd clicking a hot worker opens its window', s.window.open && s.window.laneId === 'cli-dx', s.window.laneId);
+  check('demo=crowd puts the suggested action first for the stalled lane', s.window.suggest === 'kick' && s.window.actions[0] === 'kick', s.window.actions.join(','));
+  await ev('window.__office.press("mcp")'); await wait(250);
+  s = await st();
+  check('demo=crowd puts the suggested action first for the failed lane', s.window.open && s.window.laneId === 'mcp' && s.window.suggest === 'resume' && s.window.actions[0] === 'resume', s.window.actions.join(','));
+  await ev('window.__office.press("mcp")'); await wait(200);
+
+  await size(390, 844); await wait(600);
+  s = await st();
+  const crowdPill = await ev('(function(){ var p = document.getElementById("ovPill"); return { hidden: p.hidden, text: p.textContent, inBar: getComputedStyle(document.getElementById("overflow")).left === "0px" }; })()');
+  check('demo=crowd pill stays visible as a bar when narrow', crowdPill && crowdPill.hidden === false && crowdPill.text === '+2 more', JSON.stringify(crowdPill));
+  const scrollCrowd = await ev('Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)');
+  check('demo=crowd no horizontal overflow at 390 px', scrollCrowd <= 391, String(scrollCrowd));
+  await shot('8-crowd-phone');
+  await size(1280, 800); await wait(400);
+
   await send('Page.navigate', { url: base + '/office?demo=stuck&still=1' }); await wait(1800);
   s = await stReady();
   check('demo=stuck: builder STALLED, artist running, reviewer failed',
