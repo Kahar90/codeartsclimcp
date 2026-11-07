@@ -1431,15 +1431,63 @@ function registerPlan(file) {
   fs.writeFileSync(path.join(PLANS, `${id}.json`), JSON.stringify({ id, file: f }, null, 2));
   return id;
 }
+// The title/goal a runner-created plan takes from the brief: after "Goal:" up to the first period,
+// else the brief's first sentence, else "Lane <task>".
+function planGoal(text, task) {
+  const s = String(text || '');
+  const gi = s.search(/Goal:/i);
+  if (gi >= 0) {
+    let rest = s.slice(gi + 'Goal:'.length).replace(/\s+/g, ' ').trim();
+    const dot = rest.indexOf('.');
+    if (dot >= 0) rest = rest.slice(0, dot).trim();
+    if (rest) return rest;
+  }
+  const first = s.replace(/\s+/g, ' ').trim();
+  const dot = first.indexOf('.');
+  if (dot > 0) return oneLine(first.slice(0, dot), 120);
+  return first ? oneLine(first, 120) : `Lane ${task}`;
+}
+// The plan file is shared: two lanes starting at once must not lose each other's edit. The lock is a
+// `wx` create at <planFile>.lock; a 5 s retry window, removed in finally even when fn throws.
+function withPlanLock(planFile, fn) {
+  const lock = `${planFile}.lock`; fs.mkdirSync(path.dirname(lock), { recursive: true });
+  let fd = null; const t0 = now();
+  while (fd === null && now() - t0 < 5000) {
+    try { fd = fs.openSync(lock, 'wx'); } catch (e) { if (e.code !== 'EEXIST') throw e; const t = now() + 50; while (now() < t); }
+  }
+  try { return fn(); }
+  finally { if (fd !== null) { try { fs.closeSync(fd); } catch {} try { fs.rmSync(lock, { force: true }); } catch {} } }
+}
 // Bind a lane `ca lane` is starting to its repo's plan. CA_NO_PLAN=1 (smoke lanes) is left alone.
 // A plan the lead wrote is only ever appended to; a lane already listed is not added twice.
 function ensurePlan(repo, task, briefText) {
   if (process.env.CA_NO_PLAN === '1') return null;
   const main = projectOf(repo).key;
   const planFile = path.join(main, 'tasks', 'plan.json');
+  const rel = (path.relative(main, repo) || '.').split(path.sep).join('/') || '.';
+  const goal = planGoal(briefText, task);
   const existing = readJSON(planFile);
   if (existing && !planClosed(existing) && planListsLane(existing, main, repo, task)) { registerPlan(planFile); return planFile; }
-  return planFile;
+  return withPlanLock(planFile, () => {
+    const cur = readJSON(planFile);
+    if (cur && !planClosed(cur)) {
+      if (!planListsLane(cur, main, repo, task)) {
+        cur.lanes = Array.isArray(cur.lanes) ? cur.lanes : [];
+        cur.lanes.push({ task, repo: rel, why: goal, added: 'runner' });
+        let waves = Array.isArray(cur.waves) ? cur.waves : [];
+        let wave = waves.find((w) => w && w.name === 'Added while running');
+        if (!wave) { wave = { name: 'Added while running', lanes: [] }; waves.push(wave); }
+        wave.lanes = Array.isArray(wave.lanes) ? wave.lanes : [];
+        if (!wave.lanes.includes(task)) wave.lanes.push(task);
+        cur.waves = waves;
+        cur.decisions = Array.isArray(cur.decisions) ? cur.decisions : [];
+        cur.decisions.push({ at: new Date().toISOString(), text: `Lane ${task} added by the runner (it was not in the plan)` });
+        writeAtomic(planFile, JSON.stringify(cur, null, 2) + '\n');
+      }
+      registerPlan(planFile);
+    }
+    return planFile;
+  });
 }
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
