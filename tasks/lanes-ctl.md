@@ -1,4 +1,4 @@
-MODEL: maas/glm-5.3
+MODEL: maas/deepseek-v4.1-flash
 You are working in a git repo (current directory): the Lanes dashboard page `runner/dash.html` of the `ca`
 CodeArts lane runner. Goal: show token counts per agent, per lane and per plan, and let a human control a
 stuck or ended lane from the page (retry turn, fresh session, restart server, retry now, resume with a note,
