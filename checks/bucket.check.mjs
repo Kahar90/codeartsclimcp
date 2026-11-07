@@ -1,5 +1,6 @@
-// Contract check for lane buckets (attention/running/done/ended), the /api/overview call and
-// the project key: a lane in a git worktree reports the main repo as its project.
+// Contract check for lane buckets (attention/running/done/ended), the /api/overview call,
+// the project key (a worktree lane reports the main repo) and per-model token counters
+// (tokensByModel in the status, summary, lane and plan views).
 // Fake lanes in a private registry; never starts CodeArts (CA_RESUME_DRY=1, no browser).
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -57,10 +58,23 @@ const fake = (repo, task, st) => {
   return dir;
 };
 const fin = { phase: 'finished', busy: false };
-fake(wt, 'demo', { pid: sleeper.pid });                                    // running, in the worktree
-fake(main, 'paused', { ...fin, finishedAt: Date.now() - 60000, result: 'paused', reason: 'timeout', exitCode: 5 });
+const mt = (i, o, r = 0, c = 0, st = 1) => ({ input: i, output: o, reasoning: r, cacheRead: c, steps: st });
+fake(wt, 'demo', { pid: sleeper.pid, tokensByModel: { 'maas/glm-5.3': mt(900, 150, 40, 4000, 3), 'huaweicloud-maas/GLM-5.1': mt(100, 50, 0, 0, 1) } }); // running, in the worktree
+fake(main, 'paused', { ...fin, finishedAt: Date.now() - 60000, result: 'paused', reason: 'timeout', exitCode: 5, tokensByModel: { 'maas/glm-5.3': mt(500, 100, 0, 0, 1) } });
 fake(main, 'stopped', { ...fin, finishedAt: Date.now() - 60000, result: 'stopped' });
 fake(main, 'old', { ...fin, finishedAt: Date.now() - 4 * 24 * 3600e3, result: 'done', verdict: 'ready', exitCode: 0 }); // over 3 days: overview skips it
+
+// ---------- per-model tokens (CLI, no dashboard needed) ----------
+const ca = (a) => { const x = spawnSync(process.execPath, [CA, ...a], { env, encoding: 'utf8', timeout: 60000, cwd: ROOT }); return { code: x.status, out: x.stdout || '', err: x.stderr || '' }; };
+let r = ca(['status', '--json']); let st = []; try { st = JSON.parse(r.out); } catch {}
+const row = (t) => st.find((x) => x.task === t) || {};
+check('status --json has tokensByModel with a total per model', row('demo').tokensByModel?.['maas/glm-5.3']?.total === 5090 && row('demo').tokensByModel?.['huaweicloud-maas/GLM-5.1']?.total === 150, JSON.stringify(row('demo').tokensByModel));
+r = ca(['summary', 'main-repo--paused', '--json']); let sm = {}; try { sm = JSON.parse(r.out); } catch {}
+check('summary --json has tokensByModel', sm.tokensByModel?.['maas/glm-5.3']?.total === 600, JSON.stringify(sm.tokensByModel));
+check('the lane summary line breaks tokens down by model', /by model: \$\{/.test(fs.readFileSync(CA, 'utf8')));
+const plan = path.join(main, 'tasks', 'plan.json');
+fs.writeFileSync(plan, JSON.stringify({ title: 'models', lanes: [{ task: 'demo', repo: path.basename(wt) }, { task: 'paused' }], waves: [{ name: 'W1', lanes: ['demo', 'paused'] }] }));
+ca(['plan', plan]);
 
 // ---------- dashboard API ----------
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
@@ -75,6 +89,9 @@ try {
   check('stopped lane buckets ended', L('stopped').bucket === 'ended', JSON.stringify(L('stopped').bucket));
   check('worktree lane reports the main repo as its project', real(L('demo').project?.key) === real(main) && L('demo').project?.name === 'main-repo', JSON.stringify(L('demo').project));
   check('main repo lane reports itself as its project', real(L('paused').project?.key) === real(main), JSON.stringify(L('paused').project));
+  check('/api/lanes carries tokensByModel per lane', L('demo').tokensByModel?.['maas/glm-5.3']?.total === 5090 && L('demo').tokensByModel?.['huaweicloud-maas/GLM-5.1']?.total === 150, JSON.stringify(L('demo').tokensByModel));
+  const plans = await (await fetch(base + '/api/plans')).json(); const mp = plans.find((x) => x.title === 'models') || {};
+  check('/api/plans sums tokensByModel over its lanes', mp.tokensByModel?.['maas/glm-5.3']?.total === 5690 && mp.tokensByModel?.['huaweicloud-maas/GLM-5.1']?.total === 150, JSON.stringify(mp.tokensByModel));
   let ov = null; try { ov = await (await fetch(base + '/api/overview')).json(); } catch {}
   check('/api/overview counts the buckets', ov && ov.counts && ov.counts.attention === 1 && ov.counts.running === 1 && ov.counts.ended === 1 && ov.counts.done === 0, JSON.stringify(ov?.counts));
   check('/api/overview skips lanes finished over 3 days ago', Array.isArray(ov?.lanes) && ov.lanes.length === 3 && !ov.lanes.some((x) => x.task === 'old'), JSON.stringify((ov?.lanes || []).map((x) => x.task)));

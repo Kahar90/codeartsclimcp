@@ -32,6 +32,8 @@
 //        ca steer <lane> <message>         queue a message into the running session
 //        ca attach <lane>                  open the CodeArts TUI on the live session (watch + type)
 //        ca stop <lane>                    abort the session and end the lane
+//        ca kick <lane> [--fresh|--server|--now] [message]  unstick a stuck turn: retry it (default),
+//                                  start a fresh session, restart the codearts server or skip a backoff
 //        ca resume <lane> [--note "<text>"] [--dry-run]  continue a paused, failed, stopped or DEAD
 //                                  lane in place (same id, tokens and history; the note waits in
 //                                  the lane folder; --dry-run prints the argv without spawning)
@@ -268,15 +270,16 @@ async function runLane(repoArg, task, opts = {}) {
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
     lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
     config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes },
-    tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() },
+    tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
     const by = (r) => ({ ...emptyTokens(), ...(resumed.tokensBy?.[r] || {}) });
+    const byModel = {}; for (const [m, t] of Object.entries(resumed.tokensByModel || {})) byModel[m] = { ...emptyTokens(), ...t };
     Object.assign(S, { startedAt: resumed.startedAt || T0, runStartedAt: T0, runs, resumes: runs.length, tokens: { ...S.tokens, ...(resumed.tokens || {}) },
-      tokensBy: { build: by('build'), review: by('review'), other: by('other') },
+      tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }] });
   }
@@ -305,6 +308,8 @@ async function runLane(repoArg, task, opts = {}) {
   const countedSteps = new Set();    // step-finish part ids already billed (a reconnect replays events)
   const roleOf = (sid) => (sid === S.reviewSession ? 'review' : builderSessions.has(sid) ? 'build' : 'other');
   const roles = new Map();       // messageID -> role
+  const msgModel = new Map();    // messageID -> providerID/modelID of assistant messages
+  const sessionModel = new Map(); // sid -> the model the runner sent there (fallback when a message carries none)
   const parts = new Map();       // partID -> { type, text, logged }
   const sent = new Set();        // texts we sent (to tell TUI-typed steering apart)
   const seenUser = new Set();    // user partIDs already logged
@@ -341,6 +346,7 @@ async function runLane(repoArg, task, opts = {}) {
       }
       case 'message.updated': {
         const info = pr.info || {}; if (info.id) roles.set(info.id, info.role);
+        if (info.id && info.role === 'assistant' && info.providerID && info.modelID) msgModel.set(info.id, `${info.providerID}/${info.modelID}`);
         if (info.role === 'assistant' && info.error && sid && !(sx(sid).aborting && /Abort/i.test(info.error.name || ''))) sx(sid).error = info.error;
         break;
       }
@@ -386,8 +392,10 @@ async function runLane(repoArg, task, opts = {}) {
           for (const k of parts.keys()) flushPart(k);
           if (part.id && !countedSteps.has(part.id)) {
             countedSteps.add(part.id);
+            const model = msgModel.get(part.messageID) || sessionModel.get(sid) || 'codearts/hidden';
             addStepTokens(S.tokens, part.tokens);
             addStepTokens(S.tokensBy[roleOf(sid)], part.tokens);
+            addStepTokens((S.tokensByModel[model] ||= emptyTokens()), part.tokens);
           }
         }
         break;
@@ -425,6 +433,7 @@ async function runLane(repoArg, task, opts = {}) {
   // ---- session helpers ----
   const newSession = async (title) => (await server.api('POST', '/session', { title })).id;
   const send = async (sid, text, model, agent) => {
+    if (model) sessionModel.set(sid, model);
     sent.add(text.trim()); const s = sx(sid); s.error = null; s.sawBusy = false; s.lastAct = now(); s.sentAt = now();
     S.activeSession = sid; S.busy = true;
     S.turnStartAt = now(); S.lastToolAt = 0; S.lastTextAt = 0;
@@ -713,9 +722,11 @@ async function runLane(repoArg, task, opts = {}) {
   const log = git(repo, 'log', '--oneline', `${START}..HEAD`);
   const left = dirty();
   const reviewBody = review ? (() => { const ls = review.split(/\r?\n/); const i = ls.findIndex((l) => /^\s*1\.\s/.test(l)); return ls.slice(i >= 0 ? i : Math.max(0, ls.length - 16)).filter((l) => l.trim() && !/^\s*VERDICT:/i.test(l)).slice(0, 24).join('\n'); })() : '';
+  const modelBits = Object.entries(S.tokensByModel).map(([m, t]) => `${m} ${tokenTotal(t)}`).join(', ');
+  const byModel = modelBits ? ` | by model: ${modelBits}` : '';
   const md = [
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
-    `models: build ${BUILD}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}`,
+    `models: build ${BUILD}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}${byModel}`,
     `commits ${S.commits} (brief has ${stepCount} numbered lines):`, log || '(none)',
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
@@ -794,11 +805,14 @@ const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 477
 function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '',
-    progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s),
+    progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
     summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
 function tokensByView(s) {
   return { build: withTotal(s.tokensBy?.build), review: withTotal(s.tokensBy?.review), other: withTotal(s.tokensBy?.other) };
+}
+function tokensByModelView(s) {
+  const out = {}; for (const [m, t] of Object.entries(s.tokensByModel || {})) out[m] = withTotal({ ...emptyTokens(), ...t }); return out;
 }
 function printRows(rows) {
   const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
@@ -820,7 +834,7 @@ function cmdSummary(args) {
   if (args.includes('--json')) {
     const pg = stepProgress(s);
     console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', verdict: s.verdict || '',
-      elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), commits: s.commitLog || [], steps: pg.list,
+      elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), commits: s.commitLog || [], steps: pg.list,
       gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
     return;
   }
@@ -913,6 +927,34 @@ function cmdResume(args) {
   const r = resumeLane(l, { note, by: 'ca resume' });
   if (r.error) die(r.error, 2);
   console.log(`CA_RESUME ${JSON.stringify({ lane: l.id, ok: true, dry: !!r.dry, argv: r.argv, message: r.message })}`);
+}
+// Queue a kick for a stuck turn. The supervisor consumes the file within 2 s (or at the next
+// backoff poll): turn/now retry the turn, fresh starts a clean session, server restarts
+// codearts serve, now also skips a backoff wait. Refused when the lane cannot act on it.
+function kickLane(l, { mode = 'turn', text = '', by = 'ca kick' } = {}) {
+  const s = l.s;
+  const need = { turn: ['kick'], now: ['kick', 'skip-wait'], fresh: ['fresh'], server: ['restart-server'] }[mode];
+  if (!need) return { error: `unknown kick mode "${mode}" (turn, fresh, server or now)`, code: 400 };
+  if (s.result) return { error: `lane ${l.id} already ${resultOf(s)}; use ca resume ${l.id} to continue it`, code: 409 };
+  if (!alive(s.pid)) return { error: `lane ${l.id} is DEAD (supervisor not running); use ca resume ${l.id} instead`, code: 409 };
+  const { actions } = laneActions({ s, alive: true, health: health(s), canResume: true });
+  if (!need.some((n) => actions.includes(n))) return { error: `kick (${mode}) is not allowed while ${l.id} is in phase ${s.phase} (allowed: ${actions.join(', ') || 'nothing; wait or stop'})`, code: 409 };
+  fs.mkdirSync(l.dir, { recursive: true });
+  const file = path.join(l.dir, 'KICK');
+  fs.writeFileSync(file, JSON.stringify({ at: now(), mode, text, by }));
+  return { ok: true, file };
+}
+function cmdKick(args) {
+  const flags = { '--fresh': 'fresh', '--server': 'server', '--now': 'now' };
+  let mode = 'turn'; const rest = [];
+  for (const a of args) { if (flags[a]) mode = flags[a]; else rest.push(a); }
+  const [q, ...msg] = rest;
+  if (!q) die('usage: ca kick <lane> [--fresh|--server|--now] [message]', 2);
+  const l = findLane(q);
+  const r = kickLane(l, { mode, text: msg.join(' ').trim(), by: 'ca kick' });
+  if (r.error) die(r.error, 2);
+  console.log(`CA_KICK ${JSON.stringify({ lane: l.id, ok: true, mode, file: r.file })}`);
+  console.log(`kick (${mode}) queued for ${l.id}; the supervisor applies it within 2 s (phase ${l.s.phase}). Follow: ca tail ${l.id} -f`);
 }
 function cmdGc() {
   for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); fs.rmSync(path.join(REG, 'final', `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
@@ -1160,7 +1202,7 @@ function laneView(l) {
   const isAlive = alive(s.pid); const h = health(s);
   const { actions, suggest, why } = laneActions({ s, alive: isAlive, health: h, canResume: fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`)) });
   const { bucket, reason: bucketWhy } = laneBucket({ s, alive: isAlive, health: h });
-  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
+  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
     actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo) };
@@ -1235,8 +1277,10 @@ function planView(r) {
   // Plan tokens: every lane counts, folded (continued) ones included; per agent like the lane views.
   const tokens = sumTokens(planned.map((x) => x.tokens));
   const tokensBy = { build: sumTokens(planned.map((x) => x.tokensBy?.build)), review: sumTokens(planned.map((x) => x.tokensBy?.review)), other: sumTokens(planned.map((x) => x.tokensBy?.other)) };
+  const modelKeys = [...new Set(planned.flatMap((x) => Object.keys(x.tokensByModel || {})))];
+  const tokensByModel = Object.fromEntries(modelKeys.map((m) => [m, sumTokens(planned.map((x) => x.tokensByModel?.[m]))]));
   return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', lead: p.lead || 'Claude', status: p.status || '', now: p.now || '',
-    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy,
+    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel,
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
 }
@@ -1263,6 +1307,8 @@ function cmdDash(args) {
     const u = new URL(req.url, 'http://x');
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     try {
+      // Every POST under /api/ must be JSON: a cross-site form post cannot steer, stop, kick or resume.
+      if (req.method === 'POST' && u.pathname.startsWith('/api/') && !/application\/json/i.test(String(req.headers['content-type'] || ''))) return json({ error: 'POST /api/ needs content-type application/json' }, 415);
       if (u.pathname === '/') { let html = page; try { html = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8'); } catch {} res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); }
       if (u.pathname === '/office') { let html = ''; try { html = fs.readFileSync(path.join(HERE, 'office.html'), 'utf8'); } catch {} if (html) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); } }
       if (u.pathname.startsWith('/assets/')) {
@@ -1289,7 +1335,7 @@ function cmdDash(args) {
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
-      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach)$/);
+      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
         const l = all.find((x) => x.id === q) || all.find((x) => x.task === q) || all.find((x) => x.id.includes(q));
@@ -1303,6 +1349,20 @@ function cmdDash(args) {
         }
         if (m[2] === 'summary') { const f = path.join(l.dir, 'summary.md'); return json({ text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '' }); }
         if (req.method === 'POST' && m[2] === 'steer') { let b = ''; for await (const c of req) b += c; const text = JSON.parse(b || '{}').text?.trim(); if (!text) return json({ error: 'empty' }, 400); steer(l, text); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'kick') {
+          let b = ''; for await (const c of req) b += c;
+          const body = JSON.parse(b || '{}');
+          const r = kickLane(l, { mode: String(body.mode || 'turn'), text: String(body.text || '').trim(), by: 'dashboard' });
+          if (r.error) return json({ error: r.error }, r.code || 409);
+          return json({ ok: true, mode: String(body.mode || 'turn'), file: r.file });
+        }
+        if (req.method === 'POST' && m[2] === 'resume') {
+          let b = ''; for await (const c of req) b += c;
+          const body = JSON.parse(b || '{}');
+          const r = resumeLane(l, { note: String(body.note || '').trim(), by: 'dashboard' });
+          if (r.error) return json({ error: r.error }, r.code || 409);
+          return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
+        }
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
         if (req.method === 'POST' && m[2] === 'attach') {
           // Open a new console window with the CodeArts TUI on the live session.
@@ -1316,7 +1376,8 @@ function cmdDash(args) {
     } catch (err) { json({ error: String(err.message || err) }, 500); }
   });
   srv.on('error', (e) => { if (e.code === 'EADDRINUSE') { console.log(`ca dash is already running: http://127.0.0.1:${port}`); process.exit(0); } throw e; });
-  srv.listen(port, '127.0.0.1', () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
+  // Loopback by default (the dashboard drives lanes); CA_DASH_HOST only moves it within the machine.
+  srv.listen(port, process.env.CA_DASH_HOST || '127.0.0.1', () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
 }
 
 function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(code); }
@@ -1324,7 +1385,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), resume: () => cmdResume(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
