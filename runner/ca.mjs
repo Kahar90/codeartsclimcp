@@ -852,7 +852,15 @@ function tokensByView(s) {
   return { build: withTotal(s.tokensBy?.build), review: withTotal(s.tokensBy?.review), other: withTotal(s.tokensBy?.other) };
 }
 function tokensByModelView(s) {
-  const out = {}; for (const [m, t] of Object.entries(s.tokensByModel || {})) out[m] = modelRow(t, 'worker', 'runner'); return out;
+  const out = {}; for (const [m, t] of Object.entries(s.tokensByModel || {})) out[m] = modelRow(t, 'worker', 'runner');
+  if (Object.keys(out).length || !tokTotal(s.tokens || {})) return out;
+  // Lanes from before per-model counting: attribute by the lane's models (source 'lane', not counted per reply).
+  const add = (m, t) => { if (!t || !tokTotal(t)) return; const k = m || 'unknown model'; const c = out[k];
+    out[k] = modelRow(c ? { input: c.input + (t.input || 0), output: c.output + (t.output || 0), reasoning: c.reasoning + (t.reasoning || 0), cacheRead: c.cacheRead + (t.cacheRead || 0), steps: c.steps + (t.steps || 0) } : t, 'worker', 'lane'); };
+  const by = s.tokensBy || {};
+  if (tokTotal(by.build || {}) + tokTotal(by.review || {}) + tokTotal(by.other || {})) { add(s.models?.build, by.build); add(s.models?.review, by.review); add('codearts/hidden', by.other); }
+  else add(s.models?.build, s.tokens);
+  return out;
 }
 function printRows(rows) {
   const cols = ['lane', 'bucket', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
@@ -1294,11 +1302,11 @@ function laneFromLog(file, ref, briefFile) {
   const result = head[1].trim().toLowerCase(); const reason = head[2] || '';
   const commitLog = [...tail.matchAll(/^([0-9a-f]{7,40}) (.+?)\r?$/gm)].map((m) => ({ hash: m[1], subject: m[2] })).reverse();
   let stepList = []; try { stepList = [...fs.readFileSync(briefFile, 'utf8').matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) })); } catch {}
-  const tk = tail.match(/tokens in (\d+) out (\d+)(?: \(cache read (\d+)\))? over (\d+) steps/); const vd = tail.match(/^VERDICT: (.+?)\r?$/m);
+  const tk = tail.match(/tokens in (\d+) out (\d+)(?: \(cache read (\d+)\))? over (\d+) steps/); const mm = tail.match(/^models: build (\S+), review (\S+)/m); const vd = tail.match(/^VERDICT: (.+?)\r?$/m);
   let mt = 0; try { mt = fs.statSync(file).mtimeMs; } catch {}
   const secs = [...head[3].matchAll(/(\d+)([hms])/g)].reduce((a, m) => a + Number(m[1]) * { h: 3600, m: 60, s: 1 }[m[2]], 0);
   const s = { result, reason, phase: 'finished', activity: result, verdict: vd && vd[1] !== 'none' ? vd[1] : null, commitLog, commits: commitLog.length, stepList, steps: stepList.length,
-    tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]), reasoning: 0, cacheRead: Number(tk[3] || 0), steps: Number(tk[4] || 0) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [] };
+    tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]), reasoning: 0, cacheRead: Number(tk[3] || 0), steps: Number(tk[4] || 0) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [], models: mm ? { build: mm[1], review: mm[2] } : {} };
   return { ...ref, s };
 }
 // The lead's own usage: a Claude Code transcript (leadSession) or harness-reported numbers
