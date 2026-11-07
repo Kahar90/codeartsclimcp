@@ -719,6 +719,7 @@ const sprites = {};
 const hotSeat = {};
 const laneHot = new Map();
 const hotSprites = {};
+const hotProp = {};
 const desks = {};
 const hotHits = {};
 const ovBtns = new Map();
@@ -728,9 +729,42 @@ let assignedOnce = false, prevPlanId = null, prevRunning = new Map();
 let ovOpen = false;
 
 function spriteScale() { return Math.max(0.25, Math.round(k * 2 * 4) / 4); }
-function deskProp(hd) {
+const KIND_FALLBACK = {
+  code: { rolePrefix: "hot", prop: "hotdesk", label: "Coder" },
+  art: { rolePrefix: "painter", prop: "easel", label: "Painter" },
+  review: { rolePrefix: "inspector", prop: "board", label: "Inspector" },
+  docs: { rolePrefix: "writer", prop: "bookdesk", label: "Writer" },
+};
+function kindsTable() { return (PixelSprites.manifest && PixelSprites.manifest.kinds) || KIND_FALLBACK; }
+function laneKind(l) { const t = kindsTable(); const k = l && l.kind; return k && t[k] ? k : "code"; }
+function kindDef(l) { return kindsTable()[laneKind(l)] || KIND_FALLBACK.code; }
+function stationKind(stKey) { return stKey === "builder" ? "code" : stKey === "artist" ? "art" : stKey === "reviewer" ? "review" : null; }
+function kindMatches(l, stKey) { const sk = stationKind(stKey); return sk !== null && laneKind(l) === sk; }
+function propDef(name) {
   const props = PixelSprites.manifest && PixelSprites.manifest.props;
-  return (hd && props && props[hd.prop]) || null;
+  return (name && props && props[name]) || null;
+}
+function deskProp(hd) {
+  const name = hotProp[hd.key] || (hd && hd.prop);
+  return propDef(name);
+}
+let hotLookDirty = false;
+function setHotLook(hd, l) {
+  const n = SCENE.hotdesks.indexOf(hd) + 1;
+  const def = kindDef(l);
+  const role = def.rolePrefix + n;
+  const cur = hotSprites[hd.key];
+  if (cur && cur.role === role && hotProp[hd.key] === def.prop) return;
+  if (cur) cur.destroy();
+  const sp = PixelSprites.create(role, { scale: spriteScale(), seed: hd.key, clip: "idle" });
+  sp.el.style.display = "none";
+  hotSprites[hd.key] = sp;
+  $("sprites").appendChild(sp.el);
+  hotProp[hd.key] = def.prop;
+  const pd = propDef(def.prop);
+  const desk = desks[hd.key];
+  if (desk && pd) desk.style.backgroundImage = 'url("/assets/' + pd.image + '")';
+  hotLookDirty = true;
 }
 function laneName(l) { return l.task || l.id; }
 function stationSub(l) {
@@ -878,10 +912,12 @@ function renderHotDesks() {
       if (hit) { hit.style.display = "none"; hit.dataset.lane = ""; }
       continue;
     }
+    setHotLook(hd, l);
     setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
     if (desk) desk.style.display = "";
     if (hit) { hit.style.display = ""; hit.dataset.lane = l.id; }
   }
+  if (hotLookDirty) { hotLookDirty = false; layoutStations(); }
 }
 let hoverHot = null;
 function renderLinks() {
@@ -1063,6 +1099,7 @@ async function initSprites() {
     const sp = PixelSprites.create(hd.role, { scale: spriteScale(), seed: hd.key, clip: "idle" });
     sp.el.style.display = "none";
     hotSprites[hd.key] = sp;
+    hotProp[hd.key] = hd.prop;
     $("sprites").appendChild(sp.el);
     const def = deskProp(hd);
     if (def) {
