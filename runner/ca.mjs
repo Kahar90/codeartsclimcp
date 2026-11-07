@@ -171,6 +171,24 @@ function caEnv(extra = {}) {
     ...maasEnv(), ...extra,
   };
 }
+// The CA_DUMP_ENV debug dump must never carry a secret. Blank out every variable whose name looks
+// like a credential, then scrub the remaining values of those secret values wherever they appear
+// (this also covers the MaaS apiKey embedded in OPENCODE_CONFIG_CONTENT).
+const SECRET_NAME = /KEY|SECRET|TOKEN|PASSWORD|(^|_)AK$|(^|_)SK$/i;
+function redactEnv(env) {
+  const out = {}; const secrets = [];
+  for (const [k, v] of Object.entries(env || {})) {
+    if (SECRET_NAME.test(k)) { if (typeof v === 'string' && v.length >= 6) secrets.push(v); out[k] = '<redacted>'; }
+    else out[k] = v;
+  }
+  for (const k of Object.keys(out)) {
+    if (SECRET_NAME.test(k) || typeof out[k] !== 'string') continue;
+    let s = out[k];
+    for (const sec of secrets) s = s.split(sec).join('<redacted>');
+    out[k] = s;
+  }
+  return out;
+}
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); s.on('error', rej); });
 const splitModel = (m) => { const i = m.indexOf('/'); return { providerID: m.slice(0, i), modelID: m.slice(i + 1) }; };
 
@@ -183,7 +201,7 @@ class Server {
     this.pw = this.pw || crypto.randomBytes(16).toString('hex');
     this.url = `http://127.0.0.1:${this.port}`;
     const out = fs.openSync(this.logFile, 'a');
-    if (process.env.CA_DUMP_ENV) fs.writeFileSync(process.env.CA_DUMP_ENV, JSON.stringify({ env: caEnv({ CODEARTS_SERVER_PASSWORD: 'pw' }), cwd: this.cwd }, null, 1));
+    if (process.env.CA_DUMP_ENV) fs.writeFileSync(process.env.CA_DUMP_ENV, JSON.stringify({ env: redactEnv(caEnv({ CODEARTS_SERVER_PASSWORD: this.pw })), cwd: this.cwd }, null, 1));
     this.child = spawn(EXE, ['serve', '--port', String(this.port), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'WARN'],
       { cwd: this.cwd, env: caEnv({ CODEARTS_SERVER_PASSWORD: this.pw }), stdio: ['ignore', out, out] });
     this.alive = true;
