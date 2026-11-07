@@ -367,9 +367,9 @@ function askHidden(prompt) {
 // Store one user-level env var via PowerShell. The secret travels in the child process
 // env (CA_ONBOARD_SECRET), never on the command line, and is never printed or logged.
 function storeUserEnv(name, value) {
-  const r = run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+  const r = process.platform === 'win32' ? run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
     `[Environment]::SetEnvironmentVariable('${name}', $env:CA_ONBOARD_SECRET, 'User')`],
-    { env: { ...process.env, CA_ONBOARD_SECRET: value }, timeout: 20000 });
+    { env: { ...process.env, CA_ONBOARD_SECRET: value }, timeout: 20000 }) : { status: 1 };
   return r.status === 0;
 }
 

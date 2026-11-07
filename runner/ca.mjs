@@ -1675,9 +1675,10 @@ function cmdDash(args) {
         }
         if (req.method === 'POST' && m[2] === 'attach') {
           // Open a new console window with the CodeArts TUI on the live session.
+          if (process.platform !== 'win32') return json({ error: 'Open TUI needs Windows; run ca attach <lane> in a terminal' }, 501);
           const s = l.s; if (s.result || !s.server) return json({ error: 'lane not running' }, 400);
           const sid = s.activeSession || s.buildSession;
-          spawn('cmd.exe', ['/c', 'start', `"codearts ${l.id}"`, `"${EXE}"`, 'attach', s.server.url, '-s', sid, '-p', s.server.pw], { env: caEnv(), detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+          if (process.platform === 'win32') spawn('cmd.exe', ['/c', 'start', `"codearts ${l.id}"`, `"${EXE}"`, 'attach', s.server.url, '-s', sid, '-p', s.server.pw], { env: caEnv(), detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
           return json({ ok: true });
         }
       }
