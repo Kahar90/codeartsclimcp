@@ -11,7 +11,16 @@ const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-onboard-'));
 const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSON.stringify({ security: { trustedFolders: [] }, other: 1 }, null, 2));
 const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg);
-const env = { ...process.env, CA_SETTINGS: settings, CA_REGISTRY: reg, CA_DASH: '0', CODEX_HOME: path.join(tmp, 'codex') };
+// Every home dir is a temp dir, so onboard never touches the real user config (like scope.check).
+const home = path.join(tmp, 'home'); fs.mkdirSync(home);
+const appdata = path.join(tmp, 'appdata'); fs.mkdirSync(appdata);
+const env = {
+  ...process.env, HOME: home, USERPROFILE: home, APPDATA: appdata, LOCALAPPDATA: path.join(tmp, 'localappdata'),
+  CODEX_HOME: path.join(home, '.codex'), CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CA_CLAUDE_CLI: 'none',
+  CA_SMOKE_DIR: path.join(tmp, 'smoke'),
+  CA_SETTINGS: settings, CA_REGISTRY: reg, CA_DASH: '0',
+};
+delete env.XDG_CONFIG_HOME;
 const ca = (args, opts = {}) => { const t0 = Date.now(); const r = spawnSync(process.execPath, [CA, ...args], { env, encoding: 'utf8', timeout: opts.timeout || 90000, input: '' }); return { code: r.status, out: r.stdout || '', err: r.stderr || '', ms: Date.now() - t0 }; };
 const js = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 220) : ''}`);
@@ -36,14 +45,14 @@ check('json has steps, ready and next', j && Array.isArray(j.steps) && j.steps.l
 check('steps carry status ok|warn|fail|fixed|skipped and a detail', j && j.steps.every((s) => ['ok', 'warn', 'fail', 'fixed', 'skipped', 'planned'].includes(s.status) && typeof s.detail === 'string'), j && JSON.stringify(j.steps.map((s) => s.status)));
 
 // non-interactive real run with --yes: trusts the folder, sets up kiro, never blocks on stdin
-r = ca(['onboard', '--repo', kiro, '--yes', '--json']); j = js(r.out);
+r = ca(['onboard', '--repo', kiro, '--repo-only', '--yes', '--json']); j = js(r.out);
 check('onboard --yes finishes without a TTY in under 60 s', j && r.ms < 60000, `${r.ms} ms ${r.err.slice(0, 120)}`);
 const s2 = js(fs.readFileSync(settings, 'utf8'));
 check('--yes adds the repo to trusted folders, keeps other settings', s2.other === 1 && s2.security.trustedFolders.some((f) => path.resolve(f).toLowerCase() === path.resolve(kiro).toLowerCase()), JSON.stringify(s2.security));
 check('--yes ran setup for the detected harness', fs.existsSync(path.join(kiro, '.kiro', 'settings', 'mcp.json')) && fs.existsSync(path.join(kiro, '.kiro', 'steering', 'codearts-lanes.md')));
 check('trusted step reports fixed', j && j.steps.some((s) => /trust/i.test(s.name) && s.status === 'fixed'), j && JSON.stringify(j.steps.map((s) => s.name + ':' + s.status)));
 check('next steps mention the harness way to start', j && j.next.join(' ').match(/#codearts-lanes|codearts_build/), j && j.next.join(' | '));
-r = ca(['onboard', '--repo', kiro, '--yes', '--json']); const s3 = js(fs.readFileSync(settings, 'utf8'));
+r = ca(['onboard', '--repo', kiro, '--repo-only', '--yes', '--json']); const s3 = js(fs.readFileSync(settings, 'utf8'));
 check('rerun is idempotent (no duplicate trust entry)', s3.security.trustedFolders.length === 1);
 
 // harness detection and override
