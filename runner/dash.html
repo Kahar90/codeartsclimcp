@@ -228,6 +228,12 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .onb-tbl th { color: var(--faint); font-size: 11px; letter-spacing: .06em; text-transform: uppercase }
 .onb-tbl tr:first-child th { border-top: 0 }
 .onb-tbl td:first-child { font-weight: 650 }
+.onb-harness { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 }
+.onb-hchip { font: inherit; font-size: 12.5px; padding: 4px 11px; border-radius: 999px; border: 1.5px solid var(--border-2); background: transparent; color: var(--muted); cursor: pointer }
+.onb-hchip:hover { border-color: var(--sel); color: var(--fg) }
+.onb-hchip.on { border-color: var(--sel); background: var(--sel-bg); color: var(--fg) }
+#onb-byhand > summary { cursor: pointer; font-weight: 650; font-size: 13px }
+#onb-byhand[open] > summary { margin-bottom: 8px }
 #onboard code { overflow-wrap: anywhere }
 #onboard .box, #onboard ul.plain li > span, #onboard .cmd > *, #onboard .onb-row > * { min-width: 0 }
 
@@ -1191,6 +1197,9 @@ async function copyText(t) {
 const ONBOARD_PROMPT = 'Set up CodeArts lanes by following https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md';
 // How to ask for a lane in each harness, shown as a small table under the setup prompt.
 const ASK = [['Claude Code', '/codearts-build <goal>'], ['Kiro', '#codearts-lanes <goal>'], ['Cursor', 'Use CodeArts lanes to <goal>'], ['Codex', 'Use CodeArts lanes to <goal>'], ['opencode', 'Use CodeArts lanes to <goal>'], ['VS Code', 'Use CodeArts lanes to <goal>']];
+// The harness the manual command targets; the chips swap it and the copy box follows.
+let onbHarness = 'claude';
+const onbCmd = () => `ca onboard --yes --harness ${onbHarness} --smoke`;
 // Doctor rows as HTML, shared by the first render and the 5 s refresh while the keys form is open.
 function doctorBox(d) {
   const rows = Array.isArray(d?.checks) ? d.checks : [];
@@ -1242,10 +1251,10 @@ async function connectKeys() {
 }
 async function renderOnboard() {
   const d = await fetchDoctor();
-  const harnesses = [['kiro', 'Kiro'], ['cursor', 'Cursor'], ['claude', 'Claude Code'], ['codex', 'Codex'], ['vscode', 'VS Code'], ['opencode', 'opencode']];
+  const harnesses = [['claude', 'Claude Code'], ['kiro', 'Kiro'], ['cursor', 'Cursor'], ['codex', 'Codex'], ['opencode', 'opencode'], ['vscode', 'VS Code']];
   $('view').innerHTML = `<section id="onboard"><div class="pad">
     <h2 class="title">Set up CodeArts lanes</h2>
-    <p class="goal">One-time setup: CodeArts credentials, a git repo, a trusted folder and your harness (Kiro, Cursor, Claude Code, Codex or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
+    <p class="goal">One-time setup per machine: CodeArts credentials, a git repo, a trusted folder and your harness (Claude Code, Kiro, Cursor, Codex, opencode or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
     <div class="box"><h4>Set up in one prompt</h4>
       <p class="small">Paste this into your coding agent (Claude Code, Kiro, Cursor, Codex, opencode or VS Code). It installs and connects everything; you only paste your Huawei Cloud keys into a local form.</p>
       <div class="cmd" data-copy="${esc(ONBOARD_PROMPT)}" title="click to copy"><code>${esc(ONBOARD_PROMPT)}</code><button type="button" class="onb-copy">Copy</button></div></div>
@@ -1256,15 +1265,18 @@ async function renderOnboard() {
     <div class="box"><h4>Fix everything in one go</h4>
       <div class="cmd" id="onboard-cmd" title="click to copy"><code>ca onboard --yes</code><button id="onboard-copy">Copy</button></div>
       <div class="small">Run it in the repo you want to use. Without --yes it asks before each fix.</div></div>
-    <div class="grid2">
-      <div class="box"><h4>Or set up one harness</h4><ul class="plain">${harnesses.map(([h, n]) => `<li><span style="min-width:0"><code>ca setup ${h} .</code></span><span class="small">${n}</span></li>`).join('')}</ul></div>
-      <div class="box"><h4>Your first lane</h4><ul class="plain">
+    <div class="box" id="onb-manual"><h4>Set up by hand</h4>
+      <p class="small">Pick the coding agent you use, then run this once.</p>
+      <div class="onb-harness" role="group" aria-label="Harness">${harnesses.map(([h, n]) => `<button type="button" class="onb-hchip${h === onbHarness ? ' on' : ''}" data-harness="${h}">${n}</button>`).join('')}</div>
+      <div class="cmd" id="onboard-hcmd" data-copy="${esc(onbCmd())}" title="click to copy"><code>${esc(onbCmd())}</code><button type="button" class="onb-copy">Copy</button></div>
+      <p class="small">Run once per machine; every repo works after that.</p></div>
+    <details class="box" id="onb-byhand"><summary>Run a lane by hand</summary>
+      <ul class="plain">
         <li><span class="ic" style="color:var(--run)">1</span><span style="min-width:0"><code>ca init . my-task --goal "one sentence outcome"</code><div class="small">writes tasks/my-task.md</div></span></li>
         <li><span class="ic" style="color:var(--run)">2</span><span style="min-width:0">edit the brief: numbered steps and CHECK lines</span></li>
         <li><span class="ic" style="color:var(--run)">3</span><span style="min-width:0"><code>ca lane . my-task --detach</code><div class="small">starts the builder in the background</div></span></li>
         <li><span class="ic" style="color:var(--run)">4</span><span style="min-width:0"><code>ca wait &lt;lane&gt;</code><div class="small">blocks until it ends and prints CA_RESULT</div></span></li>
-      </ul></div>
-    </div></div></section>`;
+      </ul></details></div></section>`;
   const copy = async () => { const b = $('onboard-copy'); if (!b) return; b.textContent = (await copyText('ca onboard --yes')) ? 'Copied' : 'Copy failed'; setTimeout(() => { const b2 = $('onboard-copy'); if (b2) b2.textContent = 'Copy'; }, 1500); };
   $('onboard-cmd').onclick = copy;
   $('onboard-copy').onclick = (e) => { e.stopPropagation(); copy(); };
@@ -1369,6 +1381,8 @@ async function refresh(full) {
 document.addEventListener('click', (e) => {
   // First-run panel: copy buttons, copy-box clicks and the keys button, all delegated.
   const flash = (b, ok) => { if (!b) return; b.textContent = ok ? 'Copied' : 'Copy failed'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copy'; }, 1500); };
+  const hc = e.target.closest('.onb-hchip');
+  if (hc) { e.preventDefault(); onbHarness = hc.dataset.harness || 'claude'; for (const b of document.querySelectorAll('.onb-hchip')) b.classList.toggle('on', b.dataset.harness === onbHarness); const c = document.getElementById('onboard-hcmd'); if (c) { c.dataset.copy = onbCmd(); const code = c.querySelector('code'); if (code) code.textContent = onbCmd(); } return; }
   const cp = e.target.closest('.onb-copy');
   if (cp) { e.preventDefault(); copyText(cp.dataset.copy || (cp.parentElement && cp.parentElement.dataset.copy) || '').then((ok) => flash(cp, ok)); return; }
   const cb = e.target.closest('.cmd[data-copy]');
