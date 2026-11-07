@@ -45,6 +45,11 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #plate-builder { border-color: var(--builder); }
 #plate-artist { border-color: var(--artist); }
 #plate-reviewer { border-color: var(--reviewer); }
+.plate.compact { font-size: 12px; padding: 4px 9px; gap: 1px; max-width: 170px; }
+.plate.compact .p-name { font-size: 12px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
+.plate.compact .p-sub { font-size: 10.5px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
+.plate.compact .p-badge { right: -6px; top: -6px; width: 15px; height: 15px; font: 700 10px/15px var(--font); }
+#links path.lk-hover { stroke: var(--faint); stroke-opacity: 0.6; stroke-width: 1; stroke-dasharray: 4 4; }
 #overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; gap: 4px; max-width: 320px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 #overflow[hidden] { display: none; }
 .ov-title { padding: 0 2px 4px; color: var(--muted); font-size: 13px; font-weight: 600; }
@@ -747,7 +752,7 @@ function assignHot() {
 }
 function setStation(key, opts) {
   const plate = $("plate-" + key);
-  const sp = sprites[key];
+  const sp = sprites[key] || hotSprites[key];
   const badge = plate.querySelector(".p-badge");
   if (!opts) {
     plate.style.display = "none";
@@ -778,24 +783,34 @@ function renderStations() {
     setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
   }
 }
+function hotSub(l) {
+  const st = CAUI.status(l.health);
+  const p = l.progress || {};
+  let s = st.label;
+  if (p.total) s += " " + (p.done || 0) + "/" + p.total;
+  const tt = CAUI.tokenTotal(l.tokens);
+  if (tt) s += " " + CAUI.fmtTokens(tt);
+  return s;
+}
 function renderHotDesks() {
   if (!model) return;
   for (const hd of SCENE.hotdesks) {
     const id = hotSeat[hd.key];
     const l = id && model.lanes.find((x) => x.id === id);
-    const sp = hotSprites[hd.key];
     const desk = desks[hd.key];
     const hit = hotHits[hd.key];
     if (!l) {
-      if (sp) sp.el.style.display = "none";
+      setStation(hd.key, null);
       if (desk) desk.style.display = "none";
-      if (hit) hit.style.display = "none";
+      if (hit) { hit.style.display = "none"; hit.dataset.lane = ""; }
       continue;
     }
-    if (sp) { sp.el.style.display = ""; sp.setClip(CLIP_BY_KEY[CAUI.status(l.health).key] || "idle"); }
+    setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
     if (desk) desk.style.display = "";
+    if (hit) { hit.style.display = ""; hit.dataset.lane = l.id; }
   }
 }
+let hoverHot = null;
 function renderLinks() {
   const lead = SCENE.stations.lead.foot;
   let d = "";
@@ -804,7 +819,12 @@ function renderLinks() {
     const f = SCENE.stations[stKey].foot;
     d += "M" + (ox + lead[0] * k) + "," + (oy + (lead[1] + 34) * k) + "H" + (ox + f[0] * k) + "V" + (oy + (f[1] + 34) * k);
   }
-  $("links").innerHTML = d ? '<path d="' + d + '" stroke-width="' + Math.max(1, 1.5 * k).toFixed(2) + '"></path>' : "";
+  let hover = "";
+  if (hoverHot) {
+    const hd = SCENE.hotdesks.find((h) => h.key === hoverHot);
+    if (hd) { const f = hd.foot; hover = '<path class="lk-hover" d="M' + (ox + lead[0] * k) + ',' + (oy + (lead[1] + 34) * k) + 'H' + (ox + f[0] * k) + 'V' + (oy + (f[1] + 34) * k) + '"></path>'; }
+  }
+  $("links").innerHTML = (d ? '<path d="' + d + '" stroke-width="' + Math.max(1, 1.5 * k).toFixed(2) + '"></path>' : "") + hover;
 }
 function layoutStations() {
   const a = PixelSprites.anchor();
@@ -859,6 +879,11 @@ function layoutStations() {
       hb.style.top = sp.el.style.top;
       hb.style.width = sp.el.offsetWidth + "px";
       hb.style.height = sp.el.offsetHeight + "px";
+    }
+    const plate = $("plate-" + hd.key);
+    if (plate) {
+      plate.style.left = (ox + f[0] * k) + "px";
+      plate.style.top = (oy + (f[1] + 34) * k) + "px";
     }
   }
   renderLinks();
@@ -957,6 +982,34 @@ async function initSprites() {
       $("sprites").appendChild(desk);
       desks[hd.key] = desk;
     }
+    const hit = document.createElement("div");
+    hit.className = "hit";
+    hit.setAttribute("aria-hidden", "true");
+    hit.style.display = "none";
+    hit.addEventListener("click", (ev) => { const id = hotSeat[hd.key]; if (id) winHooks.open(id, $("plate-" + hd.key), ev.detail === 0); });
+    hit.addEventListener("mouseenter", () => { hoverHot = hd.key; renderLinks(); });
+    hit.addEventListener("mouseleave", () => { if (hoverHot === hd.key) { hoverHot = null; renderLinks(); } });
+    hotHits[hd.key] = hit;
+    $("sprites").appendChild(hit);
+    const plate = document.createElement("button");
+    plate.type = "button";
+    plate.className = "plate compact";
+    plate.id = "plate-" + hd.key;
+    plate.style.display = "none";
+    plate.setAttribute("aria-controls", "win");
+    plate.setAttribute("aria-expanded", "false");
+    plate.innerHTML = '<b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span>';
+    plate.addEventListener("click", (ev) => { const id = hotSeat[hd.key]; if (id) winHooks.open(id, plate, ev.detail === 0); });
+    plate.addEventListener("mouseenter", () => { hoverHot = hd.key; renderLinks(); });
+    plate.addEventListener("mouseleave", () => { if (hoverHot === hd.key) { hoverHot = null; renderLinks(); } });
+    plate.querySelector(".p-badge").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const id = hotSeat[hd.key];
+      if (!id) return;
+      winHooks.open(id, plate, false);
+      requestAnimationFrame(() => { if (!$("win").hidden && winFor === id) $("winCtl").scrollIntoView({ block: "nearest" }); });
+    });
+    $("plates").appendChild(plate);
   }
   layoutStations();
   renderStations();
@@ -1284,6 +1337,7 @@ winHooks.close = () => closeWin(false);
 demoHooks.press = (id) => {
   let anchor = null;
   for (const stKey of WORKER_STATIONS) if (stationLane[stKey] === id) anchor = $("plate-" + stKey);
+  for (const hd of SCENE.hotdesks) if (hotSeat[hd.key] === id) anchor = $("plate-" + hd.key);
   if (!anchor) anchor = ovBtns.get(id) || null;
   winHooks.open(id, anchor, false);
 };
@@ -1400,19 +1454,19 @@ function fireCues(cues) {
   const on = PixelSprites.motion();
   for (const c of cues) {
     const stKey = laneStation.get(c.id);
-    if (!stKey || !on) continue;
+    const key = stKey || laneHot.get(c.id);
+    if (!key || !on) continue;
+    const sp = sprites[key] || hotSprites[key];
     if (c.type === "receive") {
       recordEffect("receive", c.id);
       if (sprites.lead) sprites.lead.play("receive");
-      if (!narrow) firePacket(stKey);
-      const sp = sprites[stKey];
-      if (sp) setTimeout(() => { if (laneStation.get(c.id) === stKey) sp.play("receive"); }, 600);
+      if (stKey && !narrow) firePacket(stKey);
+      if (sp) setTimeout(() => { if ((laneStation.get(c.id) || laneHot.get(c.id)) === key) sp.play("receive"); }, 600);
     } else if (c.type === "step") {
       recordEffect("step", c.id);
-      if (!narrow) fireCheck(stKey);
+      if (!narrow) fireCheck(key);
     } else if (c.type === "complete") {
       recordEffect("complete", c.id);
-      const sp = sprites[stKey];
       if (sp) sp.play("complete");
     }
   }
@@ -1474,6 +1528,7 @@ window.__office = {
     if (!model.lanes.some((l) => l.id === id)) return false;
     let anchor = null;
     for (const stKey of WORKER_STATIONS) if (stationLane[stKey] === id) anchor = $("plate-" + stKey);
+    for (const hd of SCENE.hotdesks) if (hotSeat[hd.key] === id) anchor = $("plate-" + hd.key);
     if (!anchor) anchor = ovBtns.get(id) || stRows.get(id) || null;
     winHooks.open(id, anchor, false);
     return true;
