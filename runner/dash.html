@@ -55,6 +55,11 @@ a { text-decoration: none }
 .leadband .who { font-weight: 700; color: var(--sel-ink); white-space: nowrap }
 .leadband .vdiv { width: 1px; align-self: stretch; background: var(--border-2); flex: none }
 .leadband .txt { min-width: 0; color: var(--fg) }
+@media (max-width: 640px) {
+  .leadband { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px }
+  .leadband .vdiv { display: none }
+  .leadband .txt { grid-column: 1 / -1 }
+}
 .spot { flex: none; line-height: 0 }
 
 .wave { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 16px }
@@ -311,7 +316,9 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .crumb-sep { color: var(--faint) }
 .lane-bucket { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px }
 .lane-bucket .cr-why-big { color: var(--muted); font-size: 14px; overflow-wrap: anywhere }
-@media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+/* four tiles need about 640 px of main column: below that (tablet with the rail, phone) they go 2 x 2 */
+@media (max-width: 1100px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+@media (max-width: 759px) and (min-width: 641px) { .crtiles { grid-template-columns: repeat(4, minmax(0, 1fr)) } }
 
 /* ---------- freshness, stale banner, notifications ---------- */
 .ca-fresh { color: var(--faint); font-size: 12.5px; white-space: nowrap }

@@ -294,6 +294,7 @@
   function updateDismissed(latest) { try { return localStorage.getItem('ca-update-dismissed') === latest; } catch (e) { return false; } }
   function dismissUpdate(latest) { try { localStorage.setItem('ca-update-dismissed', latest); } catch (e) {} }
   function initUpdate() {
+    if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return;
     var top = document.querySelector('.ca-top');
     if (!top || typeof fetch !== 'function') return;
     var demo = /(^|[?&])update=demo(&|$)/.test(location.search);
