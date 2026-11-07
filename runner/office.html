@@ -32,10 +32,11 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #room { position: absolute; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
 #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #links path { fill: none; stroke: var(--sel); stroke-opacity: 0.75; }
-#sprites { position: absolute; inset: 0; pointer-events: none; }
+#sprites { position: absolute; inset: 0; pointer-events: none; z-index: 1; } /* own stacking context: depth-sorted sprite z values never rise above plates */
 #sprites .px-sprite { position: absolute; }
 .desk { position: absolute; background-repeat: no-repeat; image-rendering: pixelated; pointer-events: none; }
-#plates { position: absolute; inset: 0; pointer-events: none; }
+#plates { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.needs-pill[hidden] { display: none !important; }
 .plate { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 13px; background: var(--panel-2); border: 2px solid var(--border-2); border-radius: 9px; font: 14px/1.3 var(--font); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); color: var(--fg); cursor: pointer; text-align: center; white-space: nowrap; }
 .plate .p-name { font-weight: 700; }
 .plate .p-sub { color: var(--muted); font-size: 12.5px; }
@@ -602,6 +603,7 @@ function planStatus(p, lanes) {
 // The office speaks the Control room buckets, so both views name a state the same way.
 function laneBucket(l) {
   if (l.bucket) return l.bucket;
+  if (isNeedsYou(l)) return "attention"; // payloads without bucket (older runner, demos) use the same rule as seating
   if (l.running) return "running";
   if (l.result === "done" || l.result === "continued") return "done";
   return "ended";
