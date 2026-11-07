@@ -9,9 +9,9 @@ messages to the human short: one line per step.
 
 ## 0. Already set up?
 
-Run `ca doctor`. If it prints `doctor: ready` and your CodeArts tools (`ca_status`,
-`ca_lane_start`, ...) are already available to you, skip to step 6. If `ca` exists but a row
-fails, go to step 3.
+Run `ca --version`. If it prints `codearts-lanes 0.2.0` or newer, `ca doctor` prints `doctor:
+ready` and your CodeArts tools (`ca_status`, `ca_lane_start`, ...) are already available to you,
+skip to step 6. Anything else (no `ca`, an older version, a failing row, no tools): go to step 1.
 
 ## 1. Check the basics
 
@@ -23,13 +23,19 @@ Run `node --version` and `git --version`.
 
 ## 2. Install the `ca` command
 
-Run `ca help`. If it prints the usage, skip to step 3. Otherwise:
+Always run the install, also when `ca` already exists: it updates an older copy (an old copy
+silently lacks fixes and writes the wrong config).
 
 ```sh
 npm install -g github:Kahar90/codeartsclimcp
+ca --version
 ```
 
-If `ca` is still not found afterwards (your shell's PATH lacks the npm global folder), use
+`ca --version` must print `codearts-lanes 0.2.0` or newer. If it prints an older version, an
+older `ca` is earlier on PATH: use the one npm just installed,
+`node "$(npm root -g)/codearts-lanes/runner/ca.mjs"`, everywhere this file says `ca`.
+
+If `ca` is not found at all afterwards (your shell's PATH lacks the npm global folder), use
 `node "$(npm root -g)/codearts-lanes/runner/ca.mjs"` everywhere this file says `ca`. The
 harness config written in step 3 uses that absolute path, so PATH does not matter later.
 
@@ -40,8 +46,7 @@ If the install fails (no permission for global installs, no npm), clone instead 
 git clone --depth 1 https://github.com/Kahar90/codeartsclimcp ~/.codearts-lanes
 ```
 
-To update later, run the same install command again, then step 3 again (it refreshes the paths
-in your harness config).
+To update later: `ca update` (reinstalls and refreshes every harness config).
 
 ## 3. Onboard this machine
 
