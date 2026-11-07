@@ -537,6 +537,7 @@ function toast(msg, err) {
   setTimeout(() => el.remove(), 3500);
 }
 async function sendControl(laneId, action, extra) {
+  if (inFlight && inFlight.laneId === laneId) return; // one control per lane at a time: a double click never sends twice
   inFlight = { what: action, laneId };
   let r; try { r = await CAUI.control(laneId, action, extra); } catch { r = { error: 'request failed' }; }
   inFlight = null;
