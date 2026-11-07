@@ -32,6 +32,7 @@
 //        ca steer <lane> <message>         queue a message into the running session
 //        ca attach <lane>                  open the CodeArts TUI on the live session (watch + type)
 //        ca stop <lane>                    abort the session and end the lane
+//        ca ack <lane> [--note t] [--undo]  mark a finished lane seen; a needs-you lane becomes handled (ended)
 //        ca kick <lane> [--fresh|--server|--now] [message]  unstick a stuck turn: retry it (default),
 //                                  start a fresh session, restart the codearts server or skip a backoff
 //        ca resume <lane> [--note "<text>"] [--dry-run]  continue a paused, failed, stopped or DEAD
@@ -831,9 +832,21 @@ function readAcks() {
   return acksCache;
 }
 function writeAcks(a) { try { fs.mkdirSync(REG, { recursive: true }); fs.writeFileSync(ACKS, JSON.stringify(a, null, 2) + '\n'); } catch {} acksMtime = -1; }
-function laneSeen(id, finishedAt) { return !!(finishedAt && readAcks()[id] === finishedAt); }
-function setAck(id, seen, finishedAt) { const a = { ...readAcks() }; if (seen && finishedAt) a[id] = finishedAt; else delete a[id]; writeAcks(a); }
-function bucketOf(l) { const s = l.s; return laneBucket({ s, alive: alive(s.pid), health: health(s) }).bucket; }
+// An ack is the finishedAt it was given for (a number), or { at, note } when the user marked a needs-you lane handled.
+const ackAt = (v) => (v && typeof v === 'object' ? v.at : v);
+function laneSeen(id, finishedAt) { return !!(finishedAt && ackAt(readAcks()[id]) === finishedAt); }
+function ackNote(id) { const v = readAcks()[id]; return v && typeof v === 'object' ? v.note || '' : ''; }
+function setAck(id, seen, finishedAt, note = '') { const a = { ...readAcks() }; if (seen && finishedAt) a[id] = note ? { at: finishedAt, note } : finishedAt; else delete a[id]; writeAcks(a); }
+// The bucket a person sees: a finished needs-you lane (failed, paused, needs review) that was marked handled moves to
+// ended until it finishes again. A DEAD or running lane can never be marked away: it needs resume or stop.
+function bucketFor(l) {
+  const s = l.s; const r = laneBucket({ s, alive: alive(s.pid), health: health(s) });
+  if (r.bucket === 'attention' && s.result && laneSeen(l.id, s.finishedAt)) {
+    const note = ackNote(l.id); return { bucket: 'ended', reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
+  }
+  return r;
+}
+function bucketOf(l) { return bucketFor(l).bucket; }
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
   return { lane: l.id, bucket: bucketOf(l), health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
@@ -938,6 +951,16 @@ function cmdAttach(args) {
   console.log(`attaching to ${l.id} session ${sid} at ${s.server.url}. Typing here steers the builder; leave the TUI with ctrl+c (the lane keeps running).`);
   const r = spawnSync(EXE, ['attach', s.server.url, '-s', sid, '-p', s.server.pw], { stdio: 'inherit', env: caEnv() });
   process.exit(r.status ?? 0);
+}
+function cmdAck(args) {
+  const ni = args.indexOf('--note'); const note = ni >= 0 ? args.slice(ni + 1).join(' ').trim() : '';
+  const q = args.slice(0, ni >= 0 ? ni : undefined).find((a) => !a.startsWith('--'));
+  if (!q) die('usage: ca ack <lane> [--note "text"] [--undo]', 2);
+  const l = findLane(q);
+  if (!l.s.result) die(`lane ${l.id} is not finished (${health(l.s)}): resume or stop it instead`, 2);
+  const undo = args.includes('--undo'); setAck(l.id, !undo, l.s.finishedAt || null, oneLine(note, 200));
+  const b = bucketFor(l);
+  console.log(`${l.id}: ${undo ? 'unseen again' : 'acknowledged'}; bucket ${b.bucket} (${b.reason})`);
 }
 function cmdStop(args) {
   const l = findLane(args[0]);
@@ -1299,11 +1322,11 @@ function laneView(l) {
   const s = l.s; const pg = stepProgress(s);
   const isAlive = alive(s.pid); const h = health(s);
   const { actions, suggest, why } = laneActions({ s, alive: isAlive, health: h, canResume: fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`)) });
-  const { bucket, reason: bucketWhy } = laneBucket({ s, alive: isAlive, health: h });
+  const { bucket, reason: bucketWhy, handled } = bucketFor(l);
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
-    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), seen: laneSeen(l.id, s.finishedAt) };
+    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1509,7 +1532,8 @@ function cmdDash(args) {
           // Mark a finished lane seen (or unseen again) for this finishedAt; a later finish is unseen anew.
           let b = ''; for await (const c of req) b += c;
           const body = JSON.parse(b || '{}');
-          setAck(l.id, body.seen !== false, l.s.finishedAt || null);
+          if (body.seen !== false && !l.s.result) return json({ error: 'lane is not finished: resume or stop it instead' }, 409);
+          setAck(l.id, body.seen !== false, l.s.finishedAt || null, typeof body.note === 'string' ? oneLine(body.note, 200) : '');
           return json({ ok: true, seen: laneSeen(l.id, l.s.finishedAt || null) });
         }
         if (req.method === 'POST' && m[2] === 'attach') {
@@ -1533,7 +1557,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();

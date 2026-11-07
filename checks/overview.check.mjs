@@ -121,6 +121,19 @@ try {
   check('ack on an unknown lane is 404', x.status === 404, String(x.status));
 } catch (e) { check('the dashboard section ran to the end', false, String((e && e.message) || e)); } finally { dash.kill(); sleeper.kill(); }
 
+// ---------- Mark handled: a finished needs-you lane the user dealt with moves to ended, a running one cannot ----------
+{
+  const bk = (t) => { let a = []; try { a = JSON.parse(ca(['status', '--json']).out); } catch {} return a.find((x) => x.task === t) || {}; };
+  check('failed lane starts in attention', bk('failed').bucket === 'attention', bk('failed').bucket);
+  let h = ca(['ack', 'demo-repo--failed', '--note', 'merged by the lead']);
+  check('ca ack marks a failed lane handled (ended, note kept)', h.code === 0 && bk('failed').bucket === 'ended' && /handled: merged by the lead/.test(h.out), h.out.trim() + h.err);
+  h = ca(['ack', 'demo-repo--stuck']); check('ca ack refuses a running lane (exit 2)', h.code === 2, `exit ${h.code}`);
+  h = ca(['ack', 'demo-repo--failed', '--undo']); check('ca ack --undo reopens it', h.code === 0 && bk('failed').bucket === 'attention', bk('failed').bucket);
+  ca(['ack', 'demo-repo--failed']);
+  const s = JSON.parse(fs.readFileSync(stateFile('failed'), 'utf8')); s.finishedAt = Date.now(); fs.writeFileSync(stateFile('failed'), JSON.stringify(s));
+  check('a handled lane that finishes again needs you again', bk('failed').bucket === 'attention', bk('failed').bucket);
+}
+
 console.log(results.join('\n'));
 const bad = results.filter((x) => x.startsWith('FAIL')).length;
 console.log(bad ? `${bad} FAILED` : `all ${results.length} passed`);

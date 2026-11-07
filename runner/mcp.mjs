@@ -242,6 +242,14 @@ const TOOLS = [
     build: (a) => ['stop', needStr(a.lane, 'lane')],
   },
   {
+    name: 'ca_ack',
+    description: 'Acknowledge a finished lane after you dealt with it (merged it yourself, took it over, or decided to drop it): a failed, paused or needs-review lane moves from "needs you" to ended with your note, so the human\'s Control room only lists what still needs them. A later run of the lane makes it count again.',
+    inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name; the lane must be finished' }, note: { type: 'string', description: 'short reason, for example "merged by the lead"' } }, required: ['lane'] },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['ack', needStr(a.lane, 'lane'), ...(a.note ? ['--note', String(a.note)] : [])],
+  },
+  {
     name: 'ca_kick',
     description: 'Kick a stuck lane turn (ca kick): turn (default) aborts and resumes the current turn, fresh starts a clean session, server restarts the codearts server, now retries at once and skips a backoff wait. The supervisor applies it within 2 s. Refused while checks run (gate phase) or after the lane ended: use ca_resume there.',
     inputSchema: {

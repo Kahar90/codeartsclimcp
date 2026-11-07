@@ -55,9 +55,14 @@ box to steer a lane mid-run.
 From the dashboard, or with `ca kick` and `ca resume`, anyone watching can act on a lane without
 the lead: **kick** a stuck turn (retry the turn, start a fresh session, restart the CodeArts
 server or skip a backoff wait), and **resume** a paused, failed, stopped or DEAD lane where it
-left off, with an optional note the worker applies first. Every view also shows what the lane
-spent: token totals per agent (builder, reviewer, other sessions) and per model, per lane and
-summed per plan.
+left off, with an optional note the worker applies first. **Mark handled** (`ca ack`) moves a
+failed or paused lane you already dealt with out of Needs you. Every view also shows what the
+lane spent: token totals per agent (builder, reviewer, other sessions) and per model (lead
+included when its harness reports it), per lane and summed per plan.
+
+The **Control room** (the Lanes home) groups every lane from every project into Needs you,
+Running, Done and Ended, with the reason, a one-click fix, project filters, a freshness label,
+the count in the tab title and optional browser notifications.
 
 ## Why it is safe to leave running
 
