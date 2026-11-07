@@ -2,8 +2,8 @@
   "title": "Reliability: platforms, lifecycle, network, keys",
   "goal": "Close the reliability gaps found after the onboarding work: run on macOS and Linux with CI on all three platforms, a full install lifecycle (update, uninstall, stale-config and untested-version warnings), lanes that survive network drops, sleep and crowded models, and keys encrypted at rest on Windows.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "Wave 3 running: portable, lifecycle, netwait, vault",
+  "status": "done",
+  "now": "Closed: reliability work shipped as 0.2.0; ca.mjs split deferred",
   "waves": [
     {
       "name": "Wave 3 · Platforms, lifecycle, network, keys",
@@ -78,7 +78,8 @@
         "runner/dash-server.mjs",
         "runner/lane.mjs",
         "runner/commands.mjs"
-      ]
+      ],
+      "dropped": true
     }
   ],
   "next": [
@@ -97,6 +98,14 @@
     {
       "at": "2026-11-07T14:01:20.292Z",
       "text": "Wave 3 hit the MaaS limit of 1M tokens per minute with 4 flash lanes: portable failed, vault and netwait were stopped. Root cause in the runner: CodeArts aborts a turn after its own 429 retries and the runner counted that abort as a normal interruption. Fixed (RATE_WAIT_S budget), proven against a new fake CodeArts server (checks/ratelimit.check.mjs), synced; the three lanes resumed in place."
+    },
+    {
+      "at": "2026-11-07T16:07:42.384Z",
+      "text": "Wave 3 merged with lead fixes; cold-start rehearsals (Codex, opencode on GLM 5.3, Claude Code) passed setup and a first feature; CI green on Ubuntu, macOS and Windows; Office hot-desk robots clickable. Wave 4 (split runner/ca.mjs) deferred: internal refactor, no user-facing gain, risky right after a release."
+    },
+    {
+      "at": "2026-11-07T16:07:42.566Z",
+      "text": "Plan closed: reliability work shipped as 0.2.0; ca.mjs split deferred. Dropped, never started: split."
     }
   ],
   "risks": [
