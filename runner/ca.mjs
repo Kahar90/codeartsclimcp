@@ -1560,6 +1560,16 @@ function cmdDash(args) {
   // port. CA_DASH_HOSTS adds host or host:port names for a proxy in front of the dashboard.
   const allowHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
   for (const h of String(process.env.CA_DASH_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) { allowHosts.add(h); if (!h.includes(':')) allowHosts.add(`${h}:${port}`); }
+  // One JSON reader for every POST body: invalid JSON or a body over 64 KB is a client error, not a 500.
+  const MAX_BODY = 64 * 1024;
+  const readJson = (req) => new Promise((resolve, reject) => {
+    let b = ''; let size = 0; let done = false;
+    const fail = (code) => { if (done) return; done = true; const e = new Error(code === 413 ? 'body too large' : 'invalid JSON body'); e.statusCode = code; reject(e); };
+    req.on('data', (c) => { if (done) return; size += c.length; if (size > MAX_BODY) return fail(413); b += c; });
+    req.on('end', () => { if (done) return; done = true; try { resolve(b.trim() ? JSON.parse(b) : {}); } catch { const e = new Error('invalid JSON body'); e.statusCode = 400; reject(e); } });
+    req.on('error', () => fail(400));
+  });
+  const readBody = async (req) => { try { return { body: await readJson(req) }; } catch (e) { return { error: { error: e.statusCode === 413 ? 'request body too large' : 'invalid JSON body' }, code: e.statusCode || 400 }; } };
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
@@ -1620,17 +1630,17 @@ function cmdDash(args) {
           return json({ size, text, reset: from > size });
         }
         if (m[2] === 'summary') { const f = path.join(l.dir, 'summary.md'); return json({ text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '' }); }
-        if (req.method === 'POST' && m[2] === 'steer') { let b = ''; for await (const c of req) b += c; const text = JSON.parse(b || '{}').text?.trim(); if (!text) return json({ error: 'empty' }, 400); const sr = steer(l, text); if (sr.error) return json({ error: sr.error }, sr.code || 409); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'steer') { const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code); const text = String(rb.body.text ?? '').trim(); if (!text) return json({ error: 'empty' }, 400); const sr = steer(l, text); if (sr.error) return json({ error: sr.error }, sr.code || 409); return json({ ok: true }); }
         if (req.method === 'POST' && m[2] === 'kick') {
-          let b = ''; for await (const c of req) b += c;
-          const body = JSON.parse(b || '{}');
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const body = rb.body;
           const r = kickLane(l, { mode: String(body.mode || 'turn'), text: String(body.text || '').trim(), by: 'dashboard' });
           if (r.error) return json({ error: r.error }, r.code || 409);
           return json({ ok: true, mode: String(body.mode || 'turn'), file: r.file });
         }
         if (req.method === 'POST' && m[2] === 'resume') {
-          let b = ''; for await (const c of req) b += c;
-          const body = JSON.parse(b || '{}');
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const body = rb.body;
           const r = resumeLane(l, { note: String(body.note || '').trim(), by: 'dashboard' });
           if (r.error) return json({ error: r.error }, r.code || 409);
           return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
@@ -1638,8 +1648,8 @@ function cmdDash(args) {
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
         if (req.method === 'POST' && m[2] === 'ack') {
           // Mark a finished lane seen (or unseen again) for this finishedAt; a later finish is unseen anew.
-          let b = ''; for await (const c of req) b += c;
-          const body = JSON.parse(b || '{}');
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const body = rb.body;
           if (body.seen !== false && !l.s.result) return json({ error: 'lane is not finished: resume or stop it instead' }, 409);
           setAck(l.id, body.seen !== false, l.s.finishedAt || null, typeof body.note === 'string' ? oneLine(body.note, 200) : '');
           return json({ ok: true, seen: laneSeen(l.id, l.s.finishedAt || null) });
