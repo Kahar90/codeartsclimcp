@@ -5,7 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const chromePath = findChrome();
+if (!chromePath) { console.log('SKIP lanes: no Chrome found (set CHROME_PATH)'); process.exit(0); }
 const out = path.resolve(process.argv[2] || path.join(ROOT, 'checks', 'out')); fs.mkdirSync(out, { recursive: true });
 const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -13,8 +16,8 @@ const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 
 const dashPort = await freePort(); const cdpPort = await freePort();
 const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(dashPort)], { stdio: 'ignore', env: { ...process.env, CA_DASH: '0' } });
 const base = `http://127.0.0.1:${dashPort}`;
-const profile = path.join(process.env.TEMP || ROOT, `ca-lanes-profile-${Date.now()}`);
-const chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', 'about:blank'], { stdio: 'ignore' });
+const profile = chromeProfileDir('lanes');
+const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} };
 process.on('exit', cleanup);
 const timer = setTimeout(() => { console.log('FAIL timeout after 300 s'); cleanup(); process.exit(1); }, 300000);
