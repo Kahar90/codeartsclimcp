@@ -85,11 +85,40 @@ function unprotect(map) {
   return psResult(names, r);
 }
 
-export function readCreds() {
+let cacheKey = '';
+let cacheCreds = {};
+function cacheStore(key, creds) { cacheKey = key; cacheCreds = creds; return creds; }
+
+// Rewrite a plain v1 file as the encrypted v2 form, once, on Windows.
+function migrate(plain) {
   try {
-    const v = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8').replace(/^﻿/, ''));
-    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-  } catch { return {}; }
+    const enc = protect(plain);
+    if (!enc) return;
+    fs.mkdirSync(path.dirname(CRED_FILE), { recursive: true });
+    fs.writeFileSync(CRED_FILE, JSON.stringify({ v: 2, protection: 'dpapi', keys: enc }, null, 2) + '\n', { mode: 0o600 });
+    try { fs.chmodSync(CRED_FILE, 0o600); } catch {}
+    try { const st = fs.statSync(CRED_FILE); cacheKey = `${st.mtimeMs}:${st.size}`; cacheCreds = plain; } catch {}
+  } catch {}
+}
+
+export function readCreds() {
+  let st;
+  try { st = fs.statSync(CRED_FILE); } catch { return cacheStore('', {}); }
+  const key = `${st.mtimeMs}:${st.size}`;
+  if (key === cacheKey) return cacheCreds;
+  let v;
+  try {
+    v = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8').replace(/^﻿/, ''));
+  } catch { return cacheStore(key, {}); }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return cacheStore(key, {});
+  if (v.v === 2 && v.protection === 'dpapi' && v.keys && typeof v.keys === 'object') {
+    const dec = unprotect(v.keys);
+    if (!dec) return cacheStore(key, {});
+    return cacheStore(key, dec);
+  }
+  cacheStore(key, v);
+  if (process.platform === 'win32') migrate(v);
+  return v;
 }
 
 function saveCreds(values) {
@@ -100,8 +129,12 @@ function saveCreds(values) {
     if (v) { cur[k] = v; saved.push(k); }
   }
   fs.mkdirSync(path.dirname(CRED_FILE), { recursive: true });
-  fs.writeFileSync(CRED_FILE, JSON.stringify(cur, null, 2) + '\n', { mode: 0o600 });
+  const body = process.platform === 'win32'
+    ? JSON.stringify({ v: 2, protection: 'dpapi', keys: protect(cur) || {} }, null, 2)
+    : JSON.stringify(cur, null, 2);
+  fs.writeFileSync(CRED_FILE, body + '\n', { mode: 0o600 });
   try { fs.chmodSync(CRED_FILE, 0o600); } catch {}
+  try { const st = fs.statSync(CRED_FILE); cacheStore(`${st.mtimeMs}:${st.size}`, cur); } catch { cacheStore('', {}); }
   return saved;
 }
 
