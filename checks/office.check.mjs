@@ -183,7 +183,7 @@ try {
   await send('Page.navigate', { url: base + '/office?demo=big' }); await wait(1800);
   s = await stReady();
   check('demo=big has 8 lanes', s.lanes.length === 8, String(s.lanes.length));
-  check('demo=big seats all 8 lanes at the main stations and hot desks', s.overflow.length === 0, s.overflow.join(','));
+  check('demo=big seats all 8 lanes at the main stations and hot desks', s.overflow.count === 0, s.overflow.ids.join(','));
   await shot('5-big');
 
   await send('Page.navigate', { url: base + '/office?demo=stuck&still=1' }); await wait(1800);
