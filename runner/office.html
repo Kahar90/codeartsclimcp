@@ -1755,7 +1755,7 @@ function closeWin(toFocus) {
   else {
     win.classList.remove("win-in");
     win.classList.add("win-out");
-    winCloseTimer = setTimeout(() => { win.hidden = true; win.classList.remove("win-out"); }, narrow ? 220 : 100);
+    winCloseTimer = setTimeout(() => { win.hidden = true; win.classList.remove("win-out"); }, narrow ? 220 : 120);
   }
   if (toFocus && anchor && anchor.isConnected) anchor.focus();
 }
