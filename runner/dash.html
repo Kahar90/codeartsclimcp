@@ -75,7 +75,7 @@ a { text-decoration: none }
 .cont-line { color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere }
 .lane-steps { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12.5px; color: var(--muted) }
 .prog { height: 6px; flex: 1; background: var(--raise); border-radius: 3px; overflow: hidden; min-width: 60px }
-.prog > i { display: block; height: 100%; background: var(--run) }
+.prog > i { display: block; height: 100%; background: var(--run); transition: width var(--dur-3) var(--ease-out) }
 .prog.bad > i { background: var(--bad) }
 .curband { margin-top: 12px; border: 1px solid var(--border); background: var(--code-bg); border-radius: var(--radius-sm); padding: 10px 12px }
 .curband .lbl { display: inline-block; font-size: 10.5px; letter-spacing: .1em; font-weight: 700; color: var(--sel-ink); background: var(--sel-bg); border-radius: 4px; padding: 2px 7px; text-transform: uppercase }
@@ -242,12 +242,14 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .cr-head h1 { font: 700 28px/1.2 var(--font-display); margin: 0 }
 .cr-sub { color: var(--muted); font-size: 13.5px }
 .crtiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px }
-.crtile { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 2px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; color: var(--muted); font: inherit; text-align: left }
-.crtile:hover { border-color: var(--border-2) }
-.crtile.on { border-color: var(--sel); background: var(--sel-bg) }
-.crtile .buk-ico { width: 20px; height: 20px; flex: none }
-.crtile .crn { font: 700 22px/1 var(--font-display); margin-left: auto }
-.crtile .crw { font-size: 12.5px; font-weight: 650 }
+.crtile { display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 11px 13px; cursor: pointer; color: var(--fg); font: inherit; text-align: left }
+.crtile .cr-ic { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none; border-radius: 10px; background: color-mix(in srgb, currentColor 14%, transparent) }
+.crtile .cr-ic .buk-ico { width: 20px; height: 20px }
+.crtile .cr-col { display: flex; flex-direction: column; min-width: 0 }
+.crtile .crn { font: 700 26px/1.05 var(--font-display); font-variant-numeric: tabular-nums }
+.crtile .crw { font-size: 13px; font-weight: 600; color: var(--muted) }
+.crtile:hover { transform: translateY(-1px); border-color: currentColor }
+.crtile.on { border-color: currentColor; background: color-mix(in srgb, currentColor 12%, var(--panel)) }
 .crtile.s-bad { color: var(--bad) } .crtile.s-run, .crtile.s-done { color: var(--run) } .crtile.s-idle { color: var(--muted) }
 .cr-list { margin-top: 18px; display: grid; gap: 12px }
 .cr-sec { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); overflow: hidden }
@@ -255,27 +257,35 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .cr-sec-h:hover { background: var(--panel-2) }
 .cr-sec-h .buk-ico { width: 16px; height: 16px; flex: none }
 .cr-sec-h .cnt { margin-left: auto; color: var(--faint); font-size: 12.5px; font-weight: 400 }
-.cr-sec-h .tri, .cr-seen-h .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+.cr-sec-h .tri, .cr-seen-h .tri { color: var(--faint); font-size: 10px; transition: transform var(--dur-2) var(--ease-out) }
 .cr-sec-h[aria-expanded="true"] .tri, .cr-seen-h[aria-expanded="true"] .tri { transform: rotate(90deg) }
-.cr-row { padding: 12px 14px; border-top: 1px solid var(--border); min-width: 0 }
+.cr-sec-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-2) var(--ease-out) }
+.cr-sec.open .cr-sec-body { grid-template-rows: 1fr }
+.cr-sec-inner { min-height: 0; overflow: hidden }
+.cr-row { padding: 12px 14px; border-top: 1px solid var(--border); min-width: 0; transition: background-color var(--dur-1) var(--ease-out) }
 .cr-row:first-child { border-top: 0 }
+.cr-row:hover { background: var(--panel-2) }
 .cr-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
 .cr-task { font: 700 15px/1.2 var(--font-display); color: var(--sel-ink); overflow-wrap: anywhere }
 .cr-task:hover { text-decoration: underline }
 .cr-time { color: var(--muted); font-size: 12.5px }
-.cr-open { margin-left: auto; font-size: 12.5px; white-space: nowrap }
+.cr-open { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm); color: var(--muted); transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out) }
+.cr-open:hover { background: var(--raise); color: var(--sel-ink) }
 .cr-why { color: var(--muted); font-size: 12.5px; margin-top: 4px; overflow-wrap: anywhere }
 .cr-row-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; min-width: 0 }
 .cr-row-foot .prog { width: 150px; max-width: 40vw; flex: none }
-.cr-meta { color: var(--faint); font: 12px var(--mono) }
+.cr-meta { color: var(--muted); font: 12px var(--font); font-variant-numeric: tabular-nums }
 .cr-row-foot .ctlbar { flex: none }
 .cr-seen-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px; background: var(--panel-2); border: 0; border-top: 1px solid var(--border); color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left }
 .cr-seen-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
 .cr-old-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 14px; background: var(--panel-2); border-top: 1px solid var(--border) }
 .cr-old-h { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; background: none; border: 0; color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left; padding: 3px 0 }
 .cr-old-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
-.cr-old-h .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+.cr-old-h .tri { color: var(--faint); font-size: 10px; transition: transform var(--dur-2) var(--ease-out) }
 .cr-old-h[aria-expanded="true"] .tri { transform: rotate(90deg) }
+.cr-old-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-2) var(--ease-out) }
+.cr-old.open .cr-old-body { grid-template-rows: 1fr }
+.cr-old-inner { min-height: 0; overflow: hidden }
 .ca-badge.buk { gap: 5px }
 .ca-badge.buk .buk-ico { width: 13px; height: 13px }
 button.btn.tiny { padding: 5px 10px; font-size: 12px }
@@ -800,7 +810,7 @@ function crCounts() {
 function crMeta(key) { return CR_BUCKETS.find((x) => x.key === key) || CR_BUCKETS[3]; }
 function crTile(b, n) {
   const on = crFilter === b.key;
-  return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}">${crIcon(b.key)}<span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></button>`;
+  return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}"><span class="cr-ic">${crIcon(b.key)}</span><span class="cr-col"><span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></span></button>`;
 }
 function crBadge(key) { const m = crMeta(key); return `<span class="ca-badge s-${m.tone} buk">${crIcon(key)}${esc(m.word)}</span>`; }
 function crDot(key) { const m = crMeta(key); return `<span class="ca-dot s-${m.tone}" title="${esc(m.word)}"></span>`; }
@@ -829,7 +839,7 @@ function crRow(l) {
         : '';
   const href = `#/lane/${esc(l.id)}`;
   return `<div class="cr-row" data-lane="${esc(l.id)}">
-    <div class="cr-row-top">${crBadge(b)}${proj ? `<span class="chip">${esc(proj)}</span>` : ''}<a class="cr-task" href="${href}">${esc(l.task)}</a><span class="cr-time">${crTime(l)}</span><span class="cr-open"><a href="${href}">Open</a></span></div>
+    <div class="cr-row-top">${crBadge(b)}${proj ? `<span class="chip">${esc(proj)}</span>` : ''}<a class="cr-task" href="${href}">${esc(l.task)}</a><span class="cr-time">${crTime(l)}</span><a class="cr-open" href="${href}" aria-label="Open ${esc(l.task)}" title="Open ${esc(l.task)}"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4l5 5-5 5"/></svg></a></div>
     ${why ? `<div class="cr-why">${esc(why)}</div>` : ''}
     <div class="cr-row-foot">${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${p.total || 0} steps</span><span class="cr-meta">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</span>${sug}${seenBtn}</div>
   </div>`;
