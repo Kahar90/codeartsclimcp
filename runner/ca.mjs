@@ -35,6 +35,7 @@
 //        ca attach <lane>                  open the CodeArts TUI on the live session (watch + type)
 //        ca stop <lane>                    abort the session and end the lane
 //        ca ack <lane> [--note t] [--undo]  mark a finished lane seen; a needs-you lane becomes handled (ended)
+//        ca ack --stale [--older-than 48h] [--dry-run] [--note t]   mark every Needs-you lane older than that handled
 //        ca kick <lane> [--fresh|--server|--now] [message]  unstick a stuck turn: retry it (default),
 //                                  start a fresh session, restart the codearts server or skip a backoff
 //        ca resume <lane> [--note "<text>"] [--dry-run]  continue a paused, failed, stopped or DEAD
@@ -1146,7 +1147,35 @@ function cmdAttach(args) {
   const r = spawnSync(EXE, ['attach', s.server.url, '-s', sid, '-p', s.server.pw], { stdio: 'inherit', env: caEnv() });
   process.exit(r.status ?? 0);
 }
+// Parse a CLI duration for --older-than: a number followed by m, h or d (for example 30m, 48h, 2d).
+// Anything else is null so the caller can raise a usage error.
+function parseAge(v) {
+  const m = /^(\d+)\s*([mhd])$/i.exec(String(v ?? '').trim());
+  if (!m) return null;
+  const n = Number(m[1]); const u = m[2].toLowerCase();
+  return n * (u === 'm' ? 60e3 : u === 'h' ? 3600e3 : 86400e3);
+}
+// ca ack --stale: mark every finished Needs-you lane older than the given age handled in one go.
+// Only finished lanes are selected; running, stalled and DEAD lanes are never touched.
+function ackStale(args) {
+  const oi = args.indexOf('--older-than');
+  const durArg = oi >= 0 ? (args[oi + 1] ?? '') : '48h';
+  const ms = parseAge(durArg);
+  if (ms == null) die(`invalid --older-than "${durArg}": use a number with m, h or d (for example 48h)`, 2);
+  const ni = args.indexOf('--note'); const note = ni >= 0 ? args.slice(ni + 1).join(' ').trim() : '';
+  const dry = args.includes('--dry-run');
+  const cut = now() - ms;
+  const old = lanes().filter((l) => bucketFor(l).bucket === 'attention' && l.s.result && ((l.s.finishedAt || l.s.lastEventAt) < cut));
+  if (!old.length) { console.log(`nothing in Needs you is older than ${durArg}`); return; }
+  for (const l of old) {
+    const b = bucketFor(l); const ts = l.s.finishedAt || l.s.lastEventAt;
+    if (dry) { console.log(`would mark handled: ${l.id} (${b.reason}, ${dur(now() - ts)} ago)`); continue; }
+    setAck(l.id, true, l.s.finishedAt || null, oneLine(note, 200));
+    console.log(`${l.id}: handled (${b.reason})`);
+  }
+}
 function cmdAck(args) {
+  if (args.includes('--stale')) return ackStale(args);
   const ni = args.indexOf('--note'); const note = ni >= 0 ? args.slice(ni + 1).join(' ').trim() : '';
   const q = args.slice(0, ni >= 0 ? ni : undefined).find((a) => !a.startsWith('--'));
   if (!q) die('usage: ca ack <lane> [--note "text"] [--undo]', 2);

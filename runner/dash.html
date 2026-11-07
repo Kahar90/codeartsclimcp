@@ -271,6 +271,11 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .cr-row-foot .ctlbar { flex: none }
 .cr-seen-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px; background: var(--panel-2); border: 0; border-top: 1px solid var(--border); color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left }
 .cr-seen-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
+.cr-old-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 14px; background: var(--panel-2); border-top: 1px solid var(--border) }
+.cr-old-h { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; background: none; border: 0; color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left; padding: 3px 0 }
+.cr-old-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
+.cr-old-h .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+.cr-old-h[aria-expanded="true"] .tri { transform: rotate(90deg) }
 .ca-badge.buk { gap: 5px }
 .ca-badge.buk .buk-ico { width: 13px; height: 13px }
 button.btn.tiny { padding: 5px 10px; font-size: 12px }
@@ -367,7 +372,7 @@ wideMq.addEventListener('change', syncRail);
 function syncBarPad() { const bar = $('bar'); document.documentElement.style.setProperty('--bar-h', (bar ? bar.offsetHeight : 0) + 'px'); }
 addEventListener('resize', syncBarPad);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new Date(t).getTime()) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : new Date(t).toLocaleDateString(); };
+const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new Date(t).getTime()) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const short = (m) => String(m || '').replace(/^huaweicloud-maas\//, 'codearts/');
@@ -761,6 +766,10 @@ let crProject = lsGet('ca-cr-project', '') || ''; // '' = all projects; else a p
 let crGroup = lsGet('ca-cr-group', 'status') === 'project' ? 'project' : 'status';
 const crOpen = new Set(String(lsGet('ca-cr-open', 'attention,running')).split(',').filter(Boolean)); // expanded sections
 let crSeenOpen = lsGet('ca-cr-seen', '') === '1'; // the "Seen earlier" block inside Done
+let crOldOpen = lsGet('ca-cr-old', '') === '1'; // the "Older than 2 days" block inside Needs you
+const CR_OLD_MS = 48 * 3600e3; // a finished Needs-you lane older than this sits in the collapsed old group
+const crIsOld = (l) => !!l.result && !!l.finishedAt && (Date.now() - new Date(l.finishedAt).getTime() > CR_OLD_MS);
+const crOldLanes = (list) => list.filter(crIsOld);
 function crCounts() {
   const c = { attention: 0, running: 0, done: 0, ended: 0 };
   for (const l of lanes) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; }
@@ -824,6 +833,11 @@ function crSection(b, ls) {
     body = ls.filter((l) => !l.seen).map(crRow).join('');
     if (seen.length) body += `<div class="cr-seen"><button type="button" class="cr-seen-h" data-crseen="1" aria-expanded="${crSeenOpen}"><span class="tri">&#9654;</span>Seen earlier<span class="cnt">${seen.length}</span></button>${crSeenOpen ? seen.map(crRow).join('') : ''}</div>`;
   }
+  if (b.key === 'attention') {
+    const old = crOldLanes(ls), fresh = ls.filter((l) => !crIsOld(l));
+    body = fresh.map(crRow).join('');
+    if (old.length) body += `<div class="cr-old"><div class="cr-old-row"><button type="button" class="cr-old-h" data-crold="1" aria-expanded="${crOldOpen}"><span class="tri">&#9654;</span>Older than 2 days<span class="cnt">${old.length}</span></button><button type="button" class="btn tiny" data-ack-stale="1" title="Mark every lane in this group handled: they move to Ended with your note">Mark all handled</button></div><div class="cr-old-body"${crOldOpen ? '' : ' hidden'}>${old.map(crRow).join('')}</div></div>`;
+  }
   if (!ls.length) body = '<div class="small" style="padding:10px 14px">none</div>';
   return `<section class="cr-sec" data-bucket="${b.key}"><button type="button" class="cr-sec-h" data-crsec="${b.key}" aria-expanded="${open}"><span class="tri">&#9654;</span>${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></button>${open ? body : ''}</section>`;
 }
@@ -855,6 +869,8 @@ function renderControl() {
   for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; lsSet('ca-cr-filter', crFilter); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); lsSet('ca-cr-open', [...crOpen].join(',')); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crold]')) h.onclick = () => { crOldOpen = !crOldOpen; lsSet('ca-cr-old', crOldOpen ? '1' : ''); renderControl(); };
+  for (const x of $('view').querySelectorAll('[data-ack-stale]')) x.onclick = () => markAllStale();
   for (const g of $('view').querySelectorAll('[data-crgroup]')) g.onclick = () => { crGroup = g.dataset.crgroup; lsSet('ca-cr-group', crGroup); renderControl(); };
   for (const p of $('view').querySelectorAll('[data-crproj]')) p.onclick = () => { crProject = crProject === p.dataset.crproj ? '' : p.dataset.crproj; lsSet('ca-cr-project', crProject); renderControl(); };
   for (const x of $('view').querySelectorAll('[data-ack-id]')) x.onclick = () => { let note = ''; if (x.dataset.ackNote) { note = window.prompt('Mark handled. Note (optional), for example "merged by the lead":', ''); if (note === null) return; } setSeen(x.dataset.ackId, x.dataset.ackMark === '1', note); };
@@ -864,6 +880,26 @@ async function setSeen(id, seen, note = '') {
   try { await api(`/api/lane/${encodeURIComponent(id)}/ack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seen, note }) }); } catch {}
   const l = lanes.find((x) => x.id === id); if (l) l.seen = seen;
   renderControl(); refresh(true);
+}
+// Control room bulk action: mark every finished Needs-you lane in the old group handled at once. One prompt,
+// then the same ack POST the per-row Mark handled button makes, once per lane. An error on one lane never
+// stops the others; failures are listed in the toast.
+async function markAllStale() {
+  const old = lanes.filter((l) => laneBucket(l) === 'attention' && crIsOld(l));
+  if (!old.length) return;
+  const note = window.prompt(`Mark all ${old.length} lanes older than 2 days handled. Note (optional):`, '');
+  if (note === null) return;
+  const failed = [];
+  for (const l of old) {
+    try {
+      const r = await api(`/api/lane/${encodeURIComponent(l.id)}/ack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seen: true, note }) });
+      if (r && r.error) failed.push(`${l.task}: ${r.error}`);
+      else { const x = lanes.find((y) => y.id === l.id); if (x) x.seen = true; }
+    } catch (e) { failed.push(`${l.task}: ${(e && e.message) || e}`); }
+  }
+  renderControl(); refresh(true);
+  const n = old.length - failed.length;
+  toast(failed.length ? `${n} lanes marked handled; failed: ${failed.join('; ')}` : `${n} lanes marked handled`, failed.length > 0);
 }
 
 // ---------- plan-home state that survives the 2.5 s polls ----------
