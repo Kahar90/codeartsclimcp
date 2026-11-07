@@ -671,6 +671,8 @@ async function runLane(repoArg, task, opts = {}) {
         let netLoggedAt = 0;
         const onWait = ({ tries, waitedMs }) => {
           S.activity = `offline: waiting for the network (${dur(waitedMs)})`;
+          // The silence is the outage, not the model: keep ca status from reading STALLED while we wait.
+          S.lastEventAt = now(); S.turnStartAt = now(); S.lastToolAt = now(); S.lastTextAt = now();
           if (now() - netLoggedAt >= 60000) { netLoggedAt = now(); L(`  ! network down, waiting (try ${tries})`); }
           save();
         };
@@ -788,7 +790,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const slot = laneSlots({ model, running, limits });
       if (slot.ok) break;
       if (!logged) { logged = true; say(`queued: ${slot.reason}`); L(`  ! queued: ${slot.reason}`); }
-      S.activity = `queued: ${slot.reason}`; S.queuedMs = queuedTotal + (now() - t0); save();
+      S.activity = `queued: ${slot.reason}`; S.queuedMs = queuedTotal + (now() - t0);
+      // Waiting for a slot is not a stall: keep ca status from reading STALLED while we queue.
+      S.lastEventAt = now(); S.turnStartAt = now(); S.lastToolAt = now(); S.lastTextAt = now(); save();
       if (fs.existsSync(stopFile)) { const e = new Error('stopped'); e.caStop = true; throw e; }
       await sleep(20000);
     }
