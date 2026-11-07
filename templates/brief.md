@@ -16,8 +16,7 @@ Safety rules (hard):
 - Do not launch browsers or write your own browser scripts; use only the checks below.
 - If `git commit` fails, do NOT try workarounds: stop and put the exact error in your final reply.
 
-Checks: run these before each commit. The runner also runs every CHECK: line itself when you
-finish and sends you the output if one fails.
+Checks: run these before each commit. The runner also runs every check line below by itself when you finish and sends you the output if one fails.
 CHECK: <exact command, e.g. npm run typecheck>
 CHECK: <another command, e.g. npm test>
 Constraints: no em dashes anywhere. Only touch <files>. Numbers only, never print private data.

@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CA = path.join(HERE, 'ca.mjs');
 const WORKFLOW = path.resolve(HERE, '..', 'docs', 'workflow.md');
-const VERSION = '1.0.0';
+let VERSION = '0.0.0';
+try { VERSION = JSON.parse(fs.readFileSync(path.resolve(HERE, '..', 'package.json'), 'utf8')).version || '0.0.0'; } catch { VERSION = '0.0.0'; }
 
 // ---------- stdio: only JSON-RPC lines on stdout, all logging on stderr ----------
 let closing = false;
@@ -184,7 +185,7 @@ const TOOLS = [
   },
   {
     name: 'ca_wait',
-    description: 'Block until every given lane has a result or timeout_s passes (default 300, max 3000). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed or stopped, 3 missing credentials, 4 needs review) and timedOut. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    description: 'Block until every given lane has a result or timeout_s passes (default 300, max 3000). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed or stopped, 3 keys missing or rejected (run ca auth), 4 needs review, 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -294,6 +295,37 @@ const TOOLS = [
     build: (a) => ['plan', needStr(a.file, 'file')],
   },
   {
+    name: 'ca_plan_list',
+    description: 'List the registered plans with their state and a per-wave lane summary (ca plan list). Use it to see which plan is active and what it still contains before closing it.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    ok: [0],
+    timeout: 30000,
+    build: () => ['plan', 'list'],
+  },
+  {
+    name: 'ca_plan_close',
+    description: 'Close a registered plan (ca plan close [id] --reason <reason>) when the work is finished or a wave will not run: the plan is marked done, the reason is recorded, and never-started lanes become Dropped. Defaults to the newest registered plan when id is omitted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'plan id to close (default: the newest registered plan)' },
+        reason: { type: 'string', description: 'why the plan is closed; recorded on the plan' },
+      },
+      required: [],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['plan', 'close', ...optStr(a, 'id'), ...(a.reason === undefined || a.reason === null ? [] : ['--reason', needStr(a.reason, 'reason')])],
+  },
+  {
+    name: 'ca_gc',
+    description: 'Forget lanes that finished more than 3 days ago (ca gc) so ca_status and the dashboard stay short. Use it once old lanes no longer matter.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    ok: [0],
+    timeout: 60000,
+    build: () => ['gc'],
+  },
+  {
     name: 'ca_note',
     description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use it to keep the dashboard current while lanes run.',
     inputSchema: {
@@ -350,17 +382,25 @@ function lastJsonObject(s) {
   return null;
 }
 
-// ca_wait: exit codes 0, 1, 4 and 124 are results; 2 (unknown lane) and anything else are tool errors.
+// ca_wait: exit codes 0, 1, 3, 4, 5 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
+const WAIT_NEXT = {
+  0: 'read ca_summary for each lane and verify the work',
+  1: 'read ca_summary; ca_resume continues a failed or stopped lane with a note',
+  3: 'keys missing or rejected: ask the human to run ca auth (a local form opens; never ask for keys in chat), then ca_resume the lane',
+  4: 'read ca_summary: the reviewer asked for changes',
+  5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
+  124: 'still running: call ca_wait again',
+};
 async function waitResult(a) {
   const lanes = needLanes(a.lanes);
   const timeoutS = needCount(a.timeout_s, 'timeout_s', 300, 3000);
   const r = await runCli(['wait', ...lanes, '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
-  if (![0, 1, 4, 124].includes(r.code) || !final) {
+  if (![0, 1, 3, 4, 5, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();
     return { content: [{ type: 'text', text: `ca_wait exited ${r.code}${raw ? ':\n' + raw : ' with no output'}` }], isError: true };
   }
-  return { content: [{ type: 'text', text: JSON.stringify({ ...final, exit: r.code, timedOut: r.code === 124 }, null, 2) }], isError: false };
+  return { content: [{ type: 'text', text: JSON.stringify({ ...final, exit: r.code, timedOut: r.code === 124, next: WAIT_NEXT[r.code] }, null, 2) }], isError: false };
 }
 
 async function cliResult(tool, cliArgs) {
@@ -372,7 +412,14 @@ async function cliResult(tool, cliArgs) {
   return { content: [{ type: 'text', text }], isError: !ok };
 }
 
-methods['tools/list'] = () => ({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+// MCP annotations per tool: read-only tools are safe to auto-approve; the two that end work
+// (ca_stop, ca_plan_close) are destructive; every other tool changes state without destroying it.
+const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list']);
+const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close']);
+const annotationsFor = (name) => (READ_ONLY_TOOLS.has(name)
+  ? { readOnlyHint: true }
+  : { readOnlyHint: false, destructiveHint: DESTRUCTIVE_TOOLS.has(name) });
+methods['tools/list'] = () => ({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: annotationsFor(t.name) })) });
 methods['tools/call'] = async (params) => {
   const tool = TOOLS.find((t) => t.name === params.name);
   if (!tool) throw new RpcError(-32602, `Unknown tool: ${params.name}`);
