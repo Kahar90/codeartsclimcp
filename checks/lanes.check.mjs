@@ -34,7 +34,12 @@ try {
   const key = (k, vk) => send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: vk }).then(() => send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: vk }));
   const type = (text) => send('Input.insertText', { text });
   const center = (sel) => ev(`(function(){const el=document.querySelector('${sel}');if(!el)return null;const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})()`);
-  const clickSel = async (sel) => { const c = await center(sel); if (!c) return false; await click(c.x, c.y); return true; };
+  const clickSel = async (sel) => {
+    // Scroll the target into view first: the page is taller than the viewport, so a raw coordinate
+    // click on an off-screen button (evidence tabs, quick-steer chips, lane cards) would miss.
+    const c = await ev(`(function(){const el=document.querySelector('${sel}');if(!el)return null;const r=el.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight||r.left<0||r.right>innerWidth)el.scrollIntoView({block:'center',inline:'center'});const r2=el.getBoundingClientRect();return {x:r2.left+r2.width/2,y:r2.top+r2.height/2};})()`);
+    if (!c) return false; await click(c.x, c.y); return true;
+  };
   await send('Runtime.enable');
 
   await size(1280, 800); await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1800);
