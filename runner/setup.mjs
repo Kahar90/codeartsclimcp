@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // runner/setup.mjs: one-command setup of the CodeArts lanes MCP server and workflow rules
 // for other agent harnesses. Called by `ca setup <harness> [repo] [--dry-run] [--write]`.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -60,8 +61,47 @@ function upsertBlock(text, body) {
   return (head ? head + '\n\n' : '') + block;
 }
 
+// A TOML table header line, if the line is one, returns the (trimmed) header name.
+const tomlHeader = (line) => { const m = line.match(/^\s*\[([^\]]+)\]/); return m ? m[1].trim() : null; };
+const isCodeartsTable = (name) => name === 'mcp_servers.codearts' || name.startsWith('mcp_servers.codearts.');
+
+// Replace (or append) the [mcp_servers.codearts] table and every [mcp_servers.codearts.*]
+// sub-table, keeping all other content byte for byte. Each table runs until the next header
+// that is not one of them.
+function upsertCodexToml(text, block) {
+  const lines = text.split('\n');
+  const kept = [];
+  let i = 0;
+  while (i < lines.length) {
+    const name = tomlHeader(lines[i]);
+    if (name && isCodeartsTable(name)) {
+      i++;
+      while (i < lines.length) {
+        const sub = tomlHeader(lines[i]);
+        if (sub) { if (isCodeartsTable(sub)) { i++; continue; } break; }
+        i++;
+      }
+      continue;
+    }
+    kept.push(lines[i]);
+    i++;
+  }
+  const body = kept.join('\n').replace(/\s+$/, '');
+  return (body ? body + '\n\n' : '') + block;
+}
+
 // Read-only lanes tools that are safe to auto-approve: they never start or change a lane.
 const AUTO_APPROVE = ['ca_doctor', 'ca_status', 'ca_summary', 'ca_tail', 'ca_wait'];
+
+// The user-level config dir for a harness: home-based with --user, repo-based otherwise.
+const home = () => os.homedir();
+
+// VS Code stores its user profile in a different place per OS.
+function vscodeUserDir() {
+  if (process.platform === 'win32') return path.join(process.env.APPDATA || path.join(home(), 'AppData', 'Roaming'), 'Code', 'User');
+  if (process.platform === 'darwin') return path.join(home(), 'Library', 'Application Support', 'Code', 'User');
+  return path.join(home(), '.config', 'Code', 'User');
+}
 
 function addJSON(plan, errors, file, mapKey, serverKey, value) {
   try { plan.push({ path: file, content: mergeJSON(file, mapKey, serverKey, value) }); }
@@ -102,6 +142,39 @@ function addClaudeSettings(plan, errors, file) {
   }
 }
 
+// Structural equality for the plain JSON values we merge (order of keys does not matter).
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+}
+
+// <claude dir>/settings.json: allow the read-only tools, keeping every other key.
+function addClaudeUserSettings(plan, errors, file) {
+  const allow = AUTO_APPROVE.map((t) => `mcp__codearts__${t}`);
+  try {
+    const obj = loadJSON(file);
+    if (!obj.permissions || typeof obj.permissions !== 'object' || Array.isArray(obj.permissions)) obj.permissions = {};
+    obj.permissions.allow = [...new Set([...(Array.isArray(obj.permissions.allow) ? obj.permissions.allow : []), ...allow])];
+    plan.push({ path: file, content: JSON.stringify(obj, null, 2) + '\n' });
+  } catch (e) {
+    if (!e.parseFile) throw e;
+    errors.push({ message: `${e.message}: expected JSON`, snippet: JSON.stringify({ permissions: { allow } }, null, 2) + '\n' });
+  }
+}
+
+// Try the claude CLI to register the user-scope MCP server. stdin is ignored and each call
+// has a hard 30 s timeout, so a missing or hanging CLI just returns false.
+function claudeCliAdd() {
+  const opts = { shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000, windowsHide: true, encoding: 'utf8' };
+  spawnSync('claude', ['mcp', 'remove', '-s', 'user', 'codearts'], opts);
+  const r = spawnSync('claude', ['mcp', 'add', '-s', 'user', 'codearts', '--', 'node', CA_MJS, 'mcp'], opts);
+  return r.status === 0;
+}
+
 // A plan entry is { path, content, action }. Built first, then either printed (--dry-run)
 // or written, so a failed build never half-writes a repo.
 function buildPlan(harness, repo, flags) {
@@ -110,62 +183,84 @@ function buildPlan(harness, repo, flags) {
   const notes = [];
 
   if (harness === 'kiro') {
-    addJSON(plan, errors, path.join(repo, '.kiro', 'settings', 'mcp.json'), 'mcpServers', 'codearts',
+    const dir = flags.user ? path.join(home(), '.kiro') : path.join(repo, '.kiro');
+    addJSON(plan, errors, path.join(dir, 'settings', 'mcp.json'), 'mcpServers', 'codearts',
       { ...SERVER, disabled: false, autoApprove: AUTO_APPROVE });
-    plan.push({ path: path.join(repo, '.kiro', 'steering', 'codearts-lanes.md'), content: `---\ninclusion: manual\n---\n${WORKFLOW}` });
+    plan.push({ path: path.join(dir, 'steering', 'codearts-lanes.md'), content: `---\ninclusion: manual\n---\n${WORKFLOW}` });
     notes.push('kiro: the steering file is manual. Reference it in chat with #codearts-lanes.');
   }
 
   if (harness === 'cursor') {
-    addJSON(plan, errors, path.join(repo, '.cursor', 'mcp.json'), 'mcpServers', 'codearts', { type: 'stdio', ...SERVER }); // Cursor docs list type as required
-    plan.push({
-      path: path.join(repo, '.cursor', 'rules', 'codearts-lanes.mdc'),
-      content: `---\ndescription: Delegate coding work to CodeArts lanes (plan, brief, start, wait, verify)\nalwaysApply: false\n---\n${WORKFLOW}`,
-    });
+    const dir = flags.user ? path.join(home(), '.cursor') : path.join(repo, '.cursor');
+    addJSON(plan, errors, path.join(dir, 'mcp.json'), 'mcpServers', 'codearts', { type: 'stdio', ...SERVER }); // Cursor docs list type as required
+    // User scope has no repo to hold a rule file; the MCP server instructions carry the workflow.
+    if (!flags.user) {
+      plan.push({
+        path: path.join(dir, 'rules', 'codearts-lanes.mdc'),
+        content: `---\ndescription: Delegate coding work to CodeArts lanes (plan, brief, start, wait, verify)\nalwaysApply: false\n---\n${WORKFLOW}`,
+      });
+    }
   }
 
   if (harness === 'vscode') {
-    addJSON(plan, errors, path.join(repo, '.vscode', 'mcp.json'), 'servers', 'codearts', { type: 'stdio', ...SERVER });
+    const dir = flags.user ? vscodeUserDir() : path.join(repo, '.vscode');
+    addJSON(plan, errors, path.join(dir, 'mcp.json'), 'servers', 'codearts', { type: 'stdio', ...SERVER });
   }
 
   if (harness === 'claude') {
-    addJSON(plan, errors, path.join(repo, '.mcp.json'), 'mcpServers', 'codearts', SERVER);
-    // Pre-approve the project server and the read-only tools in the personal (gitignored)
-    // settings, so Claude Code neither asks to enable .mcp.json nor prompts on ca_status.
-    addClaudeSettings(plan, errors, path.join(repo, '.claude', 'settings.local.json'));
-    // The /codearts-build skill: repo scope always, user scope too with --user.
-    addSkill(plan, notes, path.join(repo, '.claude', 'skills', 'codearts-build', 'SKILL.md'));
+    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home(), '.claude');
     if (flags.user) {
-      const claudeHome = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-      addSkill(plan, notes, path.join(claudeHome, 'skills', 'codearts-build', 'SKILL.md'));
-      notes.push(`claude: for the MCP server in every project too, run:\n  claude mcp add -s user codearts -- node ${CA_MJS} mcp`);
+      // User scope: the skill, the read-only tool permissions and the MCP server all live in
+      // the user config; nothing is written in the repo.
+      addSkill(plan, notes, path.join(claudeDir, 'skills', 'codearts-build', 'SKILL.md'));
+      addClaudeUserSettings(plan, errors, path.join(claudeDir, 'settings.json'));
+      const userJson = process.env.CLAUDE_CONFIG_DIR
+        ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json')
+        : path.join(home(), '.claude.json');
+      const entry = { type: 'stdio', ...SERVER, env: {} };
+      let current = null;
+      try { current = loadJSON(userJson).mcpServers?.codearts; } catch { current = null; }
+      if (deepEqual(current, entry)) {
+        notes.push(`claude: MCP server already in ${userJson}`);
+      } else if (!flags.dryRun && process.env.CA_CLAUDE_CLI !== 'none' && claudeCliAdd()) {
+        notes.push('claude: MCP server added with the claude CLI');
+      } else {
+        addJSON(plan, errors, userJson, 'mcpServers', 'codearts', entry);
+      }
+      notes.push('claude: restart Claude Code (or run /mcp), then in any repo type: /codearts-build <goal>');
+      notes.push(`claude: to register the server by hand: claude mcp add -s user codearts -- node ${CA_MJS} mcp`);
+    } else {
+      addJSON(plan, errors, path.join(repo, '.mcp.json'), 'mcpServers', 'codearts', SERVER);
+      // Pre-approve the project server and the read-only tools in the personal (gitignored)
+      // settings, so Claude Code neither asks to enable .mcp.json nor prompts on ca_status.
+      addClaudeSettings(plan, errors, path.join(repo, '.claude', 'settings.local.json'));
+      addSkill(plan, notes, path.join(repo, '.claude', 'skills', 'codearts-build', 'SKILL.md'));
+      notes.push('claude: restart Claude Code in this repo (or run /mcp), then type: /codearts-build <goal>');
     }
-    notes.push('claude: restart Claude Code in this repo (or run /mcp), then type: /codearts-build <goal>');
   }
 
   if (harness === 'codex') {
     // Codex asks before every MCP tool call: pre-approve the read-only tools (same set as Kiro).
-    const toml = `[mcp_servers.codearts]\ncommand = "node"\nargs = [${tomlStr(CA_MJS)}, "mcp"]\n`
+    const block = `[mcp_servers.codearts]\ncommand = "node"\nargs = [${tomlStr(CA_MJS)}, "mcp"]\n`
       + AUTO_APPROVE.map((t) => `\n[mcp_servers.codearts.tools.${t}]\napproval_mode = "approve"\n`).join('');
-    const config = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml');
-    if (flags.write && !flags.dryRun) {
-      const existing = readText(config);
-      const content = existing.includes('[mcp_servers.codearts]')
-        ? existing
-        : existing + (existing && !existing.endsWith('\n') ? '\n' : '') + toml;
-      plan.push({ path: config, content });
-      notes.push(`codex: MCP server written to ${config}`);
-    } else {
-      notes.push(`codex: MCP server for ${config}. Add this block:\n${toml}`);
-    }
-    plan.push({ path: path.join(repo, 'AGENTS.md'), content: upsertBlock(readText(path.join(repo, 'AGENTS.md')), WORKFLOW) });
+    // The MCP server is machine-wide: always written to config.toml, with or without --write.
+    const codexHome = process.env.CODEX_HOME || path.join(home(), '.codex');
+    const config = path.join(codexHome, 'config.toml');
+    plan.push({ path: config, content: upsertCodexToml(readText(config), block) });
+    notes.push(`codex: MCP server in ${config}`);
+    const agents = flags.user ? path.join(codexHome, 'AGENTS.md') : path.join(repo, 'AGENTS.md');
+    plan.push({ path: agents, content: upsertBlock(readText(agents), WORKFLOW) });
   }
 
   if (harness === 'opencode') {
-    // opencode: project opencode.json "mcp" map (command is one array), rules from AGENTS.md.
-    addJSON(plan, errors, path.join(repo, 'opencode.json'), 'mcp', 'codearts', { type: 'local', command: [SERVER.command, ...SERVER.args], enabled: true });
-    plan.push({ path: path.join(repo, 'AGENTS.md'), content: upsertBlock(readText(path.join(repo, 'AGENTS.md')), WORKFLOW) });
-    notes.push('opencode: the codearts tools load in this repo; AGENTS.md carries the workflow.');
+    // opencode: "mcp" map (command is one array), rules from AGENTS.md (project) or ~/.config/opencode.
+    const dir = flags.user ? path.join(home(), '.config', 'opencode') : repo;
+    addJSON(plan, errors, path.join(dir, 'opencode.json'), 'mcp', 'codearts', { type: 'local', command: [SERVER.command, ...SERVER.args], enabled: true });
+    const agents = path.join(dir, 'AGENTS.md');
+    plan.push({ path: agents, content: upsertBlock(readText(agents), WORKFLOW) });
+    notes.push(flags.user
+      ? 'opencode: the codearts tools load in every project; ~/.config/opencode/AGENTS.md carries the workflow.'
+      : 'opencode: the codearts tools load in this repo; AGENTS.md carries the workflow.');
   }
 
   return { plan, errors, notes };

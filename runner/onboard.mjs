@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // runner/onboard.mjs: guided first-run setup for the CodeArts lanes runner, called by
-// `ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]`.
+// `ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json] [--repo-only]`.
 // It walks the environment (doctor rows), the repo (git, trusted folder), the harness
 // (marker detection + `ca setup`) and, only with --smoke, a throwaway probe lane.
+// The default scope is machine-wide (`ca setup <h> <repo> --user`); --repo-only keeps the old
+// repo-level setup (`ca setup <h> <repo>`).
 // Every step is {name, status: ok|warn|fail|fixed|skipped|planned, detail, fix};
 // --json prints {harness, repo, ready, steps, next} only. Exit 0 when ready (no fail
 // row), 1 otherwise. --yes applies the fixes, --dry-run only plans them; with a TTY
@@ -37,13 +39,22 @@ const HARNESS_NEXT = {
   vscode: 'In VS Code chat (agent mode): use the codearts MCP tools',
   opencode: 'In opencode: ask it to follow the CodeArts lanes section of AGENTS.md (codearts MCP tools)',
 };
+// Machine-wide scope: the MCP server and rules are installed once, so these work in any repo.
+const HARNESS_NEXT_USER = {
+  kiro: 'Restart Kiro, then in any repo type: #codearts-lanes <goal>',
+  cursor: 'Restart Cursor, then in any repo ask: use CodeArts lanes to <goal>',
+  claude: 'Restart Claude Code (or run /mcp), then in any repo type: /codearts-build <goal>',
+  codex: 'Restart Codex, then in any repo ask: use CodeArts lanes to <goal>',
+  vscode: 'Restart VS Code, then in any repo ask: use CodeArts lanes to <goal>',
+  opencode: 'Restart opencode, then in any repo ask: use CodeArts lanes to <goal>',
+};
 const PORTAL = 'https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth';
 const DASH = 'http://127.0.0.1:4777';
 const oneLine = (s, n = 200) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const dur = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h`; };
 const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, input: '', ...opts });
 const git = (cwd, ...args) => run('git', args, { cwd });
-const usage = (msg) => { process.stderr.write(`${msg}\nusage: ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]\n`); process.exit(2); };
+const usage = (msg) => { process.stderr.write(`${msg}\nusage: ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json] [--repo-only]\n`); process.exit(2); };
 
 // settings.json (security.trustedFolders): BOM and CRLF tolerant; a file we cannot parse
 // as a JSON object is reported and never overwritten.
@@ -60,19 +71,30 @@ const isUnder = (list, p) => {
   const a = path.resolve(p).toLowerCase();
   return list.some((f) => { const b = path.resolve(f).toLowerCase(); return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep); });
 };
-// Base dir for the throwaway smoke repo: prefer ~/.t3/scratch, else the first trusted
-// folder that exists and is writable, else the OS temp dir when it is trusted.
-function pickSmokeBase() {
-  const { obj } = loadSettings();
-  const trusted = trustedList(obj);
-  const writable = (d) => { try { fs.accessSync(d, fs.constants.W_OK); return true; } catch { return false; } };
-  const scratch = path.join(os.homedir(), '.t3', 'scratch');
-  if (fs.existsSync(scratch) && writable(scratch)) return scratch;
-  for (const t of trusted) { const p = path.resolve(t); if (fs.existsSync(p) && writable(p)) return p; }
-  const tmp = os.tmpdir();
-  if (isUnder(trusted, tmp)) return tmp;
-  return null;
+// Add a folder to security.trustedFolders (idempotent), keeping every other setting.
+function addTrusted(folder) {
+  const re = loadSettings();
+  if (re.err) return false;
+  const obj = re.obj;
+  obj.security = obj.security && typeof obj.security === 'object' && !Array.isArray(obj.security) ? obj.security : {};
+  if (!Array.isArray(obj.security.trustedFolders)) obj.security.trustedFolders = [];
+  if (!isUnder(obj.security.trustedFolders.map(String).filter(Boolean), folder)) obj.security.trustedFolders.push(folder);
+  fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
+  fs.writeFileSync(SETTINGS, JSON.stringify(obj, null, 2) + '\n');
+  return true;
 }
+
+const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+// First summary line mentioning AK/SK, MaaS or auth (a smoke run rejected the keys).
+const authReason = (file) => (readFileSafe(file).split(/\r?\n/).find((l) => l.trim() && /AK\/SK|MaaS|auth/i.test(l)) || '').trim();
+// The "== finished:" reason from the live log (never the CA_RESULT line).
+const finishedReason = (file) => {
+  const hit = readFileSafe(file).split(/\r?\n/).find((l) => l.startsWith('== finished:'));
+  return hit ? hit.replace(/^== finished:\s*/, '').trim() || hit.trim() : 'see the lane log';
+};
+// Base dir for the throwaway smoke repo: CA_SMOKE_DIR or ~/.codeartsdoer/ca-smoke. Never the
+// repo, one of its parents or ~/.t3/scratch.
+const smokeBaseDir = () => process.env.CA_SMOKE_DIR || path.join(CA_HOME, 'ca-smoke');
 
 export default async function onboard(args) {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
@@ -84,16 +106,17 @@ export default async function onboard(args) {
   const pos = args.filter((a, i) => !a.startsWith('--') && i !== ri + 1 && i !== hi + 1);
   const repo = path.resolve((ri >= 0 ? args[ri + 1] : '') || pos[0] || process.cwd());
   const yes = flags.has('--yes'), dry = flags.has('--dry-run'), asJson = flags.has('--json'), smoke = flags.has('--smoke');
+  const scope = flags.has('--repo-only') ? 'repo' : 'user';
   const interactive = !yes && !asJson && !dry && !!(process.stdin.isTTY && process.stdout.isTTY);
   const envRows = [], repoRows = [], harnessRows = [], smokeRows = [];
-  const add = (rows, name, status, detail, fix = '') => rows.push({ name, status, detail: oneLine(detail), fix });
+  const add = (rows, name, status, detail, fix = '', notes = []) => rows.push({ name, status, detail, fix, notes });
 
   // ---- 1. environment: doctor rows, with exact fix steps for missing credentials ----
   const dr = run(process.execPath, [CA_MJS, 'doctor', '--json', repo], { timeout: 45000 });
   let docChecks = null;
   try { docChecks = JSON.parse(dr.stdout || '').checks; } catch {}
   if (!Array.isArray(docChecks) || !docChecks.length) {
-    add(envRows, 'doctor', 'fail', `could not run doctor: ${oneLine(dr.stderr || dr.error?.message || 'no JSON output', 160)}`, `node ca.mjs doctor --json ${repo}`);
+    add(envRows, 'doctor', 'fail', `could not run doctor: ${String(dr.stderr || dr.error?.message || 'no JSON output').trim()}`, `node ca.mjs doctor --json ${repo}`);
   } else {
     const credFix = (what) => [`run: ca auth   (opens a local form for the human; then: ca auth --wait)`, `${what} at ${PORTAL}`].join('\n');
     for (const c of docChecks) {
@@ -120,11 +143,11 @@ export default async function onboard(args) {
       if (!doFix && interactive) doFix = await confirm(`${isRepo ? 'Create the first (empty) commit' : 'Run git init and create the first (empty) commit'} in ${repo}?`);
       if (doFix) {
         let err = '';
-        if (!isRepo) { const r = git(repo, 'init'); if (r.status !== 0) err = oneLine(r.stderr, 160); }
+        if (!isRepo) { const r = git(repo, 'init'); if (r.status !== 0) err = String(r.stderr || '').trim(); }
         if (!err) {
           let c = git(repo, 'commit', '--allow-empty', '-m', 'first commit');
           if (c.status !== 0) c = git(repo, '-c', 'user.email=ca@localhost', '-c', 'user.name=ca', 'commit', '--allow-empty', '-m', 'first commit');
-          if (c.status !== 0) err = oneLine(c.stderr, 160);
+          if (c.status !== 0) err = String(c.stderr || '').trim();
         }
         if (err) add(repoRows, 'git repo', 'fail', `git init/commit failed: ${err}`, cmd);
         else add(repoRows, 'git repo', 'fixed', isRepo ? 'created the first (empty) commit' : 'git init + first (empty) commit');
@@ -165,10 +188,10 @@ export default async function onboard(args) {
     add(harnessRows, 'harness', 'warn', 'no harness detected (no .kiro, .cursor, .claude or CLAUDE.md, .codex or AGENTS.md, .vscode, opencode.json)', `ca onboard --harness <${HARNESSES.join('|')}>`);
   } else {
     add(harnessRows, 'harness', 'ok', `${harness} (${via})`);
-    const setupArgs = [CA_MJS, 'setup', harness, repo, ...(dry ? ['--dry-run'] : [])];
+    const setupArgs = [CA_MJS, 'setup', harness, repo, ...(dry ? ['--dry-run'] : []), ...(scope === 'repo' ? [] : ['--user'])];
     if (dry) {
       const r = run(process.execPath, setupArgs, { timeout: 30000 });
-      if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} --dry-run exited ${r.status ?? '?'}: ${oneLine(r.stderr || r.stdout, 180)}`, `run node ca.mjs setup ${harness} ${repo}`);
+      if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} --dry-run exited ${r.status ?? '?'}: ${String(r.stderr || r.stdout || '').trim()}`, `run node ca.mjs setup ${harness} ${repo}`);
       else {
         const planned = (r.stdout || '').split(/\r?\n/).map((l) => l.trim())
           .filter((l) => { const lo = l.toLowerCase(); return lo === repo.toLowerCase() || lo.startsWith(repo.toLowerCase() + path.sep); });
@@ -179,49 +202,78 @@ export default async function onboard(args) {
       if (!doFix && interactive) doFix = await confirm(`Run ca setup ${harness} for ${repo} (writes the MCP server and rules config)?`);
       if (doFix) {
         const r = run(process.execPath, setupArgs, { timeout: 30000 });
-        if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} exited ${r.status ?? '?'}: ${oneLine(r.stderr || r.stdout, 180)}`, `run node ca.mjs setup ${harness} ${repo}`);
+        if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} exited ${r.status ?? '?'}: ${(r.stderr || r.stdout || '').trim()}`, `run node ca.mjs setup ${harness} ${repo}${scope === 'repo' ? '' : ' --user'}`);
         else {
           const lines = (r.stdout || '').split(/\r?\n/).filter(Boolean);
           const acts = lines.map((l) => l.match(/^(wrote|updated|unchanged) (.+)$/)).filter(Boolean);
-          // "restart ..." notes repeat the Next line; paths inside the repo are shown relative.
-          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l) && !/^\w+: restart /.test(l));
-          const rel = (p) => { const r = path.relative(repo, p); return r && !r.startsWith('..') && !path.isAbsolute(r) ? r : p; };
-          const detail = [acts.map((m) => `${m[1]} ${rel(m[2])}`).join(', '), ...notes.map((n) => oneLine(n, 140))].filter(Boolean).join('; ');
-          add(harnessRows, 'harness setup', acts.some((m) => m[1] !== 'unchanged') ? 'fixed' : 'ok', detail || `ca setup ${harness} ran`);
+          // The detail is only the file actions; setup notes are kept apart and printed on their own.
+          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l));
+          const rel = (p) => {
+            const rr = path.relative(repo, p);
+            if (rr && !rr.startsWith('..') && !path.isAbsolute(rr)) return rr;
+            const h = os.homedir();
+            const rp = path.resolve(p), rh = path.resolve(h);
+            if (rp === rh) return '~';
+            if (rp.startsWith(rh + path.sep)) return '~/' + path.relative(rh, rp).replace(/\\/g, '/');
+            return p;
+          };
+          const detail = acts.map((m) => `${m[1]} ${rel(m[2])}`).join(', ');
+          add(harnessRows, 'harness setup', acts.some((m) => m[1] !== 'unchanged') ? 'fixed' : 'ok', detail || `ca setup ${harness} ran`, '', notes);
         }
       } else add(harnessRows, 'harness setup', 'planned', `ca setup ${harness} ${repo} writes the MCP server and rules config`, 'ca onboard --yes');
     }
   }
 
   // ---- 4. smoke test: only with --smoke, never by default ----
+  const smokeBase = smokeBaseDir();
   if (!smoke) add(smokeRows, 'smoke test', 'skipped', 'not requested; ca onboard --smoke runs a throwaway probe lane');
-  else if (dry) add(smokeRows, 'smoke test', 'skipped', 'dry run: no lane started');
+  else if (dry) add(smokeRows, 'smoke test', 'planned', `dry run: would run a probe lane in ${smokeBase}`, 'ca onboard --smoke --yes');
   else {
-    const base = pickSmokeBase();
-    if (!base) add(smokeRows, 'smoke test', 'warn', 'no writable trusted folder for a throwaway repo (tried ~/.t3/scratch, security.trustedFolders, the temp dir)', 'add a trusted folder (ca onboard --yes) and rerun with --smoke');
+    let err = '';
+    try {
+      fs.mkdirSync(smokeBase, { recursive: true });
+      // Keep only the 3 newest smoke dirs (only ca-smoke-<digits> names are ours to remove).
+      const olds = fs.readdirSync(smokeBase).filter((n) => /^ca-smoke-\d+$/.test(n))
+        .map((n) => ({ n, t: Number(n.slice('ca-smoke-'.length)) })).sort((a, b) => b.t - a.t);
+      for (const x of olds.slice(3)) fs.rmSync(path.join(smokeBase, x.n), { recursive: true, force: true });
+    } catch (e) { err = e.message; }
+    if (err) add(smokeRows, 'smoke test', 'fail', `could not prepare ${smokeBase}: ${err}`, '');
     else {
-      const dir = path.join(base, `ca-smoke-${Math.floor(Date.now() / 1000)}`);
-      let err = '';
+      // The base must be trusted, like the repo; --yes (or the y/N prompt) adds it.
+      let doTrust = yes;
+      if (!doTrust && interactive) doTrust = await confirm(`Add ${smokeBase} to the CodeArts trusted folders?`);
+      if (doTrust && !addTrusted(smokeBase)) doTrust = false;
+      const dir = path.join(smokeBase, `ca-smoke-${Math.floor(Date.now() / 1000)}`);
+      let perr = '';
       try {
         fs.mkdirSync(dir, { recursive: true });
-        if (git(dir, 'init').status !== 0) err = 'git init failed';
-        if (!err) {
+        if (git(dir, 'init').status !== 0) perr = 'git init failed';
+        if (!perr) {
           let c = git(dir, 'commit', '--allow-empty', '-m', 'init');
           if (c.status !== 0) c = git(dir, '-c', 'user.email=ca@localhost', '-c', 'user.name=ca', 'commit', '--allow-empty', '-m', 'init');
-          if (c.status !== 0) err = oneLine(c.stderr, 140);
+          if (c.status !== 0) perr = String(c.stderr || '').trim();
         }
-        if (!err) {
+        if (!perr) {
           fs.mkdirSync(path.join(dir, 'tasks'), { recursive: true });
           fs.writeFileSync(path.join(dir, 'tasks', 'probe.md'), 'Run `git log --oneline -1` with your bash tool once, reply with its output.\n');
         }
-      } catch (e) { err = e.message; }
-      if (err) add(smokeRows, 'smoke test', 'fail', `could not prepare ${dir}: ${err}`);
+      } catch (e) { perr = e.message; }
+      if (perr) add(smokeRows, 'smoke test', 'fail', `could not prepare ${dir}: ${perr}`, '');
       else {
+        const laneId = `${path.basename(dir)}--probe`;
         const t0 = Date.now();
         const r = run(process.execPath, [CA_MJS, 'lane', dir, 'probe'], { timeout: 180000, env: { ...process.env, NO_REVIEW: '1' } });
         const took = dur(Date.now() - t0);
-        if (r.status === 0) add(smokeRows, 'smoke test', 'ok', `probe lane done in ${took} (${dir})`);
-        else add(smokeRows, 'smoke test', 'fail', `probe lane failed (exit ${r.status ?? '?'}) in ${took}: ${oneLine((r.stdout || '').split(/\r?\n/).filter(Boolean).slice(-3).join(' | '), 180)}`, `see ${path.join(dir, 'tasks', 'probe.lane')}`);
+        if (r.status === 0) {
+          run(process.execPath, [CA_MJS, 'ack', laneId, '--note', 'onboard smoke test'], { timeout: 30000 });
+          add(smokeRows, 'smoke test', 'ok', `probe lane done in ${took} (${dir})`);
+        } else if (r.status === 3) {
+          const reason = authReason(path.join(dir, 'tasks', 'probe.lane', 'summary.md')) || finishedReason(path.join(dir, 'tasks', 'probe.lane', 'live.log'));
+          add(smokeRows, 'smoke test', 'fail', `keys rejected: ${reason}`, 'ca auth --force (re-enter the keys), then ca onboard --smoke');
+        } else {
+          const reason = finishedReason(path.join(dir, 'tasks', 'probe.lane', 'live.log'));
+          add(smokeRows, 'smoke test', 'fail', reason, `ca tail ${laneId}`);
+        }
       }
     }
   }
@@ -232,22 +284,28 @@ export default async function onboard(args) {
   const ready = fails === 0;
   const next = [];
   if (!harness) next.push(`ca onboard --harness <${HARNESSES.join('|')}>`);
-  else next.push(HARNESS_NEXT[harness]);
+  else next.push(scope === 'repo' ? HARNESS_NEXT[harness] : HARNESS_NEXT_USER[harness]);
   next.push(`Dashboard: ${DASH}`);
 
-  if (asJson) console.log(JSON.stringify({ harness, repo, ready, steps, next }, null, 2));
-  else {
+  if (asJson) {
+    // JSON details may be shortened; the text output below never truncates.
+    const jsonSteps = steps.map((s) => ({ name: s.name, status: s.status, detail: oneLine(s.detail, 200), fix: s.fix, notes: s.notes || [] }));
+    console.log(JSON.stringify({ harness, repo, scope, ready, steps: jsonSteps, next }, null, 2));
+  } else {
     const L = (s) => process.stdout.write(s + '\n');
     const W = 7;
     const show = { ok: 'ok', warn: 'warn', fail: 'FAIL', fixed: 'fixed', planned: 'planned', skipped: 'skipped' };
     L('CodeArts lanes onboarding');
     L(`repo: ${repo}${harness ? `  harness: ${harness}` : ''}`);
+    L(`scope: ${scope === 'repo' ? 'this repo' : 'machine-wide'}`);
+    const indented = (v) => { for (const ln of String(v).split(/\r?\n/)) L(`${' '.repeat(W + 4)}${ln}`); };
     const section = (n, title, rows) => {
       L('');
       L(`${n}. ${title}`);
       for (const r of rows) {
         L(`  ${(show[r.status] || r.status).padEnd(W)}  ${r.name}${r.detail ? `: ${r.detail}` : ''}`);
-        if (r.fix && ['fail', 'warn', 'planned'].includes(r.status)) for (const ln of String(r.fix).split(/\r?\n/)) L(`${' '.repeat(W + 4)}${ln}`);
+        if (r.notes && r.notes.length) for (const note of r.notes) indented(note);
+        if (r.fix && ['fail', 'warn', 'planned'].includes(r.status)) indented(r.fix);
       }
     };
     section(1, 'Environment', envRows);

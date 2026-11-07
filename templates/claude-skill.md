@@ -16,9 +16,12 @@ Use the `codearts` MCP server tools: `mcp__codearts__ca_doctor`, `ca_init`, `ca_
 (all prefixed `mcp__codearts__`). Below they are named without the prefix.
 
 If those tools are missing, the server is not connected: tell the user to run
-`ca setup claude` in this repo and restart Claude Code (or `/mcp` to reconnect). Until then the
-same steps work from the shell with the `ca` CLI (`ca doctor`, `ca init`, `ca lane --detach`,
-`ca wait`, `ca summary`); see `ca --help`.
+`ca onboard --yes --harness claude` once and restart Claude Code (or `/mcp` to reconnect). Until
+then the same steps work from the shell with the `ca` CLI (`ca doctor`, `ca init`,
+`ca lane --detach`, `ca wait`, `ca summary`); see `ca --help`.
+
+A repo that is not a git repo yet is fine: `ca onboard --yes --harness claude` (or `git init`
+plus an empty first commit) fixes it, and `ca lane` trusts the folder by itself.
 
 Never print, log or commit credentials (`CODEARTS_CLI_AK`, `CODEARTS_CLI_SK`, `MAAS_API_KEY`).
 
