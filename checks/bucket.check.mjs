@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-bucket-'));
 const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg, { recursive: true });
-const env = { ...process.env, CA_REGISTRY: reg, CA_DASH: '0', CA_RESUME_DRY: '1', CODEARTS_EXE: path.join(tmp, 'no-codearts.exe') };
+const env = { ...process.env, CA_REGISTRY: reg, CA_DASH: '0', CA_RESUME_DRY: '1', CODEARTS_EXE: path.join(tmp, process.platform === 'win32' ? 'no-codearts.exe' : 'no-codearts') };
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 240) : ''}`);
 const norm = (p) => path.resolve(String(p)).toLowerCase();
 // os.tmpdir() may use 8.3 short names while git reports long ones: compare real paths.
