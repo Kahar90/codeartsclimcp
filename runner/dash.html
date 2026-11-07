@@ -653,6 +653,7 @@ function renderPlan(p) {
         ${contLine(l)}
         <div class="lane-steps"><span>${l.progress?.total ? `${l.progress.done}/${l.progress.total} steps` : 'no numbered steps'}</span>${prog(l.progress, l.result)}</div>
         ${curBand(l)}${stepsBlock(l)}
+        ${l.suggest ? ctlBar(l, true) : ''}
       </div></div>`;
   const waves = p.waves.map((w, i) => {
     const key = `${p.id}::${i}`, collapsed = waveCollapsed.has(key);
