@@ -166,7 +166,7 @@ function caEnv(extra = {}) {
     KERNEL_CONFIG_DIR: CA_HOME, OPENCODE_CONFIG: path.join(CA_HOME, 'codearts_cli.json'),
     OPENCODE_CONFIG_FILE: 'codearts_cli.json,codearts_cli.jsonc', OPENCODE_CHANNEL: 'latest', PLUGIN_ENV: 'hc',
     OPENCODE_DISABLE_MODELS_FETCH: '1', OPENCODE_DISABLE_AUTOUPDATE: 'true', CODEARTS_DISABLE_AUTO_UPDATE: 'true',
-    OMO_SEND_ANONYMOUS_TELEMETRY: '0', CODEAGENT_USE_MESSAGE_FEEDBACK: 'false', NODE_TLS_REJECT_UNAUTHORIZED: '0',
+    OMO_SEND_ANONYMOUS_TELEMETRY: '0', CODEAGENT_USE_MESSAGE_FEEDBACK: 'false',
     CODEARTS_CLI_AK: userEnv('CODEARTS_CLI_AK'), CODEARTS_CLI_SK: userEnv('CODEARTS_CLI_SK'),
     ...maasEnv(), ...extra,
   };
@@ -1563,10 +1563,10 @@ function cmdDash(args) {
   // One JSON reader for every POST body: invalid JSON or a body over 64 KB is a client error, not a 500.
   const MAX_BODY = 64 * 1024;
   const readJson = (req) => new Promise((resolve, reject) => {
-    let b = ''; let size = 0; let done = false;
+    const parts = []; let size = 0; let done = false; // Buffers: a multibyte char may span two chunks
     const fail = (code) => { if (done) return; done = true; const e = new Error(code === 413 ? 'body too large' : 'invalid JSON body'); e.statusCode = code; reject(e); };
-    req.on('data', (c) => { if (done) return; size += c.length; if (size > MAX_BODY) return fail(413); b += c; });
-    req.on('end', () => { if (done) return; done = true; try { resolve(b.trim() ? JSON.parse(b) : {}); } catch { const e = new Error('invalid JSON body'); e.statusCode = 400; reject(e); } });
+    req.on('data', (c) => { if (done) return; size += c.length; if (size > MAX_BODY) return fail(413); parts.push(c); });
+    req.on('end', () => { if (done) return; done = true; const b = Buffer.concat(parts).toString('utf8'); try { const v = b.trim() ? JSON.parse(b) : {}; if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not an object'); resolve(v); } catch { const e = new Error('invalid JSON body'); e.statusCode = 400; reject(e); } });
     req.on('error', () => fail(400));
   });
   const readBody = async (req) => { try { return { body: await readJson(req) }; } catch (e) { return { error: { error: e.statusCode === 413 ? 'request body too large' : 'invalid JSON body' }, code: e.statusCode || 400 }; } };

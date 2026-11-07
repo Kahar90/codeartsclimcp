@@ -87,6 +87,16 @@ try {
   check('bad JSON body gives 400, not 500', x.code === 400, `${x.code} ${x.body.slice(0, 80)}`);
   x = await req('POST', '/api/lane/look-repo--ui/kick', { body: '[' });
   check('bad JSON on kick gives 400', x.code === 400, `${x.code}`);
+  x = await req('POST', '/api/lane/look-repo--ui/steer', { body: 'null' });
+  check('a JSON null body gives 400, not 500', x.code === 400, `${x.code}`);
+  // a multibyte character split across two TCP writes must survive
+  const before = inbox('ui');
+  const raw = Buffer.from(JSON.stringify({ text: 'café 日本' }), 'utf8'); const cut = raw.indexOf(0xc3) + 1;
+  x = await new Promise((res) => {
+    const rq = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/api/lane/look-repo--ui/steer', headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json', 'content-length': raw.length } }, (rs) => { let d = ''; rs.on('data', (c) => (d += c)); rs.on('end', () => res({ code: rs.statusCode, body: d })); });
+    rq.on('error', (e) => res({ code: 0, body: String(e) })); rq.write(raw.subarray(0, cut)); setTimeout(() => { rq.write(raw.subarray(cut)); rq.end(); }, 150); });
+  const steered = (() => { try { const d = path.join(repo3, 'tasks', 'ui.lane', 'inbox'); return fs.readdirSync(d).map((f) => fs.readFileSync(path.join(d, f), 'utf8')).join('\n'); } catch { return ''; } })();
+  check('a multibyte steer split across TCP chunks arrives intact', x.code === 200 && inbox('ui') === before + 1 && steered.includes('café 日本'), `${x.code} ${x.body.slice(0, 80)}`);
   x = await req('POST', '/api/lane/look-repo--a/steer', { body: JSON.stringify({ text: 'hi' }) });
   check('ambiguous lane in the dashboard is refused (409), nothing steered', x.code === 409 && inbox('api') === 1 && inbox('api-tests') === 0, `${x.code} ${x.body.slice(0, 120)}`);
   x = await req('GET', '/api/lane/api/detail');
