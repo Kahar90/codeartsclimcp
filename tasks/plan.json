@@ -1,68 +1,28 @@
 {
-  "title": "Dashboard reliability: every lane in a plan, stale items",
-  "goal": "The visualizer is reliable: every lane belongs to a plan (the runner enforces it), the Office always shows the plan that is working and switches to new plans and newly running lanes; stale Needs-you items are easy to clear.",
+  "title": "Updates and world-class polish",
+  "goal": "Installed users learn about new versions and can update from the CLI, the dashboards and MCP; both dashboards feel finished: one motion system, floating surfaces that never leave the screen, responsive controls, phone bottom sheet.",
   "lead": "Claude Opus 5.5",
-  "status": "done",
-  "now": "Closed: drift and planbind merged; checks green on master",
+  "status": "running",
+  "now": "Wave 1 starting: update, polish-lanes, polish-office",
   "waves": [
-    {
-      "name": "Wave 1 · Stale items and plan binding",
-      "lanes": [
-        "drift",
-        "planbind"
-      ],
-      "note": "drift: age, Older than 2 days group, Mark all handled, ca ack --stale. planbind: the runner puts every lane in a plan; the Office follows the working plan. Contract checks: drift, planbind."
-    }
+    { "name": "Wave 1 · Update check and polish", "lanes": ["update", "polish-lanes", "polish-office"], "note": "Contracts: checks/update.check.mjs, checks/polish.check.mjs (--only office | lanes,update). No shared files between lanes." }
   ],
   "lanes": [
-    {
-      "task": "drift",
-      "repo": "../ca-office-wt-drift",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "Stale Needs-you items: age, Older than 2 days group, Mark all handled, ca ack --stale, MCP ca_ack stale",
-      "files": [
-        "runner/dash.html",
-        "runner/ca.mjs",
-        "runner/mcp.mjs"
-      ]
-    },
-    {
-      "task": "planbind",
-      "repo": "../ca-office-wt-planbind",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "Every lane belongs to a plan (runner creates or extends the repo plan); the Office shows the working plan and follows new plans and newly running lanes",
-      "files": [
-        "runner/ca.mjs",
-        "runner/onboard.mjs",
-        "runner/office.html",
-        "checks/visibility.check.mjs"
-      ]
-    }
+    { "task": "update", "repo": "../ca-office-wt-update", "model": "maas/deepseek-v4.1-flash", "kind": "code", "why": "ca update --check, daily notice, doctor row, /api/update with self-restart, MCP ca_update_check/ca_update, release tooling", "files": ["runner/lifecycle.mjs", "runner/ca.mjs", "runner/mcp.mjs", "tools/release.mjs", "README.md", "docs/workflow.md"] },
+    { "task": "polish-lanes", "repo": "../ca-office-wt-polish-lanes", "model": "maas/deepseek-v4.1-flash", "kind": "art", "why": "Shared motion tokens, CAUI.place/track/toast, update pill + popover, Control room and lane detail polish, animated disclosure", "files": ["runner/assets/workshop.css", "runner/assets/workshop.js", "runner/dash.html"] },
+    { "task": "polish-office", "repo": "../ca-office-wt-polish-office", "model": "maas/deepseek-v4.1-flash", "kind": "art", "why": "Agent window always fits and follows resizes, phone bottom sheet, open/close motion for every floating surface, plate states", "files": ["runner/office.html"] }
   ],
   "next": [
-    "Merge drift and planbind, run every check",
-    "Real test: start a lane with no plan and one with a closed plan, watch the Office and Lanes",
-    "Push, sync the skill, screenshots of the Office and Control room"
+    "Merge the three lanes, run every check on main",
+    "Lead eye review: screenshots of both pages at 5 viewports, fix what looks off, iterate",
+    "Release 0.3.0: changelog, version bump, sync the skill"
   ],
   "decisions": [
-    {
-      "at": "2026-11-08T00:20:00.000Z",
-      "text": "User: lanes always belong to a plan; showing running lanes outside the shown plan is confusing. Reverting that; the runner enforces plan membership instead, and the Office follows the working plan."
-    },
-    {
-      "at": "2026-11-08T00:20:30.000Z",
-      "text": "Root cause of the missed lane: the lead started drift without a plan right after closing the previous one. Lead mistake, now made impossible by the runner."
-    },
-    {
-      "at": "2026-11-07T17:23:26.923Z",
-      "text": "drift merged (ready, 0 fix rounds); lead fixed the fractional older_than_h rounding."
-    },
-    {
-      "at": "2026-11-07T18:07:51.522Z",
-      "text": "Plan closed: drift and planbind merged; checks green on master."
-    }
+    { "at": "2026-11-08T01:10:00.000Z", "text": "Update source: package.json and CHANGELOG.md on GitHub main via raw.githubusercontent.com (no API rate limit); notify only, never auto-install; daily cached check, CA_NO_UPDATE_CHECK=1 opts out." },
+    { "at": "2026-11-08T01:10:30.000Z", "text": "Polish contract measured on master first: agent window ran past the bottom at 1280x720 and 1024x640, stayed off screen after a resize, phone tap targets under 32 px." }
   ],
   "risks": [
-    "Two lanes edit runner/ca.mjs in different functions (drift: cmdAck and help; planbind: runLane and plan helpers): the lead resolves merges."
+    "Dashboard self-restart after POST /api/update on Windows (port release timing).",
+    "Animations replaying on every poll re-render: the check asserts none do."
   ]
 }
