@@ -5,7 +5,7 @@ Lanes page home into a Control room that answers in two seconds: what needs me, 
 what ended. Every lane already has from the server: bucket (attention | running | done | ended), bucketWhy (short
 reason), project {key, name}, health, actions, suggest, why, tokens, progress, startedAt, finishedAt.
 GET /api/overview returns { counts, lanes }.
-Files: runner/dash.html, runner/ca.mjs (only the parts named below), runner/office.html (step 7 only),
+Files: runner/dash.html, runner/ca.mjs (only the parts named below), runner/mcp.mjs (ca_lead_tokens), runner/office.html,
 checks/lanes.check.mjs, new checks/overview.check.mjs. Shared helpers in runner/assets/workshop.js: read, do not edit.
 Do the steps in order. After each step that works, run its checks, then
 `git add -A && git commit -m "step N: <summary>"` (N = the step number). Do not ask questions; decide and keep going.
@@ -51,7 +51,18 @@ Make a change, run the check, read its output. Do not reason for a long time wit
    D--Coding-codearts-testing) and prints the per-model totals. UI: a "Tokens by model" table
    on the plan home and the Control room (model short name, lead or worker tag, total, in / out / cache) sorted by
    total, plus the same per lane in lane detail; the Office top bar Tokens pill title lists the per-model lines.
-   Add asserts to checks/overview.check.mjs with a small fake transcript (duplicate message ids counted once). Commit.
+   Unknown is never zero (many harnesses cannot report usage): every by-model entry carries `source`
+   ('runner' = counted from CodeArts events, 'transcript' = leadSession, 'reported' = leadTokens or ca lead-tokens
+   --set, 'none'). A plan with no lead data still lists its lead as one row: the model from plan.lead (or "lead"),
+   `source: 'none'`, total null, shown as "not reported" with a hint "ca lead-tokens --set ... or leadTokens in
+   plan.json". A worker lane whose steps ran but whose provider returned no usage (steps > 0 and every count 0)
+   gets `source: 'none'` too and shows "not reported", not 0. Plan totals: `tokens.total` sums known entries only and
+   `tokens.complete` is false when any entry is 'none'; the UI then labels the total "Known 7.4M" with a title
+   naming what is missing. Harness-neutral reporting: `ca lead-tokens --set <model> --input N --output N
+   [--cache-read N] [--cache-write N] [--plan id]` writes leadTokens (adds to an existing entry with --add), and
+   runner/mcp.mjs gets a `ca_lead_tokens` tool with the same fields so Kiro, Cursor, Codex or any MCP lead can report.
+   Add asserts to checks/overview.check.mjs with a small fake transcript (duplicate message ids counted once), a plan
+   with no lead data (row with source none, complete false), --set and --add, and a zero-usage worker lane. Commit.
 8. Test hook and checks: window.__lanes.state() adds overview { counts, group, filter, sections: [{ bucket, ids }],
    projects: [ids], title: document.title, banner: bool }. Extend the ?demo=1 fixture with bucket, bucketWhy and
    project on every lane (at least two projects, one lane per bucket, one seen done lane) and demo answers for
