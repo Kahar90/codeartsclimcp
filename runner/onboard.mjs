@@ -28,6 +28,7 @@ const INSTALL = process.env.CA_INSTALL_CMD
     ? { cmd: 'powershell', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `irm ${INSTALL_BASE}/install.ps1 | iex`], show: `irm ${INSTALL_BASE}/install.ps1 | iex` }
     : { cmd: 'bash', args: ['-c', `curl -fsSL ${INSTALL_BASE}/install.sh | bash`], show: `curl -fsSL ${INSTALL_BASE}/install.sh | bash` };
 const SETTINGS = process.env.CA_SETTINGS || path.join(CA_HOME, 'cli-data', 'settings.json');
+const STATE_DIR = path.join(os.homedir(), '.config', 'codearts-lanes');
 const HARNESSES = ['kiro', 'cursor', 'claude', 'codex', 'vscode', 'opencode'];
 // Marker -> harness, first match wins (.claude/CLAUDE.md -> claude, .codex/AGENTS.md -> codex).
 const MARKERS = [['kiro', '.kiro'], ['cursor', '.cursor'], ['claude', '.claude'], ['claude', 'CLAUDE.md'], ['opencode', 'opencode.json'], ['opencode', '.opencode'], ['codex', '.codex'], ['codex', 'AGENTS.md'], ['vscode', '.vscode']];
@@ -102,6 +103,19 @@ const finishedReason = (file) => {
 // Base dir for the throwaway smoke repo: CA_SMOKE_DIR or ~/.codeartsdoer/ca-smoke. Never the
 // repo, one of its parents or ~/.t3/scratch.
 const smokeBaseDir = () => process.env.CA_SMOKE_DIR || path.join(CA_HOME, 'ca-smoke');
+
+// Record the CodeArts version that just passed the smoke test, so `ca doctor` can flag a version
+// installed later that was never tested. Best effort: a missing exe or output writes nothing.
+function recordSmoke() {
+  try {
+    const r = run(EXE, ['--version'], { timeout: 20000, windowsHide: true });
+    const version = (String(r.stdout || '').split(/\r?\n/).find((l) => l.trim())
+      || String(r.stderr || '').split(/\r?\n/).find((l) => l.trim()) || '').trim();
+    if (!version) return;
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(STATE_DIR, 'smoke.json'), JSON.stringify({ version, at: new Date().toISOString() }, null, 2) + '\n');
+  } catch {}
+}
 
 export default async function onboard(args) {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
@@ -273,6 +287,7 @@ export default async function onboard(args) {
         const took = dur(Date.now() - t0);
         if (r.status === 0) {
           run(process.execPath, [CA_MJS, 'ack', laneId, '--note', 'onboard smoke test'], { timeout: 30000 });
+          recordSmoke();
           add(smokeRows, 'smoke test', 'ok', `probe lane done in ${took} (${dir})`);
         } else if (r.status === 3) {
           const reason = authReason(path.join(dir, 'tasks', 'probe.lane', 'summary.md')) || finishedReason(path.join(dir, 'tasks', 'probe.lane', 'live.log'));
@@ -367,10 +382,10 @@ function askHidden(prompt) {
 // Store one user-level env var via PowerShell. The secret travels in the child process
 // env (CA_ONBOARD_SECRET), never on the command line, and is never printed or logged.
 function storeUserEnv(name, value) {
-  const r = run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+  const r = process.platform === 'win32' && run('powershell', ['-NoProfile', '-NonInteractive', '-Command',
     `[Environment]::SetEnvironmentVariable('${name}', $env:CA_ONBOARD_SECRET, 'User')`],
     { env: { ...process.env, CA_ONBOARD_SECRET: value }, timeout: 20000 });
-  return r.status === 0;
+  return !!r && r.status === 0;
 }
 
 // Missing CodeArts CLI: run the official installer with --yes (or after y/N on a TTY),
