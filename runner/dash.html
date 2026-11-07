@@ -48,6 +48,8 @@ a { text-decoration: none }
 .plan-sub { color: var(--muted); margin: 7px 0 0; font-size: 13.5px }
 .goal { max-width: 900px; margin: 12px 0 0; font-size: 14.5px; color: var(--fg) }
 .plan-path { color: var(--faint); font: 12px var(--mono); margin: 9px 0 0; overflow-wrap: anywhere }
+.plan-tok { color: var(--muted); font: 12px var(--mono); margin: 6px 0 0 }
+.lane-tok { color: var(--faint); font: 12px var(--mono); margin-top: 3px }
 .leadband { display: flex; align-items: center; gap: 14px; border: 1.5px solid var(--sel); background: var(--panel); border-radius: var(--radius); padding: 12px 16px; margin: 18px 0 4px }
 .leadband .who { font-weight: 700; color: var(--sel-ink); white-space: nowrap }
 .leadband .vdiv { width: 1px; align-self: stretch; background: var(--border-2); flex: none }
@@ -558,7 +560,7 @@ function renderRail() {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
       <div class="rail-row">${dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}</div>
-      <div class="rail-sub">${esc(planSummary(p))}</div></div>`;
+      <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
   h += '<div class="rail-div"></div><div class="rail-h">' + (plans.length ? 'Other lanes' : 'Lanes') + '</div>';
@@ -602,6 +604,7 @@ function renderPlan(p) {
       <div class="lane-main">
         <a class="lane-name" href="#/lane/${esc(l.id)}">${esc(l.task)}</a>
         <div class="lane-meta">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
+        <div class="lane-tok" title="${esc(CAUI.tokenDetail(l.tokens))}">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</div>
         ${contLine(l)}
         <div class="lane-steps"><span>${l.progress?.total ? `${l.progress.done}/${l.progress.total} steps` : 'no numbered steps'}</span>${prog(l.progress, l.result)}</div>
         ${curBand(l)}${stepsBlock(l)}
@@ -616,6 +619,8 @@ function renderPlan(p) {
   const next = p.next.length ? `<ul class="plain">${p.next.map((n) => `<li class="${n.done ? 'st-done' : 'st-pending'}"><span class="ic">${n.done ? '&#10003;' : '&#9675;'}</span><span style="min-width:0">${esc(n.text)}</span></li>`).join('')}</ul>` : '<div class="small">Nothing listed</div>';
   const risks = p.risks.length ? `<h4 style="margin-top:14px">Risks</h4><ul class="plain">${p.risks.map((r) => `<li class="risk"><span class="ic">!</span><span style="min-width:0">${esc(r)}</span></li>`).join('')}</ul>` : '';
   const dec = p.decisions.length ? `<ul class="plain dec">${[...p.decisions].reverse().map((d) => `<li><span class="at">${esc(clock(d.at))}</span><span class="dv"></span><span class="tx">${esc(d.text)}</span></li>`).join('')}</ul>` : '<div class="small">None yet</div>';
+  const pRows = CAUI.tokenSplit(p.tokensBy);
+  const planTokTitle = pRows.map((r) => `${r.label} ${CAUI.fmtTokens(r.total)}`).join(' / ');
   $('view').innerHTML = `<div class="pad">
     <div class="plan-head">
       <h1>${esc(p.title)}</h1>
@@ -623,6 +628,7 @@ function renderPlan(p) {
       ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
+      <div class="plan-tok" title="${esc(planTokTitle)}">Tokens ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))}</div>
     </div>
     ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${p.closed ? 'Outcome' : 'Lead now'}</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
     ${waves}
