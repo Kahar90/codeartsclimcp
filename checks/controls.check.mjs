@@ -61,6 +61,16 @@ if (C) {
   check('no resume when the repo or brief is gone', !gone.actions.includes('resume'), JSON.stringify(gone));
 }
 
+if (C && C.laneKind) {
+  const K = (task, brief = '', files = [], override = '') => C.laneKind({ task, brief, files, override });
+  check('laneKind: UI work is art', K('office-crowd', 'Office view hot desks, sprites', ['runner/office.html']) === 'art' && K('lanes-ctl', 'Lanes dashboard page', ['runner/dash.html']) === 'art');
+  check('laneKind: runner work is code', K('controls', 'token counters, kick and resume in the supervisor', ['runner/ca.mjs']) === 'code');
+  check('laneKind: tests and reviews are review', K('auth-tests', 'add regression tests', ['checks/auth.check.mjs']) === 'review');
+  check('laneKind: README work is docs', K('readme-polish', 'update the README guide', ['README.md']) === 'docs');
+  check('laneKind: unclear lanes are code', K('x', '1. do the thing') === 'code');
+  check('laneKind: KIND line and plan override win', K('office-crowd', 'KIND: docs\n1. sprites') === 'docs' && K('controls', '', [], 'art') === 'art');
+} else check('controls.mjs exports laneKind', false);
+
 // ---------- fake lanes ----------
 const repo = path.join(tmp, 'demo-repo'); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
 spawnSync('git', ['init', '-q'], { cwd: repo }); spawnSync('git', ['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repo });

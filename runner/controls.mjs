@@ -56,3 +56,35 @@ export function laneBucket({ s, alive, health }) {
   if (/^quiet/i.test(health)) return { bucket: 'running', reason: `quiet ${idleMin()}m` };
   return { bucket: 'running', reason: String(s.activity || health || 'running') };
 }
+
+// What kind of work a lane does, for the Office characters (code: robot, art: painter, review: inspector, docs: writer).
+// An explicit `KIND: <kind>` brief line or a plan lane "kind" wins; otherwise keywords score the task name (x3),
+// the files the lane touched and the first part of the brief. Unclear lanes are code.
+export const LANE_KINDS = ['code', 'art', 'review', 'docs'];
+const KIND_RX = {
+  code: /\b(api|server|cli|runner|backend|supervisor|refactor|parser|database|db|endpoint|worker|engine)\b|\.(m?js|cjs|ts|tsx|jsx|py|rs|go|java|kt|cs|cpp|c|h|rb|php|swift|sh|sql)\b/gi,
+  art: /\b(ui|ux|css|scss|style[sd]?|theme|design|layout|visual|sprites?|art|icons?|svg|png|pixel|office|page|dashboard|frontend|front-end|animation|motion|colou?rs?|html)\b|\.(css|scss|html|svg|png)\b/gi,
+  review: /\b(review|audit|tests?|testing|checks?|qa|verify|verification|lint|bench(mark)?|regression|e2e|smoke|probe)\b|\.(test|spec)\.|checks\//gi,
+  docs: /\b(docs?|readme|guide|documentation|changelog|manual|tutorial|handbook|notes?|write-?up|copy)\b|\.md\b|docs\//gi,
+};
+export function laneKind({ task = '', brief = '', files = [], override = '' } = {}) {
+  const o = String(override || (String(brief).match(/^\s*KIND:\s*(\w+)/m) || [])[1] || '').toLowerCase();
+  if (LANE_KINDS.includes(o)) return o;
+  const name = String(task).replace(/[-_]+/g, ' ');
+  // Every brief has CHECK lines, "run its checks" and a self-check step: that boilerplate says nothing about the work.
+  const body = String(brief).split(/\r?\n/)
+    .filter((l) => !/^\s*(MODEL|REVIEW_MODEL|FALLBACK_MODEL|KIND|CHECK)\s*:|\bchecks?\b.*\b(before each commit|runner also runs|run these)\b|self[- ]check|safety rules|never kill|git commit/i.test(l))
+    .join('\n').replace(/\b(run (its|the|every) checks?|test hook|checks\/[\w.-]+)/gi, '').slice(0, 800);
+  // Lanes add their own check files: count test paths only when the lane touches nothing else.
+  const all = [].concat(files || []); const isTest = (f) => /(^|\/)(checks?|tests?|__tests__)\/|\.(test|spec)\./.test(f);
+  const fileText = (all.every(isTest) ? all : all.filter((f) => !isTest(f))).join(' ');
+  let best = 'code', bestScore = 1; // a kind needs at least 2 points, and more than code itself, to win
+  for (const [k, rx] of Object.entries(KIND_RX)) {
+    const hits = (t) => (String(t).match(rx) || []).length;
+    const n = hits(name), fh = Math.min(hits(fileText), 4), bh = Math.min(hits(body), 4);
+    // the brief text alone only decides when it is strongly one-sided; otherwise the name or the files must agree
+    const score = n || fh ? n * 3 + fh + Math.min(bh, 2) : bh >= 4 ? bh - 1 : 0;
+    if (score > bestScore) { best = k; bestScore = score; }
+  }
+  return best;
+}
