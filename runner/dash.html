@@ -32,7 +32,8 @@ body { margin: 0; overflow: hidden; display: flex; flex-direction: column; }
 .rail-fin:hover { background: var(--panel) }
 .rail-fin.sel { background: var(--sel-bg); border-color: var(--sel) }
 .rail-fin .nm { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere }
-.rail-none { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12.5px; padding: 6px 2px }
+.rail-none { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; color: var(--faint); font-size: 12.5px; padding: 6px 2px }
+.rail-none code { overflow-wrap: anywhere }
 .rail-div { border-top: 1px solid var(--border); margin: 14px 0 2px }
 
 /* ---------- main column ---------- */
@@ -210,9 +211,31 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 /* ---------- onboarding ---------- */
 .cmd { display: flex; align-items: center; gap: 10px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0; cursor: pointer }
 .cmd:hover { border-color: var(--sel) }
-.cmd code { background: none; padding: 0; flex: 1; overflow-wrap: anywhere }
+.cmd code { background: none; padding: 0; flex: 1; min-width: 0; overflow-wrap: anywhere }
 .small { color: var(--muted); font-size: 12.5px }
 .mute { color: var(--muted) }
+.onb-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 9px; border-radius: 999px; border: 1.5px solid currentColor; font-size: 11.5px; font-weight: 650; line-height: 1; white-space: nowrap }
+.onb-chip.ok { color: var(--run) } .onb-chip.warn { color: var(--amber) } .onb-chip.fail { color: var(--bad) }
+.onb-summary { font-size: 13px; font-weight: 650; margin: 0 0 8px }
+.onb-summary.ok { color: var(--run) } .onb-summary.bad { color: var(--bad) }
+.onb-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0 }
+.onb-name { font-weight: 650; flex: 1; min-width: 0; overflow-wrap: anywhere }
+.onb-detail { color: var(--muted); font-size: 12.5px; margin-top: 3px; overflow-wrap: anywhere }
+.onb-fix { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 4px; min-width: 0 }
+.onb-fix code { flex: 1; min-width: 0; font: 11.5px var(--mono); background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 9px; color: var(--sel-ink); white-space: pre-wrap; overflow-wrap: anywhere }
+.onb-tbl { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12.5px }
+.onb-tbl th, .onb-tbl td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere }
+.onb-tbl th { color: var(--faint); font-size: 11px; letter-spacing: .06em; text-transform: uppercase }
+.onb-tbl tr:first-child th { border-top: 0 }
+.onb-tbl td:first-child { font-weight: 650 }
+.onb-harness { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 }
+.onb-hchip { font: inherit; font-size: 12.5px; padding: 4px 11px; border-radius: 999px; border: 1.5px solid var(--border-2); background: transparent; color: var(--muted); cursor: pointer }
+.onb-hchip:hover { border-color: var(--sel); color: var(--fg) }
+.onb-hchip.on { border-color: var(--sel); background: var(--sel-bg); color: var(--fg) }
+#onb-byhand > summary { cursor: pointer; font-weight: 650; font-size: 13px }
+#onb-byhand[open] > summary { margin-bottom: 8px }
+#onboard code { overflow-wrap: anywhere }
+#onboard .box, #onboard ul.plain li > span, #onboard .cmd > *, #onboard .onb-row > * { min-width: 0 }
 
 /* ---------- control room ---------- */
 .cr-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap }
@@ -1156,6 +1179,7 @@ async function post(what, body) { return api(`/api/lane/${encodeURIComponent(rou
 // First-run onboarding panel: shown only while there are no plans and no lanes yet.
 // /api/doctor is cached for 30 s (the poll runs every 2.5 s) and concurrent calls share one request.
 let doctorCache = null, doctorAt = 0, doctorPromise = null;
+let authWaiting = false, authTimer = null, authUrl = '', lastOnbHtml = '';
 async function fetchDoctor() {
   if (doctorCache && Date.now() - doctorAt < 30000) return doctorCache;
   if (!doctorPromise) doctorPromise = (async () => {
@@ -1169,32 +1193,106 @@ async function copyText(t) {
   try { await navigator.clipboard.writeText(t); return true; } catch {}
   try { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch { return false; }
 }
+// The setup prompt a human pastes into their coding agent; the copy box must show it verbatim.
+const ONBOARD_PROMPT = 'Set up CodeArts lanes by following https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md';
+// How to ask for a lane in each harness, shown as a small table under the setup prompt.
+const ASK = [['Claude Code', '/codearts-build <goal>'], ['Kiro', '#codearts-lanes <goal>'], ['Cursor', 'Use CodeArts lanes to <goal>'], ['Codex', 'Use CodeArts lanes to <goal>'], ['opencode', 'Use CodeArts lanes to <goal>'], ['VS Code', 'Use CodeArts lanes to <goal>']];
+// The harness the manual command targets; the chips swap it and the copy box follows.
+let onbHarness = 'claude';
+const onbCmd = () => `ca onboard --yes --harness ${onbHarness} --smoke`;
+// Doctor rows as HTML, shared by the first render and the 5 s refresh while the keys form is open.
+function doctorBox(d) {
+  const rows = Array.isArray(d?.checks) ? d.checks : [];
+  const tone = (s) => s === 'ok' ? 'var(--run)' : s === 'warn' ? 'var(--amber)' : 'var(--bad)';
+  const mark = (s) => `<span class="ic" style="color:${tone(s)}">${s === 'ok' ? '&#10003;' : s === 'warn' ? '!' : '&#10007;'}</span>`;
+  const onbChip = (s) => `<span class="onb-chip ${s === 'ok' ? 'ok' : s === 'warn' ? 'warn' : 'fail'}">${esc(s)}</span>`;
+  const hasCmd = (fix) => /(^|\s)(ca|node|npm|npx|git|powershell|bash)\s|install\.(ps1|sh)/.test(fix || '');
+  const fails = rows.filter((c) => c.status === 'fail').length;
+  const warns = rows.filter((c) => c.status === 'warn').length;
+  const credOk = rows.some((c) => c.name === 'credentials' && c.status === 'ok');
+  const summary = !rows.length ? '' : (fails ? `<div class="onb-summary bad">${fails} to fix${warns ? ` · ${warns} optional` : ''}</div>` : `<div class="onb-summary ok">Ready: everything checks out${warns ? ` · ${warns} optional` : ''}</div>`);
+  const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0;flex:1"><span class="onb-row"><span class="onb-name">${esc(c.name)}</span>${onbChip(c.status)}${c.name === 'credentials' && c.status !== 'ok' ? '<button type="button" class="btn tiny onb-keys">Connect keys</button>' : ''}</span>${c.detail ? `<div class="onb-detail">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="onb-fix"><code>${esc(c.fix)}</code>${hasCmd(c.fix) ? `<button type="button" class="btn tiny onb-copy" data-copy="${esc(c.fix)}">Copy</button>` : ''}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
+  const waiting = authWaiting && !credOk ? `<div class="small onb-waiting" style="margin-top:8px">Waiting for the keys...${authUrl ? ` <a href="${esc(authUrl)}" target="_blank" rel="noopener">Open the keys form</a>` : ''}</div>` : '';
+  return `${summary}${doctorRows}${waiting}`;
+}
+async function freshDoctor() { doctorCache = null; doctorAt = 0; doctorPromise = null; return fetchDoctor(); }
+function stopAuthWait() { if (authTimer) { clearInterval(authTimer); authTimer = null; } }
+function startAuthWait() {
+  stopAuthWait();
+  // Every 5 s: read the doctor afresh (bypass the 30 s cache) and stop once the keys are saved.
+  authTimer = setInterval(async () => {
+    const d = await freshDoctor();
+    const box = document.getElementById('onb-doctor');
+    if (!box) { stopAuthWait(); return; }
+    box.innerHTML = doctorBox(d);
+    const cred = (d?.checks || []).find((c) => c.name === 'credentials');
+    if (cred && cred.status === 'ok') { authWaiting = false; stopAuthWait(); }
+  }, 5000);
+}
+// Connect keys: ask the dashboard to start the local form (runner/auth.mjs), open it in a new tab,
+// then poll the doctor rows until the credentials row is ok. Key values never pass through here.
+async function connectKeys() {
+  const setBtns = (t, dis) => { for (const b of document.querySelectorAll('.onb-keys')) { b.textContent = t; b.disabled = dis; } };
+  setBtns('Opening...', true);
+  // Open the tab now, inside the click: the form URL can take seconds (PowerShell key probes) and a
+  // window.open after that await is blocked as a popup. It is pointed at the form once the URL arrives.
+  let w = null; try { w = window.open('about:blank', '_blank'); if (w) w.opener = null; } catch {}
+  try {
+    const r = await api('/api/auth', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    if (r && r.error) throw new Error(r.error);
+    authUrl = (r && r.url) || '';
+    if (w) { if (authUrl) w.location.href = authUrl; else w.close(); }
+  } catch (e) {
+    if (w) try { w.close(); } catch {}
+    toast('Could not open the keys form: ' + (e.message || e), true);
+    setBtns('Connect keys', false);
+    return;
+  }
+  try {
+    const r = { ready: !authUrl };
+    const d = await freshDoctor();
+    const box = document.getElementById('onb-doctor');
+    if (!r || !r.ready) authWaiting = true;
+    if (box) box.innerHTML = doctorBox(d);
+    if (authWaiting) startAuthWait(); else stopAuthWait();
+  } catch (e) {
+    toast('Could not open the keys form: ' + (e.message || e), true);
+  } finally {
+    setBtns('Connect keys', false);
+  }
+}
 async function renderOnboard() {
   const d = await fetchDoctor();
-  const rows = Array.isArray(d?.checks) ? d.checks : [];
-  const chip = (s) => `<span class="badge ${s === 'ok' ? 'h-done' : s === 'warn' ? 'h-needs-review' : 'h-failed'}">${esc(s)}</span>`;
-  const mark = (s) => `<span class="ic" style="color:${s === 'ok' ? 'var(--ok)' : s === 'warn' ? 'var(--warn)' : 'var(--bad)'}">${s === 'ok' ? '&#10003;' : s === 'warn' ? '!' : '&#10007;'}</span>`;
-  const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0"><span class="row" style="justify-content:flex-start;gap:8px"><b>${esc(c.name)}</b>${chip(c.status)}</span>${c.detail ? `<div class="small">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(c.fix)}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
-  const harnesses = [['kiro', 'Kiro'], ['cursor', 'Cursor'], ['claude', 'Claude Code'], ['codex', 'Codex'], ['vscode', 'VS Code'], ['opencode', 'opencode']];
-  $('view').innerHTML = `<section id="onboard"><div class="pad">
+  const harnesses = [['claude', 'Claude Code'], ['kiro', 'Kiro'], ['cursor', 'Cursor'], ['codex', 'Codex'], ['opencode', 'opencode'], ['vscode', 'VS Code']];
+  const html = `<section id="onboard"><div class="pad">
     <h2 class="title">Set up CodeArts lanes</h2>
-    <p class="goal">One-time setup: CodeArts credentials, a git repo, a trusted folder and your harness (Kiro, Cursor, Claude Code, Codex or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
-    <div class="box"><h4>Environment (doctor)</h4>${doctorRows}</div>
-    <div class="box"><h4>Fix everything in one go</h4>
-      <div class="cmd" id="onboard-cmd" title="click to copy"><code>ca onboard --yes</code><button id="onboard-copy">Copy</button></div>
-      <div class="small">Run it in the repo you want to use. Without --yes it asks before each fix.</div></div>
-    <div class="grid2">
-      <div class="box"><h4>Or set up one harness</h4><ul class="plain">${harnesses.map(([h, n]) => `<li><span style="min-width:0"><code>ca setup ${h} .</code></span><span class="small">${n}</span></li>`).join('')}</ul></div>
-      <div class="box"><h4>Your first lane</h4><ul class="plain">
+    <p class="goal">One-time setup per machine: CodeArts credentials, a git repo, a trusted folder and your harness (Claude Code, Kiro, Cursor, Codex, opencode or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
+    <div class="box"><h4>Set up in one prompt</h4>
+      <p class="small">Paste this into your coding agent (Claude Code, Kiro, Cursor, Codex, opencode or VS Code). It installs and connects everything; you only paste your Huawei Cloud keys into a local form.</p>
+      <div class="cmd" data-copy="${esc(ONBOARD_PROMPT)}" title="click to copy"><code>${esc(ONBOARD_PROMPT)}</code><button type="button" class="onb-copy">Copy</button></div></div>
+    <div class="box"><h4>Then ask for work, in any repo</h4>
+      <table class="onb-tbl"><thead><tr><th>Harness</th><th>What to type</th></tr></thead><tbody>${ASK.map(([h, t]) => `<tr><td>${esc(h)}</td><td><code>${esc(t)}</code></td></tr>`).join('')}</tbody></table>
+      <p class="small" style="margin-top:8px">Restart your agent once after setup so it loads the CodeArts tools.</p></div>
+    <div class="box" id="onb-doctor"><h4>Environment (doctor)</h4>${doctorBox(d)}</div>
+    <div class="box" id="onb-manual"><h4>Set up by hand</h4>
+      <p class="small">Pick the coding agent you use, then run this once.</p>
+      <div class="onb-harness" role="group" aria-label="Harness">${harnesses.map(([h, n]) => `<button type="button" class="onb-hchip${h === onbHarness ? ' on' : ''}" data-harness="${h}">${n}</button>`).join('')}</div>
+      <div class="cmd" id="onboard-hcmd" data-copy="${esc(onbCmd())}" title="click to copy"><code>${esc(onbCmd())}</code><button type="button" class="onb-copy">Copy</button></div>
+      <p class="small">Run once per machine; every repo works after that.</p></div>
+    <details class="box" id="onb-byhand"><summary>Run a lane by hand</summary>
+      <ul class="plain">
         <li><span class="ic" style="color:var(--run)">1</span><span style="min-width:0"><code>ca init . my-task --goal "one sentence outcome"</code><div class="small">writes tasks/my-task.md</div></span></li>
         <li><span class="ic" style="color:var(--run)">2</span><span style="min-width:0">edit the brief: numbered steps and CHECK lines</span></li>
         <li><span class="ic" style="color:var(--run)">3</span><span style="min-width:0"><code>ca lane . my-task --detach</code><div class="small">starts the builder in the background</div></span></li>
         <li><span class="ic" style="color:var(--run)">4</span><span style="min-width:0"><code>ca wait &lt;lane&gt;</code><div class="small">blocks until it ends and prints CA_RESULT</div></span></li>
-      </ul></div>
-    </div></div></section>`;
-  const copy = async () => { const b = $('onboard-copy'); if (!b) return; b.textContent = (await copyText('ca onboard --yes')) ? 'Copied' : 'Copy failed'; setTimeout(() => { const b2 = $('onboard-copy'); if (b2) b2.textContent = 'Copy'; }, 1500); };
-  $('onboard-cmd').onclick = copy;
-  $('onboard-copy').onclick = (e) => { e.stopPropagation(); copy(); };
+      </ul></details></div></section>`;
+  // The 2.5 s poll calls this again: leave the DOM alone when nothing changed, so an open
+  // "Run a lane by hand", a text selection or the scroll position survive.
+  if ($('onboard') && html === lastOnbHtml) return;
+  const wasOpen = !!$('onb-byhand')?.open;
+  lastOnbHtml = html;
+  $('view').innerHTML = html;
+  if (wasOpen && $('onb-byhand')) $('onb-byhand').open = true;
   syncBarPad();
 }
 
@@ -1224,6 +1322,14 @@ window.__lanes = { state: () => {
       banner: staleOn,
     },
   };
+}, // First-run panel snapshot for the check harness: the doctor rows, the setup prompt and the
+// manual command for the picked harness.
+onboard: () => {
+  const panel = document.getElementById('onboard');
+  const rows = [...document.querySelectorAll('#onb-doctor .onb-row')].map((r) => ({ name: r.querySelector('.onb-name')?.textContent || '', status: (r.querySelector('.onb-chip')?.textContent || '').trim() }));
+  const fails = rows.filter((r) => r.status === 'fail').length;
+  const warns = rows.filter((r) => r.status === 'warn').length;
+  return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
 }, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; } };
 
 // ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
@@ -1294,6 +1400,16 @@ async function refresh(full) {
 }
 // Control buttons and inline note boxes are wired once by delegation so re-renders never double-bind them.
 document.addEventListener('click', (e) => {
+  // First-run panel: copy buttons, copy-box clicks and the keys button, all delegated.
+  const flash = (b, ok) => { if (!b) return; b.textContent = ok ? 'Copied' : 'Copy failed'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copy'; }, 1500); };
+  const hc = e.target.closest('.onb-hchip');
+  if (hc) { e.preventDefault(); onbHarness = hc.dataset.harness || 'claude'; for (const b of document.querySelectorAll('.onb-hchip')) b.classList.toggle('on', b.dataset.harness === onbHarness); const c = document.getElementById('onboard-hcmd'); if (c) { c.dataset.copy = onbCmd(); const code = c.querySelector('code'); if (code) code.textContent = onbCmd(); } return; }
+  const cp = e.target.closest('.onb-copy');
+  if (cp) { e.preventDefault(); copyText(cp.dataset.copy || (cp.parentElement && cp.parentElement.dataset.copy) || '').then((ok) => flash(cp, ok)); return; }
+  const cb = e.target.closest('.cmd[data-copy]');
+  if (cb) { e.preventDefault(); copyText(cb.dataset.copy || '').then((ok) => flash(cb.querySelector('.onb-copy'), ok)); return; }
+  const kb = e.target.closest('.onb-keys');
+  if (kb) { e.preventDefault(); if (typeof connectKeys === 'function') connectKeys(); return; }
   const btn = e.target.closest('[data-action]');
   if (btn) { e.preventDefault(); runControl(btn.dataset.action, btn.dataset.lane); return; }
   const send = e.target.closest('[data-note-send]');

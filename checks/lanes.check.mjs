@@ -274,12 +274,44 @@ try {
   const tmp = fs.mkdtempSync(path.join(process.env.TEMP || ROOT, 'ca-lanes-empty-'));
   const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSON.stringify({ security: { trustedFolders: [] } }));
   const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg);
+  // A temp credentials file with fake keys plus CA_CREDENTIALS_ONLY keeps POST /api/auth off the real keys.
+  const cred = path.join(tmp, 'credentials.json'); fs.writeFileSync(cred, JSON.stringify({ CODEARTS_CLI_AK: 'check-ak', CODEARTS_CLI_SK: 'check-sk' }));
   const dash2Port = await freePort();
-  const dash2 = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(dash2Port)], { stdio: 'ignore', env: { ...process.env, CA_SETTINGS: settings, CA_REGISTRY: reg, CA_DASH: '0', CODEX_HOME: path.join(tmp, 'codex') } });
+  const dash2 = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(dash2Port)], { stdio: 'ignore', env: { ...process.env, CA_SETTINGS: settings, CA_REGISTRY: reg, CA_CREDENTIALS: cred, CA_CREDENTIALS_ONLY: '1', CA_DASH: '0', CODEX_HOME: path.join(tmp, 'codex') } });
   process.on('exit', () => { try { dash2.kill(); } catch {} });
   let up2 = false; for (let i = 0; i < 40 && !up2; i++) { await wait(250); try { up2 = (await fetch(`http://127.0.0.1:${dash2Port}/api/lanes`)).ok; } catch {} }
   await send('Page.navigate', { url: `http://127.0.0.1:${dash2Port}/` }); await wait(1800);
   check('/ without demo and an empty registry shows the onboarding panel', up2 && (await ev('!!document.getElementById("onboard")')) === true, `up=${up2}`);
+  // the first-run test hook: the panel state, the setup prompt and the manual command
+  const onb = await ev('window.__lanes.onboard && window.__lanes.onboard()');
+  check('the onboard hook reports the panel', !!onb && onb.shown === true, JSON.stringify(onb && { shown: onb.shown, fails: onb.fails, warns: onb.warns }));
+  check('the onboard hook exposes the setup prompt with INSTALL.md', !!onb && typeof onb.prompt === 'string' && onb.prompt.includes('INSTALL.md'), onb && onb.prompt);
+  check('the onboard hook lists every doctor row with a status', !!onb && Array.isArray(onb.rows) && onb.rows.length >= 5 && onb.rows.every((r) => r.name && ['ok', 'warn', 'fail'].includes(r.status)), JSON.stringify(onb && onb.rows));
+  // clicking a harness chip swaps the manual command
+  check('the codex chip is clickable', await clickSel('.onb-hchip[data-harness="codex"]'));
+  await wait(200);
+  const onbCmdNow = await ev('window.__lanes.onboard && window.__lanes.onboard().cmd');
+  const onbHarnessNow = await ev('window.__lanes.onboard && window.__lanes.onboard().harness');
+  check('clicking the codex chip changes the manual command', typeof onbCmdNow === 'string' && onbCmdNow.includes('--harness codex') && onbHarnessNow === 'codex', String(onbCmdNow));
+  // every doctor row name and its status chip keep at least 4 px apart
+  const gaps = await ev('[...document.querySelectorAll("#onb-doctor .onb-row")].map((r)=>{const n=r.querySelector(".onb-name").getBoundingClientRect(),c=r.querySelector(".onb-chip").getBoundingClientRect();return {gap:c.left-n.right, overlap:n.right>c.left&&n.left<c.right&&n.bottom>c.top&&n.top<c.bottom};})');
+  check('every doctor row name and chip do not overlap and keep a >=4 px gap', Array.isArray(gaps) && gaps.length > 0 && gaps.every((g) => !g.overlap && g.gap >= 4), JSON.stringify(gaps));
+  // at 1280x900 the sidebar never scrolls sideways
+  await size(1280, 900); await wait(300);
+  const rail = await ev('(function(){const r=document.getElementById("rail");return {sw:r.scrollWidth,cw:r.clientWidth};})()');
+  check('the sidebar does not scroll horizontally at 1280x900', !!rail && rail.sw <= rail.cw, JSON.stringify(rail));
+  // at 390x844 nothing in the panel runs past the viewport
+  await size(390, 844); await wait(400);
+  const wide = await ev('[...document.querySelectorAll("#onboard *")].filter((el)=>el.getBoundingClientRect().right>document.documentElement.clientWidth+1).map((el)=>el.tagName+"."+el.className)');
+  check('no element in the panel is wider than the phone viewport', Array.isArray(wide) && wide.length === 0, JSON.stringify(wide && wide.slice(0, 4)));
+  // POST /api/auth answers JSON (never a reset); the temp credentials keep the real keys out
+  let authRes = null;
+  try {
+    const r = await fetch(`http://127.0.0.1:${dash2Port}/api/auth`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    authRes = { status: r.status, ct: String(r.headers.get('content-type') || ''), body: await r.text() };
+  } catch (e) { authRes = { error: String(e && e.message || e) }; }
+  let authJson = null; try { authJson = JSON.parse(authRes && authRes.body); } catch {}
+  check('POST /api/auth answers JSON with 200 or 4xx and never resets', !!authRes && !authRes.error && (authRes.status === 200 || (authRes.status >= 400 && authRes.status < 500)) && /application\/json/i.test(authRes.ct || '') && !!authJson && typeof authJson.ready === 'boolean', JSON.stringify(authRes));
   try { dash2.kill(); } catch {}
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
