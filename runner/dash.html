@@ -259,9 +259,16 @@ const dAdv = () => DEMO_ADV && Date.now() - DEMO_T0 > 6000;
 const dClock = (i) => { const t = new Date(DEMO_T0 + i * 1500); return [t.getHours(), t.getMinutes(), t.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); };
 const D_REPO = 'D:\\Coding\\demo-repo';
 const D_HASHES = ['e3f1c2a', 'b7d94ce', 'c5a83f1', 'd9274ab', 'a6b5e90'];
+// token fixture helpers: one record per role, summed up so lane/plan totals always match the by-agent rows.
+function dTok(input, output, extra) { const t = Object.assign({ input: input || 0, output: output || 0, reasoning: 0, cacheRead: 0, steps: 1 }, extra || {}); t.total = t.input + t.output + t.reasoning + t.cacheRead; return t; }
+function dTokAdd(list) { const s = (k) => list.reduce((a, x) => a + ((x && x[k]) || 0), 0); return dTok(s('input'), s('output'), { reasoning: s('reasoning'), cacheRead: s('cacheRead'), steps: s('steps') }); }
+function dTokBy(build, review, other) { const by = { build, review, other }; return { tokens: dTokAdd([build, review, other]), tokensBy: by }; }
+function planTokSum(lanes) { const list = lanes.map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
+const D_RUN_ACTIONS = ['steer', 'stop', 'attach', 'kick', 'fresh', 'restart-server'];
+const demoControls = []; // fixture log of kick/resume POSTs, read by the check harness
 function dLane(id, task, o) {
   return Object.assign({ lane: id, id, task, repo: D_REPO, health: 'planned', phase: 'planned', elapsed: '', idle: '-', commits: '0/0',
-    steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
+    steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tokensBy: {}, actions: [], suggest: '', why: '', tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
     session: '', reason: '', running: false, result: '', progress: { done: 0, total: 0, current: null },
     startedAt: DEMO_T0 - 600000, finishedAt: null, fixes: 0 }, o);
 }
@@ -293,17 +300,19 @@ const D_REVIEW_CHAOS = '## Review\n\nVerdict: needs fixes\n\nThe layout work lan
 const D_SUMMARY_CHAOS = '## Summary\n\nReworked the Lanes dashboard as Pixel Workshop Lanes: plum shell, persistent plans rail, plan homescreen with full-width waves and a full-page lane detail.\n\nKept every route, data call and action. The demo fixture renders both routes without real lanes; steer, stop and open TUI answer through the same handlers.';
 function demoLanes() {
   return [
-    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', tokens: { input: 52764, output: 202 }, session: 's-7011', startedAt: DEMO_T0 - 231000,
+    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', ...dTokBy(dTok(48000, 150, { reasoning: 4200, cacheRead: 9000 }), dTok(3900, 40), dTok(864, 12)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7011', startedAt: DEMO_T0 - 231000,
       runs: 2, continues: [{ id: 'demo-repo--office-v2', task: 'office-v2', reason: 'paused by the operator for a scope change', commits: 6, progress: { done: 6, total: 8 }, elapsed: '41m 12s' }],
       progress: dAdv() ? { done: 1, total: 7, current: { n: 2, text: D_STEPS_LAYOUT[1] } } : { done: 0, total: 7, current: { n: 1, text: D_STEPS_LAYOUT[0] } }, tools: [{ tool: 'edit', input: 'runner/dash.html', since: DEMO_T0 - 9000 }] }),
-    dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', tokens: { input: 21014, output: 5302 }, session: 's-7012', startedAt: DEMO_T0 - 437000,
+    dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', ...dTokBy(dTok(21014, 5302, { reasoning: 1100, cacheRead: 3000 }), dTok(1200, 90), dTok(300, 20)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7012', startedAt: DEMO_T0 - 437000,
       progress: { done: 2, total: 4, current: { n: 3, text: D_STEPS_STRINGS[2] } } }),
-    dLane('demo-repo--path-join', 'path-join', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', tokens: { input: 12050, output: 3211 }, finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
-    dLane('demo-repo--cli-dx', 'cli-dx', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '41m 10s', commits: '8/8', tokens: { input: 8600, output: 12300 }, finishedAt: DEMO_T0 - 1800000, progress: { done: 8, total: 8, current: null } }),
-    dLane('demo-repo--office-scene', 'office-scene', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '46m 03s', commits: '6/6', tokens: { input: 12100, output: 21400 }, finishedAt: DEMO_T0 - 2600000, progress: { done: 6, total: 6, current: null } }),
-    dLane('demo-repo--stall', 'stall', { health: 'failed', phase: 'finished', result: 'failed', reason: 'no progress for 20 minutes', elapsed: '22m 41s', commits: '1/5', tokens: { input: 4300, output: 690 }, finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 5, current: null } }),
-    dLane('demo-repo--orphan', 'orphan', { health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', tokens: { input: 900, output: 80 }, finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
-    dLane('demo-repo--chaos', 'chaos', { health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', tokens: { input: 7300, output: 1060 }, finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
+    dLane('demo-repo--stuck', 'stuck', { health: 'STALLED', phase: 'build', running: true, elapsed: '9m 04s', idle: '6m', commits: '1/4', now: 'Waiting on the model', ...dTokBy(dTok(16000, 2400, { reasoning: 800, cacheRead: 2000 }), dTok(0, 0), dTok(0, 0)), actions: D_RUN_ACTIONS, suggest: 'kick', why: 'no model activity for 6m', session: 's-7013', startedAt: DEMO_T0 - 544000,
+      progress: { done: 1, total: 4, current: { n: 2, text: D_STEPS_STRINGS[1] } } }),
+    dLane('demo-repo--path-join', 'path-join', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', ...dTokBy(dTok(12050, 3211), dTok(900, 120), dTok(150, 10)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
+    dLane('demo-repo--cli-dx', 'cli-dx', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '41m 10s', commits: '8/8', ...dTokBy(dTok(8600, 12300), dTok(600, 200), dTok(200, 30)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 1800000, progress: { done: 8, total: 8, current: null } }),
+    dLane('demo-repo--office-scene', 'office-scene', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '46m 03s', commits: '6/6', ...dTokBy(dTok(12100, 21400), dTok(500, 150), dTok(100, 20)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 2600000, progress: { done: 6, total: 6, current: null } }),
+    dLane('demo-repo--stall', 'stall', { health: 'failed', phase: 'finished', result: 'failed', reason: 'no progress for 20 minutes', elapsed: '22m 41s', commits: '1/5', ...dTokBy(dTok(4300, 690), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: 'resume', why: 'gave up after 3 interruptions (transport)', finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 5, current: null } }),
+    dLane('demo-repo--orphan', 'orphan', { health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', ...dTokBy(dTok(900, 80), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
+    dLane('demo-repo--chaos', 'chaos', { health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', ...dTokBy(dTok(7300, 1060), dTok(2200, 300), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
   ];
 }
 function demoPlans() {
@@ -321,6 +330,7 @@ function demoPlans() {
         { at: dIso(41), text: 'Wave cards go full width; the old horizontal scroll clipped long titles.' },
         { at: dIso(12), text: 'The step disclosure never navigates; only the lane name link opens the detail route.' },
       ],
+      ...planTokSum([by['demo-repo--office-layout']]),
       waves: [{ name: 'Wave 1 · Layout', note: 'Stage geometry and the check hook', status: 'running', lanes: [wp('demo-repo--office-layout', { model: 'maas/glm-5.3', why: 'Owns the layout rework end to end', files: ['runner/dash.html', 'checks/lanes.check.mjs'], briefExists: true })] }] },
     { id: 'string-utils', file: 'D:/Coding/demo-repo/tasks/strings.json', updatedAt: dIso(2), title: 'String utils for sandbox',
       goal: 'Give the sandbox string helpers: formatting, path joins and escaping, each covered by a check.',
@@ -329,9 +339,11 @@ function demoPlans() {
       next: [{ text: 'Read the path-join verdict', done: true }, { text: 'Land string-utils once its check passes', done: false }],
       risks: ['Escaping rules differ between cmd and bash'],
       decisions: [{ at: dIso(90), text: 'Split the work: one lane per helper family so review stays small.' }],
+      ...planTokSum([by['demo-repo--string-utils'], by['demo-repo--path-join'], by['demo-repo--stuck']]),
       waves: [{ name: 'Wave 1 · Helpers', note: '', status: 'running', lanes: [
         wp('demo-repo--string-utils', { model: 'maas/glm-5.3', why: 'Formatting and escaping helpers', files: ['runner/sandbox.mjs'], briefExists: true }),
         wp('demo-repo--path-join', { model: 'maas/qwen3-coder', why: 'Small surface, quick win', files: ['runner/sandbox.mjs'], briefExists: true }),
+        wp('demo-repo--stuck', { model: 'maas/glm-5.3', why: 'Recover the stalled turn', files: ['runner/sandbox.mjs'], briefExists: true }),
       ] }] },
   ];
 }
@@ -445,6 +457,8 @@ async function demoPost(what, id, body) {
     if (!body || !body.text || !body.text.trim()) return { error: 'empty' };
     return l && l.running ? { ok: true } : { error: 'lane not running' };
   }
+  if (what === 'kick') { demoControls.push({ laneId: id, action: 'kick', body: body || {} }); return { ok: true, message: `Kick sent (${(body && body.mode) || 'turn'})` }; }
+  if (what === 'resume') { demoControls.push({ laneId: id, action: 'resume', body: body || {} }); return { ok: true, message: 'Lane resumed' }; }
   return { ok: true };
 }
 function demoDoctor() {
@@ -459,7 +473,7 @@ async function demoApi(path, opts) {
   if (u.pathname === '/api/plans') return demoPlans();
   if (u.pathname === '/api/lanes') return demoLanes();
   if (u.pathname === '/api/doctor') return demoDoctor();
-  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach)$/);
+  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume)$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
     if (m[2] === 'detail') return demoDetail(id);
