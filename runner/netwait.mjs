@@ -36,7 +36,8 @@ export async function defaultProbe() {
 
 // Poll probe() until it answers true. A throw counts as offline. onWait runs after every failed
 // try (for live.log and the lane activity). Resolves { online, tries, waitedMs }; never rejects.
-export async function waitOnline({ probe, intervalMs = 15000, timeoutMs, onWait } = {}) {
+// shouldStop(): checked every second while waiting; true ends the wait with { online: false, stopped: true }.
+export async function waitOnline({ probe, intervalMs = 15000, timeoutMs, onWait, shouldStop } = {}) {
   const p = probe || defaultProbe;
   const t0 = Date.now();
   const deadline = Number.isFinite(timeoutMs) ? t0 + timeoutMs : Infinity;
@@ -51,7 +52,10 @@ export async function waitOnline({ probe, intervalMs = 15000, timeoutMs, onWait 
     if (Date.now() >= deadline) return { online: false, tries, waitedMs: Date.now() - t0 };
     const nap = Math.max(0, Math.min(intervalMs, deadline - Date.now()));
     if (nap <= 0) return { online: false, tries, waitedMs: Date.now() - t0 };
-    await new Promise((r) => setTimeout(r, nap));
+    for (let left = nap; left > 0; left -= 1000) {
+      if (shouldStop && shouldStop()) return { online: false, stopped: true, tries, waitedMs: Date.now() - t0 };
+      await new Promise((r) => setTimeout(r, Math.min(1000, left)));
+    }
   }
 }
 

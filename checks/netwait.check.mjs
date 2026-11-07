@@ -26,6 +26,9 @@ if (fn('waitOnline')) {
   check('waitOnline: a throwing probe counts as offline, never rejects', r && r.online === false);
   const ticks = []; r = await m.waitOnline({ probe: async () => ticks.length >= 2, intervalMs: 10, timeoutMs: 1000, onWait: (info) => ticks.push(info) });
   check('waitOnline: calls onWait while offline (for live.log and status)', ticks.length >= 2 && r.online === true);
+  const t1 = Date.now(); let stop = false; setTimeout(() => { stop = true; }, 300);
+  r = await m.waitOnline({ probe: async () => false, intervalMs: 60000, timeoutMs: 60000, shouldStop: () => stop });
+  check('waitOnline: shouldStop ends a long wait within about a second (ca stop during an outage)', r && r.stopped === true && r.online === false && Date.now() - t1 < 3000, JSON.stringify(r));
   check('waitOnline has a default probe (DNS or HTTPS to the model host) when none is given', /lookup|resolve|https?\.request|fetch\(/.test(fs.readFileSync(path.join(ROOT, 'runner', 'netwait.mjs'), 'utf8')));
 }
 if (fn('detectSleep')) {

@@ -678,7 +678,8 @@ async function runLane(repoArg, task, opts = {}) {
         };
         onWait({ tries: 0, waitedMs: 0 });
         say(`network down (${oneLine(what, 140)}); waiting up to ${netWaitS}s (no retry used)`);
-        const net = await waitOnline({ timeoutMs: netWaitS * 1000, onWait });
+        const net = await waitOnline({ timeoutMs: netWaitS * 1000, onWait, shouldStop: () => fs.existsSync(stopFile) });
+        if (net.stopped) return { ok: false, sid, reason: 'stopped' };
         if (net.online) {
           say(`network is back after ${dur(net.waitedMs)}; resuming the same session (no retry used)`);
           phase(label, 'resuming after network returned');
@@ -786,7 +787,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     const limits = parseLimits(process.env.CA_MAX_LANES_PER_MODEL || '');
     const t0 = now(); let logged = false;
     for (;;) {
-      const running = lanes().filter((l) => !l.s.result && l.id !== id).map((l) => (l.s.models && l.s.models.build) || '').filter(Boolean);
+      // Only lanes that are alive and working hold a slot: queued lanes (or every lane over the limit
+      // would wait forever) and DEAD lanes (supervisor gone) do not.
+      const running = lanes().filter((l) => !l.s.result && l.id !== id && alive(l.s.pid) && !/^queued/.test(l.s.activity || '')).map((l) => (l.s.models && l.s.models.build) || '').filter(Boolean);
       const slot = laneSlots({ model, running, limits });
       if (slot.ok) break;
       if (!logged) { logged = true; say(`queued: ${slot.reason}`); L(`  ! queued: ${slot.reason}`); }
