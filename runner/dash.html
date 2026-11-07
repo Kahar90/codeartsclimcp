@@ -1179,7 +1179,7 @@ async function post(what, body) { return api(`/api/lane/${encodeURIComponent(rou
 // First-run onboarding panel: shown only while there are no plans and no lanes yet.
 // /api/doctor is cached for 30 s (the poll runs every 2.5 s) and concurrent calls share one request.
 let doctorCache = null, doctorAt = 0, doctorPromise = null;
-let authWaiting = false, authTimer = null;
+let authWaiting = false, authTimer = null, authUrl = '', lastOnbHtml = '';
 async function fetchDoctor() {
   if (doctorCache && Date.now() - doctorAt < 30000) return doctorCache;
   if (!doctorPromise) doctorPromise = (async () => {
@@ -1212,7 +1212,7 @@ function doctorBox(d) {
   const credOk = rows.some((c) => c.name === 'credentials' && c.status === 'ok');
   const summary = !rows.length ? '' : (fails ? `<div class="onb-summary bad">${fails} to fix${warns ? ` · ${warns} optional` : ''}</div>` : `<div class="onb-summary ok">Ready: everything checks out${warns ? ` · ${warns} optional` : ''}</div>`);
   const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0;flex:1"><span class="onb-row"><span class="onb-name">${esc(c.name)}</span>${onbChip(c.status)}${c.name === 'credentials' && c.status !== 'ok' ? '<button type="button" class="btn tiny onb-keys">Connect keys</button>' : ''}</span>${c.detail ? `<div class="onb-detail">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="onb-fix"><code>${esc(c.fix)}</code>${hasCmd(c.fix) ? `<button type="button" class="btn tiny onb-copy" data-copy="${esc(c.fix)}">Copy</button>` : ''}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
-  const waiting = authWaiting && !credOk ? '<div class="small onb-waiting" style="margin-top:8px">Waiting for the keys...</div>' : '';
+  const waiting = authWaiting && !credOk ? `<div class="small onb-waiting" style="margin-top:8px">Waiting for the keys...${authUrl ? ` <a href="${esc(authUrl)}" target="_blank" rel="noopener">Open the keys form</a>` : ''}</div>` : '';
   return `${summary}${doctorRows}${waiting}`;
 }
 async function freshDoctor() { doctorCache = null; doctorAt = 0; doctorPromise = null; return fetchDoctor(); }
@@ -1234,10 +1234,22 @@ function startAuthWait() {
 async function connectKeys() {
   const setBtns = (t, dis) => { for (const b of document.querySelectorAll('.onb-keys')) { b.textContent = t; b.disabled = dis; } };
   setBtns('Opening...', true);
+  // Open the tab now, inside the click: the form URL can take seconds (PowerShell key probes) and a
+  // window.open after that await is blocked as a popup. It is pointed at the form once the URL arrives.
+  let w = null; try { w = window.open('about:blank', '_blank'); if (w) w.opener = null; } catch {}
   try {
     const r = await api('/api/auth', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     if (r && r.error) throw new Error(r.error);
-    if (r && r.url) { try { window.open(r.url, '_blank', 'noopener'); } catch {} }
+    authUrl = (r && r.url) || '';
+    if (w) { if (authUrl) w.location.href = authUrl; else w.close(); }
+  } catch (e) {
+    if (w) try { w.close(); } catch {}
+    toast('Could not open the keys form: ' + (e.message || e), true);
+    setBtns('Connect keys', false);
+    return;
+  }
+  try {
+    const r = { ready: !authUrl };
     const d = await freshDoctor();
     const box = document.getElementById('onb-doctor');
     if (!r || !r.ready) authWaiting = true;
@@ -1252,7 +1264,7 @@ async function connectKeys() {
 async function renderOnboard() {
   const d = await fetchDoctor();
   const harnesses = [['claude', 'Claude Code'], ['kiro', 'Kiro'], ['cursor', 'Cursor'], ['codex', 'Codex'], ['opencode', 'opencode'], ['vscode', 'VS Code']];
-  $('view').innerHTML = `<section id="onboard"><div class="pad">
+  const html = `<section id="onboard"><div class="pad">
     <h2 class="title">Set up CodeArts lanes</h2>
     <p class="goal">One-time setup per machine: CodeArts credentials, a git repo, a trusted folder and your harness (Claude Code, Kiro, Cursor, Codex, opencode or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
     <div class="box"><h4>Set up in one prompt</h4>
@@ -1262,9 +1274,6 @@ async function renderOnboard() {
       <table class="onb-tbl"><thead><tr><th>Harness</th><th>What to type</th></tr></thead><tbody>${ASK.map(([h, t]) => `<tr><td>${esc(h)}</td><td><code>${esc(t)}</code></td></tr>`).join('')}</tbody></table>
       <p class="small" style="margin-top:8px">Restart your agent once after setup so it loads the CodeArts tools.</p></div>
     <div class="box" id="onb-doctor"><h4>Environment (doctor)</h4>${doctorBox(d)}</div>
-    <div class="box"><h4>Fix everything in one go</h4>
-      <div class="cmd" id="onboard-cmd" title="click to copy"><code>ca onboard --yes</code><button id="onboard-copy">Copy</button></div>
-      <div class="small">Run it in the repo you want to use. Without --yes it asks before each fix.</div></div>
     <div class="box" id="onb-manual"><h4>Set up by hand</h4>
       <p class="small">Pick the coding agent you use, then run this once.</p>
       <div class="onb-harness" role="group" aria-label="Harness">${harnesses.map(([h, n]) => `<button type="button" class="onb-hchip${h === onbHarness ? ' on' : ''}" data-harness="${h}">${n}</button>`).join('')}</div>
@@ -1277,9 +1286,13 @@ async function renderOnboard() {
         <li><span class="ic" style="color:var(--run)">3</span><span style="min-width:0"><code>ca lane . my-task --detach</code><div class="small">starts the builder in the background</div></span></li>
         <li><span class="ic" style="color:var(--run)">4</span><span style="min-width:0"><code>ca wait &lt;lane&gt;</code><div class="small">blocks until it ends and prints CA_RESULT</div></span></li>
       </ul></details></div></section>`;
-  const copy = async () => { const b = $('onboard-copy'); if (!b) return; b.textContent = (await copyText('ca onboard --yes')) ? 'Copied' : 'Copy failed'; setTimeout(() => { const b2 = $('onboard-copy'); if (b2) b2.textContent = 'Copy'; }, 1500); };
-  $('onboard-cmd').onclick = copy;
-  $('onboard-copy').onclick = (e) => { e.stopPropagation(); copy(); };
+  // The 2.5 s poll calls this again: leave the DOM alone when nothing changed, so an open
+  // "Run a lane by hand", a text selection or the scroll position survive.
+  if ($('onboard') && html === lastOnbHtml) return;
+  const wasOpen = !!$('onb-byhand')?.open;
+  lastOnbHtml = html;
+  $('view').innerHTML = html;
+  if (wasOpen && $('onb-byhand')) $('onb-byhand').open = true;
   syncBarPad();
 }
 
