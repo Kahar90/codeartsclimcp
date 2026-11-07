@@ -52,7 +52,7 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 /* hover cards (tokens, plan outcome): styled replacements for native title tooltips */
 #statusBadge, #tokenChip { cursor: default; }
 #tokenChip:hover, #tokenChip:focus-visible { border-color: var(--sel); color: var(--fg); }
-#hoverCard { width: 300px; max-width: calc(100vw - 24px); padding: 14px 16px 12px; pointer-events: none; font-size: 13px; }
+#hoverCard { width: 300px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px 16px 12px; pointer-events: none; font-size: 13px; }
 .hc-kicker { color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .hc-big { font: 700 24px/1.15 var(--font-display); margin: 2px 0 10px; }
 .hc-big small { font: 600 13px var(--font); color: var(--muted); margin-left: 6px; }
@@ -841,10 +841,18 @@ function renderPlanMenu() {
   if (planMenuActive >= 0) m.setAttribute("aria-activedescendant", "pm-" + planMenuActive); else m.removeAttribute("aria-activedescendant");
 }
 function placeFloat(el, anchor, align) {
-  const b = anchor.getBoundingClientRect(), w = el.offsetWidth;
-  el.style.top = Math.round(b.bottom + 8) + "px";
+  const b = anchor.getBoundingClientRect();
+  const M = 12, vw = window.innerWidth, vh = window.innerHeight;
+  el.style.maxHeight = "";
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const below = b.bottom + 8, above = b.top - 8 - h;
+  const flip = below + h > vh - M && above >= M;
+  const avail = flip ? b.top - 8 - M : vh - M - below;
+  el.style.maxHeight = Math.max(120, Math.round(avail)) + "px";
+  const top = flip ? above : below;
+  el.style.top = Math.round(Math.max(M, Math.min(top, vh - M - Math.min(h, Math.max(120, avail))))) + "px";
   const x = align === "center" ? b.left + b.width / 2 - w / 2 : b.right - w;
-  el.style.left = Math.round(Math.max(12, Math.min(x, window.innerWidth - w - 12))) + "px";
+  el.style.left = Math.round(Math.max(M, Math.min(x, vw - w - M))) + "px";
 }
 function openPlanMenu() {
   hideHoverCard();
@@ -1765,6 +1773,7 @@ $("noteSend").addEventListener("click", () => {
 });
 $("noteCancel").addEventListener("click", closeNote);
 document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") hideHoverCard();
   if (ev.key === "Escape" && !$("win").hidden) { ev.preventDefault(); closeWin(true); }
 });
 document.addEventListener("pointerdown", (ev) => {
@@ -2002,8 +2011,9 @@ $("planMenu").addEventListener("keydown", (e) => {
 });
 document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#planMenu, #planBtn")) closePlanMenu(); });
 window.addEventListener("resize", () => { closePlanMenu(); hideHoverCard(); schedulePositionWin(); });
-window.addEventListener("scroll", schedulePositionWin, { passive: true });
-document.addEventListener("scroll", schedulePositionWin, { passive: true, capture: true });
+const onScroll = () => { schedulePositionWin(); hideHoverCard(); };
+window.addEventListener("scroll", onScroll, { passive: true });
+document.addEventListener("scroll", onScroll, { passive: true, capture: true });
 for (const id of ["tokenChip", "statusBadge"]) {
   $(id).addEventListener("mouseenter", () => showHoverCard(id));
   $(id).addEventListener("mouseleave", hideHoverCard);
