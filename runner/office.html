@@ -104,7 +104,7 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #win { position: absolute; left: 0; top: 0; width: 440px; max-width: calc(100% - 24px); z-index: 10; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); display: flex; flex-direction: column; }
 #win[hidden] { display: none; }
 #winGrab { display: none; }
-#winScrim { position: fixed; inset: 0; z-index: 9; background: rgba(10, 6, 16, .5); opacity: 0; transition: opacity .2s ease; }
+#winScrim { position: absolute; inset: 0; z-index: 8; background: rgba(10, 6, 16, .5); opacity: 0; transition: opacity .2s ease; }
 #winScrim[hidden] { display: none !important; }
 #winScrim.show { opacity: 1; }
 #winTail { position: absolute; width: 14px; height: 14px; background: var(--panel); transform: rotate(45deg); }
@@ -173,6 +173,10 @@ body.narrow #winTail { display: none; }
 @keyframes win-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
 #win.win-in { animation: win-in 140ms ease-out; }
 #win.win-out { animation: win-out 100ms ease-in forwards; }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes sheet-down { from { transform: none; } to { transform: translateY(100%); opacity: 0; } }
+body.narrow #win.win-in { animation: sheet-up 260ms cubic-bezier(.2, .8, .2, 1); }
+body.narrow #win.win-out { animation: sheet-down 220ms ease-in forwards; }
 #fx { position: absolute; inset: 0; pointer-events: none; }
 .packet { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--sel-ink); box-shadow: 0 0 8px var(--sel); }
 .checkmark { position: absolute; width: 16px; height: 16px; }
@@ -232,6 +236,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
     <img id="room" src="/assets/workshop.png" alt="" aria-hidden="true">
     <div id="sprites"></div>
     <div id="fx" aria-hidden="true"><div id="lamp"></div></div>
+    <div id="winScrim" hidden></div>
     <div id="plates">
       <button type="button" class="plate" id="plate-lead" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span></button>
       <button type="button" class="plate" id="plate-builder" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span></button>
@@ -285,7 +290,6 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
   </div>
 </main>
 <div id="stlist" hidden></div>
-<div id="winScrim" hidden></div>
 <div id="toast" hidden></div>
 <script src="/assets/workshop.js"></script>
 <script>
@@ -1569,6 +1573,7 @@ function winRegion() {
 function positionWin() {
   const win = $("win"), stage = $("stage"), tail = $("winTail");
   if (narrow) { win.style.left = ""; win.style.top = ""; win.style.maxHeight = ""; return; }
+  setScrim(false);
   const R = winRegion();
   const mh = Math.max(140, Math.round(R.h)) + "px";
   if (win.style.maxHeight !== mh) win.style.maxHeight = mh;
@@ -1637,6 +1642,20 @@ function schedulePositionWin() {
   if (posRaf) return;
   posRaf = requestAnimationFrame(() => { posRaf = 0; if (!$("win").hidden) positionWin(); });
 }
+// Phone bottom sheet: a dimmed scrim fades in behind the sheet and closes it on tap. Only at narrow.
+let scrimTimer = 0;
+function setScrim(on) {
+  const sc = $("winScrim");
+  clearTimeout(scrimTimer);
+  if (on && narrow) {
+    sc.hidden = false;
+    void sc.offsetWidth;
+    sc.classList.add("show");
+  } else {
+    sc.classList.remove("show");
+    scrimTimer = setTimeout(() => { if (!sc.classList.contains("show")) sc.hidden = true; }, 220);
+  }
+}
 function openWin(id, anchor, kb) {
   clearTimeout(winCloseTimer);
   const win = $("win");
@@ -1649,6 +1668,7 @@ function openWin(id, anchor, kb) {
   closeNote();
   win.hidden = false;
   positionWin();
+  setScrim(true);
   win.classList.remove("win-in", "win-out");
   if (!wasOpen && !winInstant()) { void win.offsetWidth; win.classList.add("win-in"); }
   if (kb) $("winX").focus();
@@ -1661,11 +1681,12 @@ function closeWin(toFocus) {
   setTriggerAria(anchor, false);
   winFor = null;
   winAnchor = null;
+  setScrim(false);
   if (winInstant()) { win.hidden = true; win.classList.remove("win-in", "win-out"); }
   else {
     win.classList.remove("win-in");
     win.classList.add("win-out");
-    winCloseTimer = setTimeout(() => { win.hidden = true; win.classList.remove("win-out"); }, 100);
+    winCloseTimer = setTimeout(() => { win.hidden = true; win.classList.remove("win-out"); }, narrow ? 220 : 100);
   }
   if (toFocus && anchor && anchor.isConnected) anchor.focus();
 }
