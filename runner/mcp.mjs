@@ -244,11 +244,19 @@ const TOOLS = [
   },
   {
     name: 'ca_ack',
-    description: 'Acknowledge a finished lane after you dealt with it (merged it yourself, took it over, or decided to drop it): a failed, paused or needs-review lane moves from "needs you" to ended with your note, so the human\'s Control room only lists what still needs them. A later run of the lane makes it count again.',
-    inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name; the lane must be finished' }, note: { type: 'string', description: 'short reason, for example "merged by the lead"' } }, required: ['lane'] },
+    description: 'Acknowledge a finished lane after you dealt with it (merged it yourself, took it over, or decided to drop it): a failed, paused or needs-review lane moves from "needs you" to ended with your note, so the human\'s Control room only lists what still needs them. A later run of the lane makes it count again. Pass stale:true to clean up drift in one call: every finished Needs-you lane older than older_than_h (default 48) is marked handled; running, stalled and DEAD lanes are never touched.',
+    inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name; the lane must be finished' }, note: { type: 'string', description: 'short reason, for example "merged by the lead"' }, stale: { type: 'boolean', description: 'mark every finished Needs-you lane older than older_than_h handled, without naming one' }, older_than_h: { type: 'number', description: 'age in hours for the stale form (default 48)' } } },
     ok: [0],
     timeout: 60000,
-    build: (a) => ['ack', needStr(a.lane, 'lane'), ...(a.note ? ['--note', String(a.note)] : [])],
+    build: (a) => {
+      if (a.stale) {
+        const h = (a.older_than_h === undefined || a.older_than_h === null || a.older_than_h === '') ? 48 : Number(a.older_than_h);
+        if (!Number.isFinite(h) || h <= 0) throw new ArgError('older_than_h');
+        return ['ack', '--stale', '--older-than', `${Math.round(h)}h`, ...(a.note ? ['--note', String(a.note)] : [])];
+      }
+      if (a.lane !== undefined && a.lane !== null && a.lane !== '') return ['ack', needStr(a.lane, 'lane'), ...(a.note ? ['--note', String(a.note)] : [])];
+      throw new ArgError('lane');
+    },
   },
   {
     name: 'ca_kick',
