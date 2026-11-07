@@ -32,7 +32,8 @@ body { margin: 0; overflow: hidden; display: flex; flex-direction: column; }
 .rail-fin:hover { background: var(--panel) }
 .rail-fin.sel { background: var(--sel-bg); border-color: var(--sel) }
 .rail-fin .nm { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere }
-.rail-none { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12.5px; padding: 6px 2px }
+.rail-none { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; color: var(--faint); font-size: 12.5px; padding: 6px 2px }
+.rail-none code { overflow-wrap: anywhere }
 .rail-div { border-top: 1px solid var(--border); margin: 14px 0 2px }
 
 /* ---------- main column ---------- */
@@ -222,6 +223,8 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .onb-detail { color: var(--muted); font-size: 12.5px; margin-top: 3px; overflow-wrap: anywhere }
 .onb-fix { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 4px; min-width: 0 }
 .onb-fix code { flex: 1; min-width: 0; font: 11.5px var(--mono); background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 9px; color: var(--sel-ink); white-space: pre-wrap; overflow-wrap: anywhere }
+#onboard code { overflow-wrap: anywhere }
+#onboard .box, #onboard ul.plain li > span, #onboard .cmd > *, #onboard .onb-row > * { min-width: 0 }
 
 /* ---------- control room ---------- */
 .cr-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap }
