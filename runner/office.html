@@ -76,7 +76,7 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #plates { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .needs-pill[hidden] { display: none !important; }
 .plate { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 13px; background: var(--panel-2); border: 2px solid var(--border-2); border-radius: 9px; font: 14px/1.3 var(--font); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); color: var(--fg); cursor: pointer; text-align: center; white-space: nowrap; }
-.plate .p-name { font-weight: 700; }
+.plate .p-name { font-weight: 700; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .plate .p-sub { color: var(--muted); font-size: 12.5px; }
 .p-badge { position: absolute; right: -8px; top: -8px; width: 18px; height: 18px; border-radius: 50%; background: var(--amber); color: #3a2a05; font: 700 12px/18px var(--font); text-align: center; cursor: pointer; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55); }
 .p-badge[hidden] { display: none !important; }
@@ -115,10 +115,11 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 body.narrow #winTail { display: none; }
 #win [hidden] { display: none !important; }
 .win-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px 10px; flex: none; }
-#winTitle { font-weight: 700; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#winTitle { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #winBadge { flex: none; }
 #winKind { flex: none; color: var(--muted); font-size: 13px; }
-#winX { margin-left: auto; flex: none; width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 15px var(--font); cursor: pointer; padding: 0; }
+#winX { margin-left: auto; flex: none; width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 15px var(--font); cursor: pointer; padding: 0; }
+#winX:hover { border-radius: 50%; background: var(--raise); color: var(--fg); }
 #winBody { padding: 0 18px 14px; display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 #winMeta { color: var(--muted); font-size: 14px; }
 #winTokens { display: flex; flex-direction: column; gap: 5px; }
@@ -223,6 +224,9 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
 @keyframes badge-pulse { 0%, 100% { box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55), 0 0 0 0 rgba(255, 170, 80, 0.45); } 50% { box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55), 0 0 0 4px rgba(255, 170, 80, 0); } }
 .plate .p-badge:not([hidden]) { animation: badge-pulse 2.4s ease-in-out infinite; }
 body.no-motion .p-badge { animation: none; }
+@keyframes count-bump { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+#needsPillN.bump { display: inline-block; animation: count-bump 320ms ease-out; }
+body.no-motion #needsPillN.bump { animation: none; }
 .ov-row:hover, .ov-pill:hover, #planBtn:hover, .ctl-btn:hover, .qchip:hover, #winX:hover { background: var(--raise); }
 .ov-row:active, .ov-pill:active, #planBtn:active, .ctl-btn:active, .qchip:active, #winX:active, #winSend:active { transform: translateY(1px); }
 body.narrow .needs-pill { height: 32px; }
@@ -785,6 +789,7 @@ function tokenCard(p) {
 // The plan carries the author name as leadName (lead is now the lead token table); old/demo fixtures still use a string.
 function leadName(p) { return (p && (p.leadName || (typeof p.lead === "string" ? p.lead : ""))) || "Lead"; }
 
+let needsShown = -1;
 function renderTop() {
   const p = model.plan;
   $("planTitle").textContent = p.title || p.goal || "(no plan)";
@@ -797,7 +802,18 @@ function renderTop() {
   if ($("statusBadge").innerHTML !== badgeHtml) $("statusBadge").innerHTML = badgeHtml;
   const attn = model.lanes.filter((l) => laneBucket(l) === "attention").length;
   const pill = $("needsPill");
-  if (pill) { pill.hidden = attn === 0; const pn = $("needsPillN"); if (pn) pn.textContent = String(attn); }
+  if (pill) {
+    pill.hidden = attn === 0;
+    const pn = $("needsPillN");
+    if (pn) {
+      const next = String(attn);
+      if (pn.textContent !== next) {
+        pn.textContent = next;
+        if (needsShown >= 0 && !winInstant()) { pn.classList.remove("bump"); void pn.offsetWidth; pn.classList.add("bump"); }
+      }
+    }
+  }
+  needsShown = attn;
   const pt = CAUI.tokenTotal(p.tokens);
   $("tokenChip").hidden = !pt;
   if (pt) {
@@ -1140,7 +1156,9 @@ function setStation(key, opts) {
   }
   plate.style.display = "flex";
   if (sp) sp.el.style.display = "";
-  plate.querySelector(".p-name").textContent = opts.name;
+  const pname = plate.querySelector(".p-name");
+  pname.textContent = opts.name;
+  pname.title = opts.name;
   plate.querySelector(".p-sub").textContent = opts.sub;
   plate.dataset.lane = opts.laneId;
   if (badge) {
