@@ -129,7 +129,7 @@ export async function uninstall(args) {
 
 // The install command: CA_UPDATE_CMD when set (a shell command line, used by the checks); else a
 // git pull when the package root is a checkout, else a fresh global install from GitHub.
-function installCommand() {
+export function installCommand() {
   if (process.env.CA_UPDATE_CMD) return process.env.CA_UPDATE_CMD;
   const root = path.resolve(HERE, '..');
   if (fs.existsSync(path.join(root, '.git'))) return `git -C ${root} pull --ff-only`;
@@ -176,7 +176,7 @@ const UPDATE_FILE = path.join(STATE_DIR, 'update.json');
 // How long a cached result is trusted before a refresh: 24 h, CA_UPDATE_TTL_H hours overrides it.
 export const UPDATE_TTL_MS = (() => { const h = Number(process.env.CA_UPDATE_TTL_H); return (Number.isFinite(h) && h > 0 ? h : 24) * 3600 * 1000; })();
 
-function currentVersion() { try { return String(JSON.parse(fs.readFileSync(PKG_FILE, 'utf8')).version || '0.0.0'); } catch { return '0.0.0'; } }
+export function currentVersion() { try { return String(JSON.parse(fs.readFileSync(PKG_FILE, 'utf8')).version || '0.0.0'); } catch { return '0.0.0'; } }
 function updateBaseUrl() { const u = process.env.CA_UPDATE_URL || 'https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/'; return u.endsWith('/') ? u : `${u}/`; }
 
 // null when the cache is missing or unreadable.

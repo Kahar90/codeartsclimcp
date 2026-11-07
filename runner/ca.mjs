@@ -1893,6 +1893,34 @@ function cmdDash(args) {
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
+      if (u.pathname === '/api/update') {
+        // The update pill: the cached check plus the running dash pid. A stale cache refreshes in
+        // the background; ?refresh=1 waits for a fresh check. POST runs `ca update` and then
+        // restarts this same dashboard on the same port (after the response is sent).
+        const { readUpdateCache, checkUpdate, installCommand, currentVersion, UPDATE_TTL_MS } = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href);
+        const view = (c) => ({ current: (c && c.current) || currentVersion(), latest: (c && c.latest) || null, available: !!(c && c.available), notes: (c && Array.isArray(c.notes)) ? c.notes : [], cmd: (c && c.cmd) || installCommand(), checkedAt: (c && c.checkedAt) || 0, error: (c && c.error) || undefined, pid: process.pid });
+        if (req.method === 'POST') {
+          const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'update', '--json'], { encoding: 'utf8', env: caEnv(), windowsHide: true });
+          let out = ''; child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
+          const code = await new Promise((res) => { const to = setTimeout(() => { try { child.kill(); } catch {} res(-1); }, 600000); child.on('close', (c) => { clearTimeout(to); res(c); }); child.on('error', () => { clearTimeout(to); res(-1); }); });
+          if (code !== 0) {
+            const tail = out.trim().split(/\r?\n/).slice(-4).join(' ').slice(0, 300);
+            return json({ ok: false, error: `${tail} (exit ${code})` }, 500);
+          }
+          json({ ok: true, restarting: true, output: out.trim().slice(0, 2000) });
+          res.on('finish', () => {
+            try { srv.close(); } catch {}
+            try { spawn(process.execPath, [fileURLToPath(import.meta.url), 'dash', String(port)], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env }).unref(); } catch {}
+            setTimeout(() => process.exit(0), 50);
+          });
+          return;
+        }
+        let cache = readUpdateCache();
+        const stale = !cache || typeof cache.checkedAt !== 'number' || Date.now() - cache.checkedAt >= UPDATE_TTL_MS;
+        if (u.searchParams.get('refresh') === '1') { try { cache = await checkUpdate({ force: true, timeoutMs: 5000 }); } catch {} }
+        else if (stale) { try { spawn(process.execPath, [fileURLToPath(import.meta.url), 'update', '--check', '--json'], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch {} }
+        return json(view(cache));
+      }
       if (u.pathname === '/api/auth') {
         // Start the local key form (runner/auth.mjs) for the Connect keys button and hand back its
         // URL. The child prints JSON only; key values never reach this process, the page or the logs.
@@ -1954,9 +1982,18 @@ function cmdDash(args) {
       json({ error: 'not found' }, 404);
     } catch (err) { json({ error: String(err.message || err) }, 500); }
   });
-  srv.on('error', (e) => { if (e.code === 'EADDRINUSE') { console.log(`ca dash is already running: http://127.0.0.1:${port}`); process.exit(0); } throw e; });
   // Loopback by default (the dashboard drives lanes); CA_DASH_HOST only moves it within the machine.
-  srv.listen(port, process.env.CA_DASH_HOST || '127.0.0.1', () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
+  const dashHost = process.env.CA_DASH_HOST || '127.0.0.1';
+  const listenStarted = Date.now();
+  const listenDash = () => srv.listen(port, dashHost, () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
+  srv.on('error', (e) => {
+    if (e.code !== 'EADDRINUSE') throw e;
+    // A POST /api/update restart spawns a fresh dash that must reclaim the same port once the old
+    // process releases it: retry for up to 10 s (the port is briefly busy), then give up.
+    if (Date.now() - listenStarted < 10000) { setTimeout(listenDash, 250); return; }
+    console.log(`ca dash is already running: http://127.0.0.1:${port}`); process.exit(0);
+  });
+  listenDash();
 }
 
 function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(code); }
