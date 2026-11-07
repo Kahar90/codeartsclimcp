@@ -42,6 +42,12 @@ summaries, not transcripts.
   session, server restarts the codearts server, now skips a backoff wait). Ended lane:
   `ca_resume {lane, note}` continues a paused, failed, stopped or DEAD lane in place, applying
   the note first. The human can do both from the dashboard.
+- Handled: after you deal with a failed, paused or needs-review lane yourself (merged it, took it
+  over, dropped it), `ca_ack {lane, note}` moves it out of the human's "Needs you" list into
+  Ended with your note. It comes back if the lane runs and ends again.
+- Tokens of the lead: Claude Code leads run `ca lead-tokens` once per plan (reads the session
+  transcript live); other harnesses report with `ca_lead_tokens` or `leadTokens` in plan.json.
+  Unknown usage shows as "not reported", never as 0.
 - Token counters: each lane tracks its tokens per agent (build, review, other sessions) and per
   model; `ca_status`, `ca_summary` and the plan views carry them, so cost is visible per lane
   and per plan.
