@@ -34,7 +34,14 @@ try {
   const key = (k, vk) => send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: vk }).then(() => send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: vk }));
   const type = (text) => send('Input.insertText', { text });
   const center = (sel) => ev(`(function(){const el=document.querySelector('${sel}');if(!el)return null;const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})()`);
-  const clickSel = async (sel) => { const c = await center(sel); if (!c) return false; await click(c.x, c.y); return true; };
+  const clickSel = async (sel) => {
+    // Scroll the target into view first, including when the sticky action bar (#bar) covers it: the
+    // page is taller than the viewport, so a raw coordinate click on an off-screen button or one
+    // hidden under the bar (evidence tabs, quick-steer chips, lane cards) would miss. A target counts
+    // as ready only when it is inside the viewport and the topmost element at its centre is itself.
+    const c = await ev(`(function(){const el=document.querySelector('${sel}');if(!el)return null;const r=el.getBoundingClientRect();const cx=r.left+r.width/2,cy=r.top+r.height/2;const over=(cx>=0&&cy>=0&&cx<=innerWidth&&cy<=innerHeight)?document.elementFromPoint(cx,cy):null;const clear=!!over&&(over===el||el.contains(over));if(!clear)el.scrollIntoView({block:'center',inline:'center'});const r2=el.getBoundingClientRect();return {x:r2.left+r2.width/2,y:r2.top+r2.height/2};})()`);
+    if (!c) return false; await click(c.x, c.y); return true;
+  };
   await send('Runtime.enable');
 
   await size(1280, 800); await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1800);
@@ -62,9 +69,10 @@ try {
   const opened = JSON.parse(await ev('(function(){const b=document.querySelector("[data-steps]");return JSON.stringify({hash:location.hash,open:b?b.getAttribute("aria-expanded"):"",items:document.querySelectorAll(".steplist li").length});})()') || '{}');
   check('step disclosure opens without route change', opened.hash === hash0 && opened.open === 'true' && opened.items === 7, JSON.stringify(opened));
   await ev('document.querySelector(".lane-name").click()'); await wait(900);
-  const det = JSON.parse(await ev('(function(){return JSON.stringify({hash:location.hash,back:document.querySelector(".backlink")?.getAttribute("href"),h1:document.querySelector(".idrow h1")?.innerText,metrics:document.querySelectorAll(".metrics .m").length,mtokens:document.querySelector(".metrics")?.innerText||"",segs:document.querySelectorAll(".seg").length,now:document.querySelector(".nowband")?.innerText||"",steps:document.querySelectorAll(".steprow").length,ctx:document.querySelectorAll(".ctxrow").length,sprite:document.querySelectorAll(".px-sprite:not(.px-fallback)").length});})()') || '{}');
+  const det = JSON.parse(await ev('(function(){return JSON.stringify({hash:location.hash,back:document.querySelector(".backlink")?.getAttribute("href"),h1:document.querySelector(".idrow h1")?.innerText,metrics:document.querySelectorAll(".metrics .m").length,mtokens:document.querySelector(".metrics")?.innerText||"",tokTitle:document.querySelector(".metrics .m[title]")?.getAttribute("title")||"",tokRows:document.querySelectorAll(".tokrow").length,segs:document.querySelectorAll(".seg").length,now:document.querySelector(".nowband")?.innerText||"",steps:document.querySelectorAll(".steprow").length,ctx:document.querySelectorAll(".ctxrow").length,sprite:document.querySelectorAll(".px-sprite:not(.px-fallback)").length});})()') || '{}');
   check('lane detail renders identity, metrics and context', det.hash === '#/lane/demo-repo--office-layout' && det.back === '#/plan/office-polish' && det.h1 === 'office-layout' && det.metrics === 7 && det.segs === 5 && det.steps === 7 && det.ctx === 3 && det.sprite === 1, JSON.stringify(det));
-  check('metrics format thousands and n/a', /52,764 in \/ 202 out/.test(det.mtokens) && /Build/.test(det.mtokens), det.mtokens.slice(0, 120));
+  check('metrics show the compact token total with detail in its title', /66k/.test(det.mtokens) && /53k in \/ 202 out \/ 4\.2k reasoning \/ 9\.0k cache/.test(det.tokTitle) && /Build/.test(det.mtokens), `${det.mtokens.slice(0, 60)} | ${det.tokTitle}`);
+  check('lane detail shows three tokens-by-agent rows', det.tokRows === 3, String(det.tokRows));
   check('now band shows the current step', /Step 1/.test(det.now), det.now.slice(0, 80));
   const cpt = JSON.parse(await ev('(function(){const b=document.querySelector("[data-ctx=gates]");if(!b)return "{}";const r=b.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()') || '{}');
   if (cpt.x != null) { await click(cpt.x, cpt.y); await wait(200); }
@@ -170,6 +178,52 @@ try {
   s = await st();
   check('no horizontal overflow on the phone lane detail', s?.overflowX === false, JSON.stringify({ overflowX: s?.overflowX }));
   await shot('lanes-phone-detail');
+  // tokens and lane controls (step 4-7)
+  await size(1280, 800); await send('Page.navigate', { url: base + '/?demo=1#/lane/demo-repo--office-layout' }); await wait(1500);
+  s = await st();
+  const trowSum = await ev('[...document.querySelectorAll(".tokrow")].reduce((a,r)=>a+(+r.dataset.total||0),0)');
+  check('running lane token total equals the sum of its three agent rows', !!s?.lane?.tokens && s.lane.tokens.total === s.lane.tokens.build + s.lane.tokens.review + s.lane.tokens.other && s.lane.tokens.total === trowSum, JSON.stringify({ tokens: s?.lane?.tokens, trowSum }));
+  check('running lane control ids render in order with attach and stop', Array.isArray(s?.lane?.actions) && s.lane.actions[0] === 'kick' && s.lane.actions.includes('attach') && s.lane.actions.includes('stop'), JSON.stringify(s?.lane?.actions));
+  await shot('lanes-detail-controls');
+  await ev('location.hash = "#/lane/demo-repo--stuck"'); await wait(1300);
+  s = await st();
+  check('stuck lane suggests kick and renders it first', s?.lane?.suggest === 'kick' && s?.lane?.actions?.[0] === 'kick', JSON.stringify({ suggest: s?.lane?.suggest, actions: s?.lane?.actions }));
+  const kickPrimary = await ev('(function(){const b=document.querySelector("#bar .ctlbar .sugbtn");return b?{action:b.dataset.action,primary:b.classList.contains("primary")}:null;})()');
+  check('the suggested kick button is primary', !!kickPrimary && kickPrimary.action === 'kick' && kickPrimary.primary === true, JSON.stringify(kickPrimary));
+  await clickSel('#bar .ctlbar .sugbtn'); await wait(300);
+  s = await st();
+  check('clicking the suggested kick opens the note box', s?.lane?.noteOpen === true && (await ev('!!document.querySelector("#bar .notebox textarea")')) === true, JSON.stringify({ noteOpen: s?.lane?.noteOpen }));
+  await clickSel('#bar .notebox textarea'); await type('continue the turn'); await wait(150);
+  await clickSel('#bar .notebox [data-note-send]');
+  let kickCtl = null; for (let i = 0; i < 30 && !kickCtl; i++) { await wait(150); kickCtl = await ev('(window.__lanes.state().controls||[]).find(c=>c.action==="kick")'); }
+  check('kick note flow logs {action kick, mode turn, text}', !!kickCtl && kickCtl.body?.mode === 'turn' && kickCtl.body?.text === 'continue the turn', JSON.stringify(kickCtl));
+  check('the kick flow keeps the lane route', (await ev('location.hash')) === '#/lane/demo-repo--stuck', String(await ev('location.hash')));
+  await ev('location.hash = "#/lane/demo-repo--stall"'); await wait(1300);
+  s = await st();
+  check('failed lane offers resume as its first control', s?.lane?.actions?.[0] === 'resume', JSON.stringify(s?.lane?.actions));
+  await clickSel('#bar .ctlbar .sugbtn'); await wait(300);
+  await clickSel('#bar .notebox textarea'); await type('pick up where you left off'); await wait(150);
+  await clickSel('#bar .notebox [data-note-send]');
+  let resCtl = null; for (let i = 0; i < 30 && !resCtl; i++) { await wait(150); resCtl = await ev('(window.__lanes.state().controls||[]).find(c=>c.action==="resume")'); }
+  check('resume note flow logs body.note', !!resCtl && resCtl.body?.note === 'pick up where you left off', JSON.stringify(resCtl));
+  // plan home: token total and a one-click suggested action on the stuck card
+  await ev('location.hash = "#/plan/string-utils"'); await wait(1300);
+  s = await st();
+  check('plan home shows a plan token total', typeof s?.plan?.tokens === 'number' && s.plan.tokens > 0, String(s?.plan?.tokens));
+  check('plan home marks the stuck card for one-click', Array.isArray(s?.plan?.suggestButtons) && s.plan.suggestButtons.includes('demo-repo--stuck'), JSON.stringify(s?.plan?.suggestButtons));
+  await shot('lanes-plan-home-tokens');
+  await clickSel('.lane-card .sugbtn'); await wait(300);
+  await clickSel('.lane-card .notebox textarea'); await type('retry the stuck turn'); await wait(150);
+  await clickSel('.lane-card .notebox [data-note-send]');
+  let planKick = null; for (let i = 0; i < 30 && !planKick; i++) { await wait(150); planKick = await ev('(window.__lanes.state().controls||[]).find(c=>c.action==="kick" && c.body && c.body.text==="retry the stuck turn")'); }
+  check('one-click on the stuck card logs a kick without changing the route', !!planKick && (await ev('location.hash')) === '#/plan/string-utils', JSON.stringify(planKick));
+  // quick steering fills the draft only
+  await ev('location.hash = "#/lane/demo-repo--office-layout"'); await wait(1300);
+  const chipTxt = await ev('(function(){const c=document.querySelector("#quickSteers .qchip");return c?c.title:"";})()');
+  const chipN = await ev('document.querySelectorAll("#quickSteers .qchip").length');
+  await clickSel('#quickSteers .qchip'); await wait(250);
+  s = await st();
+  check('quick steering chips render and a click fills the steer draft', chipN === 5 && !!chipTxt && s?.quickSteers === 5 && s?.lane?.draft === chipTxt && (await ev('document.getElementById("msg").value')) === chipTxt, JSON.stringify({ chipN, chipTxt, draft: s?.lane?.draft }));
   // / without demo and with an empty registry shows the onboarding panel
   const tmp = fs.mkdtempSync(path.join(process.env.TEMP || ROOT, 'ca-lanes-empty-'));
   const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSON.stringify({ security: { trustedFolders: [] } }));

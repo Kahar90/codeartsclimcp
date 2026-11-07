@@ -48,6 +48,8 @@ a { text-decoration: none }
 .plan-sub { color: var(--muted); margin: 7px 0 0; font-size: 13.5px }
 .goal { max-width: 900px; margin: 12px 0 0; font-size: 14.5px; color: var(--fg) }
 .plan-path { color: var(--faint); font: 12px var(--mono); margin: 9px 0 0; overflow-wrap: anywhere }
+.plan-tok { color: var(--muted); font: 12px var(--mono); margin: 6px 0 0 }
+.lane-tok { color: var(--faint); font: 12px var(--mono); margin-top: 3px }
 .leadband { display: flex; align-items: center; gap: 14px; border: 1.5px solid var(--sel); background: var(--panel); border-radius: var(--radius); padding: 12px 16px; margin: 18px 0 4px }
 .leadband .who { font-weight: 700; color: var(--sel-ink); white-space: nowrap }
 .leadband .vdiv { width: 1px; align-self: stretch; background: var(--border-2); flex: none }
@@ -80,6 +82,9 @@ a { text-decoration: none }
 .curband .t2 { color: var(--muted); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px }
 .chip { font: 11.5px var(--mono); color: var(--muted); background: var(--raise); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; overflow-wrap: anywhere }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px }
+.qchip { cursor: pointer; color: var(--sel-ink); background: var(--raise); border: 1px solid var(--border-2); font: 600 11.5px var(--font); border-radius: 5px; padding: 4px 9px }
+.qchip:hover { border-color: var(--sel) }
 .stepsdisc > button { display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; color: var(--sel-ink); font: 600 12.5px var(--font); cursor: pointer; padding: 4px 2px }
 .stepsdisc > button:hover { text-decoration: underline }
 .stepsdisc .tri { display: inline-block; transition: transform .15s; font-size: 10px }
@@ -118,6 +123,15 @@ ul.plain li:first-child { border-top: 0 }
 .metrics .m:first-child { border-left: 0; padding-left: 0 }
 .metrics .lb { color: var(--muted); white-space: nowrap }
 .metrics b { color: var(--fg); font-weight: 650; overflow-wrap: anywhere }
+.tokbox { margin-top: 16px }
+.tokby { display: grid; gap: 9px }
+.tokrow { display: grid; grid-template-columns: minmax(96px, 140px) 60px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 12.5px }
+.tokrow .tk-lb { color: var(--muted); overflow-wrap: anywhere }
+.tokrow .tk-n { font: 12px var(--mono); color: var(--fg); text-align: right }
+.tokrow .tk-bar { height: 8px; background: var(--raise); border-radius: 4px; overflow: hidden; min-width: 40px }
+.tokrow .tk-bar > i { display: block; height: 100%; background: var(--run) }
+.tokrow .tk-bar > i.review { background: var(--sel) }
+.tokrow .tk-bar > i.other { background: var(--amber) }
 .wt { font: 12px var(--mono); color: var(--faint); margin-top: 10px; overflow-wrap: anywhere; user-select: all }
 .pipe { display: flex; margin-top: 16px; flex-wrap: wrap }
 .seg { padding: 6px 16px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font-size: 12.5px; font-weight: 600; margin-right: -1px; white-space: nowrap }
@@ -176,6 +190,13 @@ button.btn:disabled { opacity: .45; cursor: default }
 button.btn.primary { background: var(--sel); border-color: var(--sel); color: #171320 }
 button.btn.danger { color: var(--bad); border-color: var(--bad); background: transparent }
 #steerErr { color: var(--bad); font-size: 12.5px; flex: none; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ctlbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0 }
+.ctlbar .why { color: var(--muted); font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.notebox { display: flex; gap: 8px; align-items: center; flex-basis: 100%; min-width: 0; margin-top: 8px }
+.notebox textarea { flex: 1; min-width: 140px; min-height: 34px; max-height: 96px; resize: vertical; background: var(--panel); border: 1px solid var(--border-2); color: var(--fg); font: 13px var(--font); border-radius: var(--radius-sm); padding: 8px 10px }
+.notebox textarea:focus { outline: none; border-color: var(--sel) }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60; background: var(--panel); border: 1.5px solid var(--sel); color: var(--fg); border-radius: var(--radius-sm); padding: 9px 15px; font-size: 13px; max-width: 80vw; box-shadow: 0 8px 26px rgba(0,0,0,.4) }
+#toast.err { border-color: var(--bad); color: var(--bad) }
 
 /* ---------- onboarding ---------- */
 .cmd { display: flex; align-items: center; gap: 10px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0; cursor: pointer }
@@ -188,6 +209,7 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 @keyframes rowflash { 0% { background: var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel) } 100% { background: transparent; box-shadow: none } }
 .flash { animation: rowflash 1.6s ease-out 1 }
 @media (prefers-reduced-motion: reduce) { .flash { animation: none } }
+[hidden] { display: none !important }
 
 /* ---------- narrow ---------- */
 @media (max-width: 1024px) { .grid21 { grid-template-columns: 1fr } }
@@ -259,9 +281,16 @@ const dAdv = () => DEMO_ADV && Date.now() - DEMO_T0 > 6000;
 const dClock = (i) => { const t = new Date(DEMO_T0 + i * 1500); return [t.getHours(), t.getMinutes(), t.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); };
 const D_REPO = 'D:\\Coding\\demo-repo';
 const D_HASHES = ['e3f1c2a', 'b7d94ce', 'c5a83f1', 'd9274ab', 'a6b5e90'];
+// token fixture helpers: one record per role, summed up so lane/plan totals always match the by-agent rows.
+function dTok(input, output, extra) { const t = Object.assign({ input: input || 0, output: output || 0, reasoning: 0, cacheRead: 0, steps: 1 }, extra || {}); t.total = t.input + t.output + t.reasoning + t.cacheRead; return t; }
+function dTokAdd(list) { const s = (k) => list.reduce((a, x) => a + ((x && x[k]) || 0), 0); return dTok(s('input'), s('output'), { reasoning: s('reasoning'), cacheRead: s('cacheRead'), steps: s('steps') }); }
+function dTokBy(build, review, other) { const by = { build, review, other }; return { tokens: dTokAdd([build, review, other]), tokensBy: by }; }
+function planTokSum(lanes) { const list = lanes.map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
+const D_RUN_ACTIONS = ['steer', 'stop', 'attach', 'kick', 'fresh', 'restart-server'];
+const demoControls = []; // fixture log of kick/resume POSTs, read by the check harness
 function dLane(id, task, o) {
   return Object.assign({ lane: id, id, task, repo: D_REPO, health: 'planned', phase: 'planned', elapsed: '', idle: '-', commits: '0/0',
-    steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
+    steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tokensBy: {}, actions: [], suggest: '', why: '', tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
     session: '', reason: '', running: false, result: '', progress: { done: 0, total: 0, current: null },
     startedAt: DEMO_T0 - 600000, finishedAt: null, fixes: 0 }, o);
 }
@@ -293,17 +322,19 @@ const D_REVIEW_CHAOS = '## Review\n\nVerdict: needs fixes\n\nThe layout work lan
 const D_SUMMARY_CHAOS = '## Summary\n\nReworked the Lanes dashboard as Pixel Workshop Lanes: plum shell, persistent plans rail, plan homescreen with full-width waves and a full-page lane detail.\n\nKept every route, data call and action. The demo fixture renders both routes without real lanes; steer, stop and open TUI answer through the same handlers.';
 function demoLanes() {
   return [
-    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', tokens: { input: 52764, output: 202 }, session: 's-7011', startedAt: DEMO_T0 - 231000,
+    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', ...dTokBy(dTok(48000, 150, { reasoning: 4200, cacheRead: 9000 }), dTok(3900, 40), dTok(864, 12)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7011', startedAt: DEMO_T0 - 231000,
       runs: 2, continues: [{ id: 'demo-repo--office-v2', task: 'office-v2', reason: 'paused by the operator for a scope change', commits: 6, progress: { done: 6, total: 8 }, elapsed: '41m 12s' }],
       progress: dAdv() ? { done: 1, total: 7, current: { n: 2, text: D_STEPS_LAYOUT[1] } } : { done: 0, total: 7, current: { n: 1, text: D_STEPS_LAYOUT[0] } }, tools: [{ tool: 'edit', input: 'runner/dash.html', since: DEMO_T0 - 9000 }] }),
-    dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', tokens: { input: 21014, output: 5302 }, session: 's-7012', startedAt: DEMO_T0 - 437000,
+    dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', ...dTokBy(dTok(21014, 5302, { reasoning: 1100, cacheRead: 3000 }), dTok(1200, 90), dTok(300, 20)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7012', startedAt: DEMO_T0 - 437000,
       progress: { done: 2, total: 4, current: { n: 3, text: D_STEPS_STRINGS[2] } } }),
-    dLane('demo-repo--path-join', 'path-join', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', tokens: { input: 12050, output: 3211 }, finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
-    dLane('demo-repo--cli-dx', 'cli-dx', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '41m 10s', commits: '8/8', tokens: { input: 8600, output: 12300 }, finishedAt: DEMO_T0 - 1800000, progress: { done: 8, total: 8, current: null } }),
-    dLane('demo-repo--office-scene', 'office-scene', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '46m 03s', commits: '6/6', tokens: { input: 12100, output: 21400 }, finishedAt: DEMO_T0 - 2600000, progress: { done: 6, total: 6, current: null } }),
-    dLane('demo-repo--stall', 'stall', { health: 'failed', phase: 'finished', result: 'failed', reason: 'no progress for 20 minutes', elapsed: '22m 41s', commits: '1/5', tokens: { input: 4300, output: 690 }, finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 5, current: null } }),
-    dLane('demo-repo--orphan', 'orphan', { health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', tokens: { input: 900, output: 80 }, finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
-    dLane('demo-repo--chaos', 'chaos', { health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', tokens: { input: 7300, output: 1060 }, finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
+    dLane('demo-repo--stuck', 'stuck', { health: 'STALLED', phase: 'build', running: true, elapsed: '9m 04s', idle: '6m', commits: '1/4', now: 'Waiting on the model', ...dTokBy(dTok(16000, 2400, { reasoning: 800, cacheRead: 2000 }), dTok(0, 0), dTok(0, 0)), actions: D_RUN_ACTIONS, suggest: 'kick', why: 'no model activity for 6m', session: 's-7013', startedAt: DEMO_T0 - 544000,
+      progress: { done: 1, total: 4, current: { n: 2, text: D_STEPS_STRINGS[1] } } }),
+    dLane('demo-repo--path-join', 'path-join', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', ...dTokBy(dTok(12050, 3211), dTok(900, 120), dTok(150, 10)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
+    dLane('demo-repo--cli-dx', 'cli-dx', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '41m 10s', commits: '8/8', ...dTokBy(dTok(8600, 12300), dTok(600, 200), dTok(200, 30)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 1800000, progress: { done: 8, total: 8, current: null } }),
+    dLane('demo-repo--office-scene', 'office-scene', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '46m 03s', commits: '6/6', ...dTokBy(dTok(12100, 21400), dTok(500, 150), dTok(100, 20)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 2600000, progress: { done: 6, total: 6, current: null } }),
+    dLane('demo-repo--stall', 'stall', { health: 'failed', phase: 'finished', result: 'failed', reason: 'no progress for 20 minutes', elapsed: '22m 41s', commits: '1/5', ...dTokBy(dTok(4300, 690), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: 'resume', why: 'gave up after 3 interruptions (transport)', finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 5, current: null } }),
+    dLane('demo-repo--orphan', 'orphan', { health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', ...dTokBy(dTok(900, 80), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
+    dLane('demo-repo--chaos', 'chaos', { health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', ...dTokBy(dTok(7300, 1060), dTok(2200, 300), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
   ];
 }
 function demoPlans() {
@@ -321,6 +352,7 @@ function demoPlans() {
         { at: dIso(41), text: 'Wave cards go full width; the old horizontal scroll clipped long titles.' },
         { at: dIso(12), text: 'The step disclosure never navigates; only the lane name link opens the detail route.' },
       ],
+      ...planTokSum([by['demo-repo--office-layout']]),
       waves: [{ name: 'Wave 1 · Layout', note: 'Stage geometry and the check hook', status: 'running', lanes: [wp('demo-repo--office-layout', { model: 'maas/glm-5.3', why: 'Owns the layout rework end to end', files: ['runner/dash.html', 'checks/lanes.check.mjs'], briefExists: true })] }] },
     { id: 'string-utils', file: 'D:/Coding/demo-repo/tasks/strings.json', updatedAt: dIso(2), title: 'String utils for sandbox',
       goal: 'Give the sandbox string helpers: formatting, path joins and escaping, each covered by a check.',
@@ -329,9 +361,11 @@ function demoPlans() {
       next: [{ text: 'Read the path-join verdict', done: true }, { text: 'Land string-utils once its check passes', done: false }],
       risks: ['Escaping rules differ between cmd and bash'],
       decisions: [{ at: dIso(90), text: 'Split the work: one lane per helper family so review stays small.' }],
+      ...planTokSum([by['demo-repo--string-utils'], by['demo-repo--path-join'], by['demo-repo--stuck']]),
       waves: [{ name: 'Wave 1 · Helpers', note: '', status: 'running', lanes: [
         wp('demo-repo--string-utils', { model: 'maas/glm-5.3', why: 'Formatting and escaping helpers', files: ['runner/sandbox.mjs'], briefExists: true }),
         wp('demo-repo--path-join', { model: 'maas/qwen3-coder', why: 'Small surface, quick win', files: ['runner/sandbox.mjs'], briefExists: true }),
+        wp('demo-repo--stuck', { model: 'maas/glm-5.3', why: 'Recover the stalled turn', files: ['runner/sandbox.mjs'], briefExists: true }),
       ] }] },
   ];
 }
@@ -445,6 +479,8 @@ async function demoPost(what, id, body) {
     if (!body || !body.text || !body.text.trim()) return { error: 'empty' };
     return l && l.running ? { ok: true } : { error: 'lane not running' };
   }
+  if (what === 'kick') { demoControls.push({ laneId: id, action: 'kick', body: body || {} }); return { ok: true, message: `Kick sent (${(body && body.mode) || 'turn'})` }; }
+  if (what === 'resume') { demoControls.push({ laneId: id, action: 'resume', body: body || {} }); return { ok: true, message: 'Lane resumed' }; }
   return { ok: true };
 }
 function demoDoctor() {
@@ -459,7 +495,7 @@ async function demoApi(path, opts) {
   if (u.pathname === '/api/plans') return demoPlans();
   if (u.pathname === '/api/lanes') return demoLanes();
   if (u.pathname === '/api/doctor') return demoDoctor();
-  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach)$/);
+  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume)$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
     if (m[2] === 'detail') return demoDetail(id);
@@ -474,13 +510,62 @@ async function api(path, opts) {
   const r = await fetch(path, opts);
   return r.json();
 }
+// CAUI.control (workshop.js) always fetches the server, so on ?demo=1 it never reaches the in-page
+// fixture. Swap it for api(), the demo-aware layer, only while demo mode is on.
+if (DEMO) {
+  CAUI.control = function (laneId, action, extra) {
+    const a = CAUI.ACTIONS[action];
+    if (!a) return Promise.resolve({ error: 'unknown action ' + action });
+    const body = Object.assign({}, a.body || {}, extra || {});
+    return api(`/api/lane/${encodeURIComponent(laneId)}/${a.path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then((r) => (r && r.error ? r : Object.assign({ ok: true }, r || {})));
+  };
+}
 
 let plans = [], lanes = [], detail = null, route = { kind: '', id: '' }, tab = 'log';
 const tstate = new Map(); // laneId -> {html, pos, rendered, follow, top, atBottom} transcript state
 const drafts = new Map(); // laneId -> steer text typed so far
 const evScroll = new Map(); // "laneId:tab" -> evidence scroll top
-let inFlight = null; // {what, laneId} while a steer/stop/attach POST runs
+let inFlight = null; // {what, laneId} while a steer/stop/attach/control POST runs
+const ctlNotes = new Map(); // laneId -> { action, text } while an inline note box is open
 const tget = (id) => { let s = tstate.get(id); if (!s) { s = { html: '', pos: 0, rendered: 0, follow: true, top: 0, atBottom: true }; tstate.set(id, s); } return s; };
+
+function toast(msg, err) {
+  const el = document.createElement('div');
+  el.id = 'toast'; el.className = err ? 'err' : ''; el.setAttribute('role', 'status'); el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+async function sendControl(laneId, action, extra) {
+  inFlight = { what: action, laneId };
+  let r; try { r = await CAUI.control(laneId, action, extra); } catch { r = { error: 'request failed' }; }
+  inFlight = null;
+  if (!r.error) ctlNotes.delete(laneId);
+  toast(r.error ? r.error : (r.message || `${action} sent`), !!r.error);
+  refresh(true);
+}
+function rerenderLane(laneId) {
+  if (route.kind === 'lane' && detail && detail.id === laneId) patchLane(detail);
+  else if (route.kind === 'plan' && curPlan) renderPlan(curPlan);
+}
+function runControl(action, laneId) {
+  const A = CAUI.ACTIONS[action]; if (!A || !laneId) return;
+  if (A.danger && !confirm(A.danger)) return;
+  if (A.note) { ctlNotes.set(laneId, { action, text: ctlNotes.get(laneId)?.text || '' }); rerenderLane(laneId); return; }
+  sendControl(laneId, action, {});
+}
+const CTL_ORDER = ['skip-wait', 'kick', 'fresh', 'restart-server', 'resume', 'attach', 'stop'];
+// Control buttons for a lane. suggestOnly is used by the plan-home cards: just the suggested action.
+function ctlBar(l, suggestOnly) {
+  const acts = (Array.isArray(l.actions) ? l.actions : []).filter((a) => a !== 'steer' && CAUI.ACTIONS[a]);
+  const sug = l.suggest && acts.includes(l.suggest) ? l.suggest : '';
+  const btns = (a, primary) => { const A = CAUI.ACTIONS[a]; return `<button type="button" class="btn ctl${primary ? ' primary sugbtn' : ''}${A.danger ? ' danger' : ''}" data-action="${esc(a)}" data-lane="${esc(l.id)}" title="${esc(A.title)}">${esc(A.label)}</button>`; };
+  const head = sug ? btns(sug, true) + (l.why ? `<span class="why" title="${esc(l.why)}">${esc(l.why)}</span>` : '') : '';
+  const rest = suggestOnly ? '' : CTL_ORDER.filter((a) => acts.includes(a) && a !== sug).map((a) => btns(a, false)).join('');
+  const open = ctlNotes.get(l.id);
+  const note = open ? `<div class="notebox"><textarea data-note-text="${esc(l.id)}" placeholder="Note for the worker, optional">${esc(open.text || '')}</textarea><button type="button" class="btn primary" data-note-send="${esc(l.id)}">Send</button><button type="button" class="btn" data-note-cancel="${esc(l.id)}">Cancel</button></div>` : '';
+  return `<div class="ctlbar">${head}${rest}</div>${note}`;
+}
 
 function prog(p, res) {
   const t = p?.total || 0, d = p?.done || 0; const pct = t ? Math.round((100 * d) / t) : 0;
@@ -535,7 +620,7 @@ function renderRail() {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
       <div class="rail-row">${dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}</div>
-      <div class="rail-sub">${esc(planSummary(p))}</div></div>`;
+      <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
   h += '<div class="rail-div"></div><div class="rail-h">' + (plans.length ? 'Other lanes' : 'Lanes') + '</div>';
@@ -579,9 +664,11 @@ function renderPlan(p) {
       <div class="lane-main">
         <a class="lane-name" href="#/lane/${esc(l.id)}">${esc(l.task)}</a>
         <div class="lane-meta">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
+        <div class="lane-tok" title="${esc(CAUI.tokenDetail(l.tokens))}">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</div>
         ${contLine(l)}
         <div class="lane-steps"><span>${l.progress?.total ? `${l.progress.done}/${l.progress.total} steps` : 'no numbered steps'}</span>${prog(l.progress, l.result)}</div>
         ${curBand(l)}${stepsBlock(l)}
+        ${l.suggest ? ctlBar(l, true) : ''}
       </div></div>`;
   const waves = p.waves.map((w, i) => {
     const key = `${p.id}::${i}`, collapsed = waveCollapsed.has(key);
@@ -593,6 +680,8 @@ function renderPlan(p) {
   const next = p.next.length ? `<ul class="plain">${p.next.map((n) => `<li class="${n.done ? 'st-done' : 'st-pending'}"><span class="ic">${n.done ? '&#10003;' : '&#9675;'}</span><span style="min-width:0">${esc(n.text)}</span></li>`).join('')}</ul>` : '<div class="small">Nothing listed</div>';
   const risks = p.risks.length ? `<h4 style="margin-top:14px">Risks</h4><ul class="plain">${p.risks.map((r) => `<li class="risk"><span class="ic">!</span><span style="min-width:0">${esc(r)}</span></li>`).join('')}</ul>` : '';
   const dec = p.decisions.length ? `<ul class="plain dec">${[...p.decisions].reverse().map((d) => `<li><span class="at">${esc(clock(d.at))}</span><span class="dv"></span><span class="tx">${esc(d.text)}</span></li>`).join('')}</ul>` : '<div class="small">None yet</div>';
+  const pRows = CAUI.tokenSplit(p.tokensBy);
+  const planTokTitle = pRows.map((r) => `${r.label} ${CAUI.fmtTokens(r.total)}`).join(' / ');
   $('view').innerHTML = `<div class="pad">
     <div class="plan-head">
       <h1>${esc(p.title)}</h1>
@@ -600,6 +689,7 @@ function renderPlan(p) {
       ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
+      <div class="plan-tok" title="${esc(planTokTitle)}">Tokens ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))}</div>
     </div>
     ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${p.closed ? 'Outcome' : 'Lead now'}</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
     ${waves}
@@ -632,9 +722,10 @@ function renderLane(d, keep) {
   const wl = plan ? plan.waves.flatMap((w) => w.lanes).find((l) => l.id === d.id) : null; // the plan wave entry carries continues/runs when the detail does not
   const st = CAUI.status(d.health, d.result);
   const na = (v) => (v == null || v === '' || v === '-') ? 'n/a' : esc(v);
-  const metric = (lb, val) => `<span class="m"><span class="lb">${lb}</span><b>${val}</b></span>`;
-  const tokens = `${Number(t.input ?? 0).toLocaleString('en-US')} in / ${Number(t.output ?? 0).toLocaleString('en-US')} out`;
-  const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed))}${metric('Idle', na(d.idle))}${metric('Tokens', tokens)}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
+  const metric = (lb, val, title) => `<span class="m"${title ? ` title="${esc(title)}"` : ''}><span class="lb">${lb}</span><b>${val}</b></span>`;
+  const tokens = CAUI.fmtTokens(CAUI.tokenTotal(t));
+  const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed))}${metric('Idle', na(d.idle))}${metric('Tokens', tokens, CAUI.tokenDetail(t))}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
+  const tokRows = (() => { const rows = CAUI.tokenSplit(d.tokensBy); const max = Math.max(1, ...rows.map((r) => r.total)); return `<div class="tokby">${rows.map((r) => `<div class="tokrow" data-role="${r.role}" data-total="${r.total}" title="${esc(r.label)}: ${esc(CAUI.tokenDetail(r.t))}"><span class="tk-lb">${esc(r.label)}</span><span class="tk-n">${CAUI.fmtTokens(r.total)}</span><span class="tk-bar"><i class="${r.role}" style="width:${Math.round((100 * r.total) / max)}%"></i></span></div>`).join('')}</div>`; })();
   const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
   const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
   const prevSt = prevSteps.get(d.id);
@@ -658,6 +749,7 @@ function renderLane(d, keep) {
     <div class="wt">${esc(d.repo)}</div>
     ${pipeline(d)}
     <div class="nowband"><span class="lb">${d.running ? 'Now' : 'Result'}</span><div class="bd">${nowInner}${tools}</div></div>
+    <div class="box tokbox"><h4>Tokens by agent</h4>${tokRows}</div>
     <div class="grid21">
       <div class="box"><h4>Plan steps (brief) &middot; ${d.progress.done}/${d.progress.total}</h4>${steps}
         ${extraCommits.length ? `<h4 style="margin-top:14px">Other commits</h4><ul class="plain">${extraCommits.map((c) => `<li><span style="font:11.5px var(--mono);color:var(--faint);flex:none;min-width:64px">${esc(c.hash)}</span><span style="min-width:0">${esc(c.subject)}</span></li>`).join('')}</ul>` : ''}${todos}</div>
@@ -673,13 +765,14 @@ function renderLane(d, keep) {
         ${tab === 'log' ? `<label class="follow"><input type="checkbox" id="follow" ${tget(d.id).follow ? 'checked' : ''}>Follow live</label>` : ''}
       </div>
       <pre class="ebody" id="out" tabindex="0"></pre>
-    </div></div>
+    </div>
+    <div class="quick" id="quickSteers" role="group" aria-label="Quick steering">${CAUI.QUICK_STEERS.map((q, i) => `<button type="button" class="chip qchip" data-quick="${i}" title="${esc(q.text)}">${esc(q.label)}</button>`).join('')}</div>
+  </div>
     <div id="bar">
       <input id="msg" placeholder="Steer the builder: queued into its session within 2 s" autocomplete="off">
       <button id="send" class="btn primary">Steer</button>
       <span id="steerErr" role="alert"></span>
-      <button id="attach" class="btn" title="Open the CodeArts TUI on this session in a new window">Open TUI</button>
-      <button id="stop" class="btn danger">Stop</button>
+      ${ctlBar(d)}
     </div>`;
   for (const r of $('view').querySelectorAll('[data-step]')) r.onclick = () => { const k = r.dataset.step; if (stepOpen.has(k)) { stepOpen.delete(k); r.classList.remove('x'); } else { stepOpen.add(k); r.classList.add('x'); } };
   for (const b of $('view').querySelectorAll('[data-ctx]')) b.onclick = () => {
@@ -719,15 +812,17 @@ function renderLane(d, keep) {
   msgEl.value = drafts.get(d.id) || '';
   msgEl.oninput = () => drafts.set(d.id, msgEl.value);
   msgEl.onkeydown = (e) => { if (e.key === 'Enter') $('send').click(); };
-  const busy = !!inFlight && inFlight.laneId === d.id;
-  $('send').disabled = busy;
-  $('stop').disabled = busy || !d.running;
-  $('attach').disabled = busy || !d.running;
-  const restoreButtons = () => { const dd = detail && detail.id === d.id ? detail : d; $('send').disabled = false; $('stop').disabled = !dd.running; $('attach').disabled = !dd.running; };
+  const syncCtlBusy = () => {
+    const b = !!inFlight && inFlight.laneId === d.id;
+    const s = $('send'); if (s) s.disabled = b;
+    for (const el of $('view').querySelectorAll('.ctlbar [data-action]')) el.disabled = b;
+    for (const el of document.querySelectorAll('[data-note-send]')) el.disabled = b;
+  };
+  syncCtlBusy();
   $('send').onclick = async () => {
     const text = msgEl.value.trim(); if (!text) return;
     const id = d.id;
-    inFlight = { what: 'steer', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
+    inFlight = { what: 'steer', laneId: id }; syncCtlBusy();
     errEl.textContent = '';
     let r; try { r = await post('steer', { text }); } catch { r = { error: 'request failed' }; }
     inFlight = null;
@@ -735,30 +830,7 @@ function renderLane(d, keep) {
       const m = $('msg'), e = $('steerErr');
       if (r.ok) { if (m && m.value.trim() === text) { m.value = ''; drafts.delete(id); } }
       else if (e) e.textContent = r.error || 'steer failed';
-      restoreButtons();
-    }
-  };
-  $('stop').onclick = async () => {
-    if (!confirm(`Stop lane ${d.task}?`)) return;
-    const id = d.id;
-    inFlight = { what: 'stop', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
-    errEl.textContent = '';
-    let r; try { r = await post('stop'); } catch { r = { error: 'request failed' }; }
-    inFlight = null;
-    if (route.kind === 'lane' && route.id === id) {
-      if (!r.ok) { const e = $('steerErr'); if (e) e.textContent = r.error || 'stop failed'; restoreButtons(); }
-      else refresh(true);
-    }
-  };
-  $('attach').onclick = async () => {
-    const id = d.id;
-    inFlight = { what: 'attach', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
-    errEl.textContent = '';
-    let r; try { r = await post('attach'); } catch { r = { error: 'request failed' }; }
-    inFlight = null;
-    if (route.kind === 'lane' && route.id === id) {
-      if (!r.ok) { const e = $('steerErr'); if (e) e.textContent = r.error || 'could not open the TUI'; }
-      restoreButtons();
+      syncCtlBusy();
     }
   };
   if (keep) $('view').scrollTop = vtop;
@@ -854,9 +926,13 @@ window.__lanes = { state: () => {
   return {
     route: { kind: route.kind, id: route.id },
     rail: { plans: plans.map((p) => ({ id: p.id, selected: route.kind === 'plan' && route.id === p.id })), finished: lanes.filter((l) => !inPlan.has(l.id) && !l.running).map((l) => l.id) },
-    plan: route.kind === 'plan' && curPlan ? { waves: curPlan.waves.map((w, i) => ({ name: w.name, collapsed: waveCollapsed.has(`${curPlan.id}::${i}`), lanes: w.lanes.map((l) => ({ id: l.id, href: `#/lane/${l.id}`, stepsOpen: stepsOpen.has(l.id) })) })) } : null,
-    lane: route.kind === 'lane' && detail ? { id: detail.id, phase: detail.phase, liveSegment: document.querySelector('.seg.live')?.textContent || '', tab, follow: tget(detail.id).follow, transcriptScrollTop: tget(detail.id).top, transcriptAtBottom: tget(detail.id).atBottom, steps: detail.steps.map((x) => ({ n: x.n, state: x.state })), draft: drafts.get(detail.id) || '', sending: !!(inFlight && inFlight.laneId === detail.id) } : null,
+    plan: route.kind === 'plan' && curPlan ? { waves: curPlan.waves.map((w, i) => ({ name: w.name, collapsed: waveCollapsed.has(`${curPlan.id}::${i}`), lanes: w.lanes.map((l) => ({ id: l.id, href: `#/lane/${l.id}`, stepsOpen: stepsOpen.has(l.id) })) })), tokens: CAUI.tokenTotal(curPlan.tokens), suggestButtons: [...document.querySelectorAll('.lane-card .sugbtn')].map((b) => b.dataset.lane) } : null,
+    lane: route.kind === 'lane' && detail ? { id: detail.id, phase: detail.phase, liveSegment: document.querySelector('.seg.live')?.textContent || '', tab, follow: tget(detail.id).follow, transcriptScrollTop: tget(detail.id).top, transcriptAtBottom: tget(detail.id).atBottom, steps: detail.steps.map((x) => ({ n: x.n, state: x.state })), draft: drafts.get(detail.id) || '', sending: !!(inFlight && inFlight.laneId === detail.id),
+      tokens: { total: CAUI.tokenTotal(detail.tokens), build: CAUI.tokenTotal(detail.tokensBy && detail.tokensBy.build), review: CAUI.tokenTotal(detail.tokensBy && detail.tokensBy.review), other: CAUI.tokenTotal(detail.tokensBy && detail.tokensBy.other) },
+      actions: [...document.querySelectorAll('#bar .ctlbar [data-action]')].map((b) => b.dataset.action), suggest: detail.suggest || '', noteOpen: ctlNotes.has(detail.id) } : null,
     sprites: { count: spriteMap.size, animating: working.size },
+    controls: demoControls.slice(),
+    quickSteers: document.querySelectorAll('#quickSteers [data-quick]').length,
     overflowX: document.documentElement.scrollWidth > window.innerWidth,
   };
 } };
@@ -874,6 +950,36 @@ async function refresh(full) {
     catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }   else if (!plans.length && !lanes.length) await renderOnboard();
 }
+// Control buttons and inline note boxes are wired once by delegation so re-renders never double-bind them.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (btn) { e.preventDefault(); runControl(btn.dataset.action, btn.dataset.lane); return; }
+  const send = e.target.closest('[data-note-send]');
+  if (send) {
+    const id = send.dataset.noteSend, cur = ctlNotes.get(id); if (!cur) return;
+    const ta = [...document.querySelectorAll('[data-note-text]')].find((x) => x.dataset.noteText === id);
+    const text = (ta?.value || '').trim();
+    sendControl(id, cur.action, cur.action === 'resume' ? { note: text } : { text });
+    return;
+  }
+  const cancel = e.target.closest('[data-note-cancel]');
+  if (cancel) { ctlNotes.delete(cancel.dataset.noteCancel); rerenderLane(cancel.dataset.noteCancel); return; }
+  const chip = e.target.closest('[data-quick]');
+  if (chip) {
+    e.preventDefault();
+    const q = CAUI.QUICK_STEERS[Number(chip.dataset.quick)]; if (!q) return;
+    const m = document.getElementById('msg');
+    if (m) { m.value = q.text; m.focus(); }
+    const id = (detail && detail.id) || route.id;
+    if (id) drafts.set(id, q.text);
+  }
+});
+document.addEventListener('input', (e) => {
+  const ta = e.target.closest('[data-note-text]');
+  if (!ta) return;
+  const n = ctlNotes.get(ta.dataset.noteText);
+  if (n) n.text = ta.value;
+});
 window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; refresh(true); };
 syncRail();
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
