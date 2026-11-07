@@ -7,21 +7,79 @@
   "waves": [
     {
       "name": "Wave 3 · Platforms, lifecycle, network, keys",
-      "lanes": ["portable", "lifecycle", "netwait", "vault"],
+      "lanes": [
+        "portable",
+        "lifecycle",
+        "netwait",
+        "vault"
+      ],
       "note": "Contract checks first (portable, lifecycle, netwait, vault). Separate files except small, separate places in runner/ca.mjs (portable: attach line and EXE; lifecycle: dispatch, help, one doctor call; netwait: supervisor and help knobs)."
     },
     {
       "name": "Wave 4 · Split runner/ca.mjs",
-      "lanes": ["split"],
+      "lanes": [
+        "split"
+      ],
       "note": "After wave 3 merges: move the dashboard server, the lane supervisor and the CLI commands into modules, behaviour unchanged, every check as the safety net."
     }
   ],
   "lanes": [
-    { "task": "portable", "repo": "../ca-office-wt-portable", "model": "maas/deepseek-v4.1-flash", "why": "Linux/macOS fixes (trust.mjs crash), Chrome helper, CI on 3 OSes with annotations", "files": ["scripts/trust.mjs", "runner/ca.mjs", "checks/lib/chrome.mjs", "tools/run-checks.mjs", ".github/workflows/check.yml"] },
-    { "task": "lifecycle", "repo": "../ca-office-wt-lifecycle", "model": "maas/deepseek-v4.1-flash", "why": "ca update, ca uninstall, manifest, doctor rows for stale paths and untested CodeArts versions", "files": ["runner/lifecycle.mjs", "runner/setup.mjs", "runner/onboard.mjs", "runner/ca.mjs"] },
-    { "task": "netwait", "repo": "../ca-office-wt-netwait", "model": "maas/deepseek-v4.1-flash", "why": "Wait for the network, survive sleep, cap lanes per model", "files": ["runner/netwait.mjs", "runner/ca.mjs"] },
-    { "task": "vault", "repo": "../ca-office-wt-vault", "model": "maas/deepseek-v4.1-flash", "why": "DPAPI-encrypted keys file on Windows, migration, clear errors", "files": ["runner/auth.mjs"] },
-    { "task": "split", "repo": "../ca-office-wt-split", "model": "maas/deepseek-v4.1-flash", "why": "Split the 1700-line runner so parallel lanes stop sharing one file", "files": ["runner/ca.mjs", "runner/dash-server.mjs", "runner/lane.mjs", "runner/commands.mjs"] }
+    {
+      "task": "portable",
+      "repo": "../ca-office-wt-portable",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "Linux/macOS fixes (trust.mjs crash), Chrome helper, CI on 3 OSes with annotations",
+      "files": [
+        "scripts/trust.mjs",
+        "runner/ca.mjs",
+        "checks/lib/chrome.mjs",
+        "tools/run-checks.mjs",
+        ".github/workflows/check.yml"
+      ]
+    },
+    {
+      "task": "lifecycle",
+      "repo": "../ca-office-wt-lifecycle",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "ca update, ca uninstall, manifest, doctor rows for stale paths and untested CodeArts versions",
+      "files": [
+        "runner/lifecycle.mjs",
+        "runner/setup.mjs",
+        "runner/onboard.mjs",
+        "runner/ca.mjs"
+      ]
+    },
+    {
+      "task": "netwait",
+      "repo": "../ca-office-wt-netwait",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "Wait for the network, survive sleep, cap lanes per model",
+      "files": [
+        "runner/netwait.mjs",
+        "runner/ca.mjs"
+      ]
+    },
+    {
+      "task": "vault",
+      "repo": "../ca-office-wt-vault",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "DPAPI-encrypted keys file on Windows, migration, clear errors",
+      "files": [
+        "runner/auth.mjs"
+      ]
+    },
+    {
+      "task": "split",
+      "repo": "../ca-office-wt-split",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "Split the 1700-line runner so parallel lanes stop sharing one file",
+      "files": [
+        "runner/ca.mjs",
+        "runner/dash-server.mjs",
+        "runner/lane.mjs",
+        "runner/commands.mjs"
+      ]
+    }
   ],
   "next": [
     "Merge wave 3, resolve runner/ca.mjs merges, run every check",
@@ -32,7 +90,14 @@
     "Sync to the skill, push, close the plan"
   ],
   "decisions": [
-    { "at": "2026-11-07T14:10:00.000Z", "text": "User asked to queue and close as much as possible. No WSL, Docker or gh on this machine: Linux and macOS are proven through GitHub Actions only." }
+    {
+      "at": "2026-11-07T14:10:00.000Z",
+      "text": "User asked to queue and close as much as possible. No WSL, Docker or gh on this machine: Linux and macOS are proven through GitHub Actions only."
+    },
+    {
+      "at": "2026-11-07T14:01:20.292Z",
+      "text": "Wave 3 hit the MaaS limit of 1M tokens per minute with 4 flash lanes: portable failed, vault and netwait were stopped. Root cause in the runner: CodeArts aborts a turn after its own 429 retries and the runner counted that abort as a normal interruption. Fixed (RATE_WAIT_S budget), proven against a new fake CodeArts server (checks/ratelimit.check.mjs), synced; the three lanes resumed in place."
+    }
   ],
   "risks": [
     "Four lanes touch runner/ca.mjs in different places: merge conflicts resolved by the lead.",
