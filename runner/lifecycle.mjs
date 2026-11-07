@@ -126,3 +126,48 @@ export async function uninstall(args) {
   else for (const c of changes) process.stdout.write(`${c}\n`);
   return 0;
 }
+
+// The install command: CA_UPDATE_CMD when set (a shell command line, used by the checks); else a
+// git pull when the package root is a checkout, else a fresh global install from GitHub.
+function installCommand() {
+  if (process.env.CA_UPDATE_CMD) return process.env.CA_UPDATE_CMD;
+  const root = path.resolve(HERE, '..');
+  if (fs.existsSync(path.join(root, '.git'))) return `git -C ${root} pull --ff-only`;
+  return 'npm install -g github:Kahar90/codeartsclimcp';
+}
+
+// `ca update [--dry-run]`: reinstall the latest version, then rerun `ca setup <h> --user` for every
+// recorded harness so each config is refreshed. A failing install command changes nothing.
+export async function update(args) {
+  const flags = new Set(args.filter((a) => a.startsWith('--')));
+  const dry = flags.has('--dry-run');
+  const asJson = flags.has('--json');
+  const cmd = installCommand();
+  const harnesses = Object.keys(readManifest().harnesses);
+
+  if (dry) {
+    process.stdout.write(`would run: ${cmd}\n`);
+    process.stdout.write(`would refresh: ${harnesses.join(', ') || 'nothing (no machine-wide setup recorded)'}\n`);
+    return 0;
+  }
+
+  const r = spawnSync(cmd, { shell: true, stdio: asJson ? ['ignore', 'pipe', 'pipe'] : 'inherit', encoding: 'utf8', windowsHide: true, timeout: 600000 });
+  if (r.status !== 0) {
+    process.stdout.write(`update failed: ${cmd} exited ${r.status ?? '?'}\n`);
+    process.exitCode = 1;
+    return 1;
+  }
+
+  const refreshed = [];
+  for (const h of harnesses) {
+    const s = spawnSync(process.execPath, [CA_MJS, 'setup', h, STATE_DIR, '--user'], { encoding: 'utf8', windowsHide: true, timeout: 60000 });
+    const acted = (s.stdout || '').split(/\r?\n/).filter((l) => /^(wrote|updated) /.test(l));
+    refreshed.push(`${h}: ${acted.length ? acted.join(', ') : 'unchanged'}`);
+  }
+  if (asJson) process.stdout.write(JSON.stringify({ cmd, refreshed }, null, 2) + '\n');
+  else {
+    process.stdout.write(`updated via: ${cmd}\n`);
+    for (const line of refreshed) process.stdout.write(line + '\n');
+  }
+  return 0;
+}
