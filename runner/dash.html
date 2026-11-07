@@ -1181,6 +1181,8 @@ async function copyText(t) {
   try { await navigator.clipboard.writeText(t); return true; } catch {}
   try { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch { return false; }
 }
+// The setup prompt a human pastes into their coding agent; the copy box must show it verbatim.
+const ONBOARD_PROMPT = 'Set up CodeArts lanes by following https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md';
 async function renderOnboard() {
   const d = await fetchDoctor();
   const rows = Array.isArray(d?.checks) ? d.checks : [];
@@ -1196,6 +1198,9 @@ async function renderOnboard() {
   $('view').innerHTML = `<section id="onboard"><div class="pad">
     <h2 class="title">Set up CodeArts lanes</h2>
     <p class="goal">One-time setup: CodeArts credentials, a git repo, a trusted folder and your harness (Kiro, Cursor, Claude Code, Codex or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
+    <div class="box"><h4>Set up in one prompt</h4>
+      <p class="small">Paste this into your coding agent (Claude Code, Kiro, Cursor, Codex, opencode or VS Code). It installs and connects everything; you only paste your Huawei Cloud keys into a local form.</p>
+      <div class="cmd" data-copy="${esc(ONBOARD_PROMPT)}" title="click to copy"><code>${esc(ONBOARD_PROMPT)}</code><button type="button" class="onb-copy">Copy</button></div></div>
     <div class="box" id="onb-doctor"><h4>Environment (doctor)</h4>${summary}${doctorRows}</div>
     <div class="box"><h4>Fix everything in one go</h4>
       <div class="cmd" id="onboard-cmd" title="click to copy"><code>ca onboard --yes</code><button id="onboard-copy">Copy</button></div>
@@ -1311,6 +1316,14 @@ async function refresh(full) {
 }
 // Control buttons and inline note boxes are wired once by delegation so re-renders never double-bind them.
 document.addEventListener('click', (e) => {
+  // First-run panel: copy buttons, copy-box clicks and the keys button, all delegated.
+  const flash = (b, ok) => { if (!b) return; b.textContent = ok ? 'Copied' : 'Copy failed'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copy'; }, 1500); };
+  const cp = e.target.closest('.onb-copy');
+  if (cp) { e.preventDefault(); copyText(cp.dataset.copy || (cp.parentElement && cp.parentElement.dataset.copy) || '').then((ok) => flash(cp, ok)); return; }
+  const cb = e.target.closest('.cmd[data-copy]');
+  if (cb) { e.preventDefault(); copyText(cb.dataset.copy || '').then((ok) => flash(cb.querySelector('.onb-copy'), ok)); return; }
+  const kb = e.target.closest('.onb-keys');
+  if (kb) { e.preventDefault(); if (typeof connectKeys === 'function') connectKeys(); return; }
   const btn = e.target.closest('[data-action]');
   if (btn) { e.preventDefault(); runControl(btn.dataset.action, btn.dataset.lane); return; }
   const send = e.target.closest('[data-note-send]');
