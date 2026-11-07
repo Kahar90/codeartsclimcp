@@ -171,6 +171,52 @@ try {
   s = await st();
   check('no horizontal overflow on the phone lane detail', s?.overflowX === false, JSON.stringify({ overflowX: s?.overflowX }));
   await shot('lanes-phone-detail');
+  // tokens and lane controls (step 4-7)
+  await size(1280, 800); await send('Page.navigate', { url: base + '/?demo=1#/lane/demo-repo--office-layout' }); await wait(1500);
+  s = await st();
+  const trowSum = await ev('[...document.querySelectorAll(".tokrow")].reduce((a,r)=>a+(+r.dataset.total||0),0)');
+  check('running lane token total equals the sum of its three agent rows', !!s?.lane?.tokens && s.lane.tokens.total === s.lane.tokens.build + s.lane.tokens.review + s.lane.tokens.other && s.lane.tokens.total === trowSum, JSON.stringify({ tokens: s?.lane?.tokens, trowSum }));
+  check('running lane control ids render in order with attach and stop', Array.isArray(s?.lane?.actions) && s.lane.actions[0] === 'kick' && s.lane.actions.includes('attach') && s.lane.actions.includes('stop'), JSON.stringify(s?.lane?.actions));
+  await shot('lanes-detail-controls');
+  await ev('location.hash = "#/lane/demo-repo--stuck"'); await wait(1300);
+  s = await st();
+  check('stuck lane suggests kick and renders it first', s?.lane?.suggest === 'kick' && s?.lane?.actions?.[0] === 'kick', JSON.stringify({ suggest: s?.lane?.suggest, actions: s?.lane?.actions }));
+  const kickPrimary = await ev('(function(){const b=document.querySelector("#bar .ctlbar .sugbtn");return b?{action:b.dataset.action,primary:b.classList.contains("primary")}:null;})()');
+  check('the suggested kick button is primary', !!kickPrimary && kickPrimary.action === 'kick' && kickPrimary.primary === true, JSON.stringify(kickPrimary));
+  await clickSel('#bar .ctlbar .sugbtn'); await wait(300);
+  s = await st();
+  check('clicking the suggested kick opens the note box', s?.lane?.noteOpen === true && (await ev('!!document.querySelector("#bar .notebox textarea")')) === true, JSON.stringify({ noteOpen: s?.lane?.noteOpen }));
+  await clickSel('#bar .notebox textarea'); await type('continue the turn'); await wait(150);
+  await clickSel('#bar .notebox [data-note-send]');
+  let kickCtl = null; for (let i = 0; i < 30 && !kickCtl; i++) { await wait(150); kickCtl = await ev('(window.__lanes.state().controls||[]).find(c=>c.action==="kick")'); }
+  check('kick note flow logs {action kick, mode turn, text}', !!kickCtl && kickCtl.body?.mode === 'turn' && kickCtl.body?.text === 'continue the turn', JSON.stringify(kickCtl));
+  check('the kick flow keeps the lane route', (await ev('location.hash')) === '#/lane/demo-repo--stuck', String(await ev('location.hash')));
+  await ev('location.hash = "#/lane/demo-repo--stall"'); await wait(1300);
+  s = await st();
+  check('failed lane offers resume as its first control', s?.lane?.actions?.[0] === 'resume', JSON.stringify(s?.lane?.actions));
+  await clickSel('#bar .ctlbar .sugbtn'); await wait(300);
+  await clickSel('#bar .notebox textarea'); await type('pick up where you left off'); await wait(150);
+  await clickSel('#bar .notebox [data-note-send]');
+  let resCtl = null; for (let i = 0; i < 30 && !resCtl; i++) { await wait(150); resCtl = await ev('(window.__lanes.state().controls||[]).find(c=>c.action==="resume")'); }
+  check('resume note flow logs body.note', !!resCtl && resCtl.body?.note === 'pick up where you left off', JSON.stringify(resCtl));
+  // plan home: token total and a one-click suggested action on the stuck card
+  await ev('location.hash = "#/plan/string-utils"'); await wait(1300);
+  s = await st();
+  check('plan home shows a plan token total', typeof s?.plan?.tokens === 'number' && s.plan.tokens > 0, String(s?.plan?.tokens));
+  check('plan home marks the stuck card for one-click', Array.isArray(s?.plan?.suggestButtons) && s.plan.suggestButtons.includes('demo-repo--stuck'), JSON.stringify(s?.plan?.suggestButtons));
+  await shot('lanes-plan-home-tokens');
+  await clickSel('.lane-card .sugbtn'); await wait(300);
+  await clickSel('.lane-card .notebox textarea'); await type('retry the stuck turn'); await wait(150);
+  await clickSel('.lane-card .notebox [data-note-send]');
+  let planKick = null; for (let i = 0; i < 30 && !planKick; i++) { await wait(150); planKick = await ev('(window.__lanes.state().controls||[]).find(c=>c.action==="kick" && c.body && c.body.text==="retry the stuck turn")'); }
+  check('one-click on the stuck card logs a kick without changing the route', !!planKick && (await ev('location.hash')) === '#/plan/string-utils', JSON.stringify(planKick));
+  // quick steering fills the draft only
+  await ev('location.hash = "#/lane/demo-repo--office-layout"'); await wait(1300);
+  const chipTxt = await ev('(function(){const c=document.querySelector("#quickSteers .qchip");return c?c.title:"";})()');
+  const chipN = await ev('document.querySelectorAll("#quickSteers .qchip").length');
+  await clickSel('#quickSteers .qchip'); await wait(250);
+  s = await st();
+  check('quick steering chips render and a click fills the steer draft', chipN === 5 && !!chipTxt && s?.quickSteers === 5 && s?.lane?.draft === chipTxt && (await ev('document.getElementById("msg").value')) === chipTxt, JSON.stringify({ chipN, chipTxt, draft: s?.lane?.draft }));
   // / without demo and with an empty registry shows the onboarding panel
   const tmp = fs.mkdtempSync(path.join(process.env.TEMP || ROOT, 'ca-lanes-empty-'));
   const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSON.stringify({ security: { trustedFolders: [] } }));
