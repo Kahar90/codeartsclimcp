@@ -1,30 +1,106 @@
 {
-  "title": "Onboarding: one setup per machine, clear failures",
+  "title": "Onboarding and hardening",
   "goal": "Make installing and using CodeArts lanes as easy as possible for a new user on any harness: one prompt, one keys form, then any repo works; wrong keys explained in seconds; a first-run dashboard that says what to do.",
   "lead": "Claude Opus 5.5",
   "status": "running",
-  "now": "Wave 1 running: scope, keys, firstrun",
+  "now": "Waiting for scope and firstrun; wave 2 briefs ready",
   "waves": [
     {
       "name": "Wave 1 · Setup scope, keys, first-run page",
-      "lanes": ["scope", "keys", "firstrun"],
+      "lanes": [
+        "scope",
+        "keys",
+        "firstrun"
+      ],
       "note": "Contract checks written first (checks/scope.check.mjs, checks/authfast.check.mjs). No shared files except a small route in ca.mjs (keys and firstrun touch different parts)."
+    },
+    {
+      "name": "Wave 2 · MCP results and runner hardening",
+      "lanes": [
+        "mcpfix",
+        "harden"
+      ],
+      "note": "Starts only after wave 1 merges (keys and firstrun edit runner/ca.mjs). Contract checks: mcpwave, runnerwave."
     }
   ],
   "lanes": [
-    { "task": "scope", "repo": "../ca-office-wt-scope", "model": "maas/deepseek-v4.1-flash", "why": "Machine-wide setup by default, Codex MCP always written, smoke test outside the user's repo", "files": ["runner/setup.mjs", "runner/onboard.mjs", "templates/claude-skill.md", "checks/onboard.check.mjs"] },
-    { "task": "keys", "repo": "../ca-office-wt-keys", "model": "maas/deepseek-v4.1-flash", "why": "Rejected AK/SK or MaaS key ends the lane in seconds with a plain message; MaaS key verified on save; readable doctor", "files": ["runner/authsignal.mjs", "runner/ca.mjs", "runner/auth.mjs", "checks/auth.check.mjs"] },
-    { "task": "firstrun", "repo": "../ca-office-wt-firstrun", "model": "maas/deepseek-v4.1-flash", "why": "First-run dashboard: one setup prompt, how to ask for work, Connect keys button, readable rows, no overflow", "files": ["runner/dash.html", "runner/ca.mjs", "checks/lanes.check.mjs"] }
+    {
+      "task": "scope",
+      "repo": "../ca-office-wt-scope",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "Machine-wide setup by default, Codex MCP always written, smoke test outside the user's repo",
+      "files": [
+        "runner/setup.mjs",
+        "runner/onboard.mjs",
+        "templates/claude-skill.md",
+        "checks/onboard.check.mjs"
+      ]
+    },
+    {
+      "task": "keys",
+      "repo": "../ca-office-wt-keys",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "Rejected AK/SK or MaaS key ends the lane in seconds with a plain message; MaaS key verified on save; readable doctor",
+      "files": [
+        "runner/authsignal.mjs",
+        "runner/ca.mjs",
+        "runner/auth.mjs",
+        "checks/auth.check.mjs"
+      ]
+    },
+    {
+      "task": "firstrun",
+      "repo": "../ca-office-wt-firstrun",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "First-run dashboard: one setup prompt, how to ask for work, Connect keys button, readable rows, no overflow",
+      "files": [
+        "runner/dash.html",
+        "runner/ca.mjs",
+        "checks/lanes.check.mjs"
+      ]
+    },
+    {
+      "task": "mcpfix",
+      "repo": "../ca-office-wt-mcpfix",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "ca_wait exits 3/5 as results with next steps, plan close/list and gc tools, version, annotations, brief template wording",
+      "files": [
+        "runner/mcp.mjs",
+        "templates/brief.md",
+        "checks/mcp.check.mjs"
+      ]
+    },
+    {
+      "task": "harden",
+      "repo": "../ca-office-wt-harden",
+      "model": "maas/deepseek-v4.1-flash",
+      "why": "Env dump redaction, placeholder CHECK refusal, dashboard Host check, 400 on bad JSON, unambiguous lookups, Open TUI quoting",
+      "files": [
+        "runner/ca.mjs"
+      ]
+    }
   ],
   "next": [
-    "Merge the three lanes, run every check on master",
-    "Real fresh-user rerun: npm pack install in a fake home, onboard for claude and codex, smoke test, wrong-key run",
-    "Update README, INSTALL.md, docs/manual-setup.md and docs/workflow.md for machine-wide setup",
-    "Deploy to the live skill, push master to origin main"
+    "Merge wave 1 (keys, scope, firstrun), run every check on master",
+    "Start wave 2 (mcpfix, harden)",
+    "Smoke lane without NODE_TLS_REJECT_UNAUTHORIZED=0; remove it if MaaS and CodeArts auth still work",
+    "Check the T3 preview still reaches the dashboard with the Host check",
+    "Real fresh-user rerun: install in a fake home, onboard claude and codex, smoke, wrong keys",
+    "npm run sync to the live skill, push master to origin main"
   ],
   "decisions": [
-    { "at": "2026-11-07T12:20:00.000Z", "text": "Fresh-user walkthrough found: smoke repo created inside the user's repo, Codex MCP never written by onboard, wrong keys look like an IAM outage and retry for 70 s, doctor table unreadable, first-run panel glued rows and overflow, setup needed again in every repo." },
-    { "at": "2026-11-07T12:22:00.000Z", "text": "User chose machine-wide setup by default (--repo-only keeps the per-repo files)." }
+    {
+      "at": "2026-11-07T12:20:00.000Z",
+      "text": "Fresh-user walkthrough found: smoke repo created inside the user's repo, Codex MCP never written by onboard, wrong keys look like an IAM outage and retry for 70 s, doctor table unreadable, first-run panel glued rows and overflow, setup needed again in every repo."
+    },
+    {
+      "at": "2026-11-07T12:22:00.000Z",
+      "text": "User chose machine-wide setup by default (--repo-only keeps the per-repo files)."
+    },
+    {
+      "at": "2026-11-07T12:38:48.993Z",
+      "text": "Audit wave queued. Deleted D:/Coding/codearts testing/runner-env.json (env dump with live keys, never in git). Contract checks mcpwave and runnerwave reproduce every item; also found the MaaS key inside OPENCODE_CONFIG_CONTENT (name-based redaction alone would leak it) and fuzzy plan lookup (sho closed shop-admin)."
+    }
   ],
   "risks": [
     "Kiro, Cursor and VS Code user-level paths come from their docs; they cannot be signed in here to test.",
