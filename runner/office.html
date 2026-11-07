@@ -773,6 +773,7 @@ function renderTop() {
     const mm = Object.entries(p.tokensByModel || {}).sort((a, b) => ((typeof b[1]?.total === "number" ? b[1].total : -1) - (typeof a[1]?.total === "number" ? a[1].total : -1)))
       .map(([m, e]) => CAUI.shortModel(m) + " " + ((e.source === "none" || typeof e.total !== "number") ? "not reported" : CAUI.fmtTokens(e.total)) + " (" + (e.who === "lead" ? "lead" : "worker") + ")");
     $("tokenChip").setAttribute("aria-label", "Tokens " + CAUI.fmtTokens(pt) + ": " + CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).concat(mm).join(", "));
+    $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).join(" \u00b7 ");
   }
   const nPlans = mode === "demo" ? 1 : plansArr.length;
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
