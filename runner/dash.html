@@ -1414,6 +1414,7 @@ window.__lanes = { state: () => {
       title: document.title,
       banner: staleOn,
     },
+    polish: { toast: !!document.querySelector('.ca-toast'), updatePill: !!document.querySelector('.ca-update') },
   };
 }, // First-run panel snapshot for the check harness: the doctor rows, the setup prompt and the
 // manual command for the picked harness.
