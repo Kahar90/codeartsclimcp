@@ -1236,10 +1236,11 @@ async function cmdDoctor(args) {
   const { checks, fails } = await doctorData(args.filter((a) => !a.startsWith('--'))[0]);
   if (asJson) console.log(JSON.stringify({ checks }, null, 2));
   else {
-    const cols = ['name', 'status', 'detail', 'fix'];
-    const w = cols.map((c, i) => Math.max(['NAME', 'STATUS', 'DETAIL', 'FIX'][i].length, ...checks.map((r) => String(r[c]).length)));
-    console.log(['NAME', 'STATUS', 'DETAIL', 'FIX'].map((h, i) => h.padEnd(w[i])).join('  '));
-    for (const r of checks) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
+    // One readable line per row; the fix (if any) sits under it. No padded table.
+    for (const r of checks) {
+      console.log(`  ${String(r.status).padEnd(5)}  ${r.name}: ${r.detail}`);
+      if (r.status !== 'ok' && r.fix) console.log(`         fix: ${r.fix}`);
+    }
     console.log(`doctor: ${fails ? `not ready (${fails} fail)` : 'ready'}`);
   }
   if (fails) process.exit(1);
