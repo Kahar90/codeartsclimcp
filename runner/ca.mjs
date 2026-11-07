@@ -257,6 +257,11 @@ async function runLane(repoArg, task, opts = {}) {
   const repo = path.resolve(repoArg);
   const briefFile = path.join(repo, 'tasks', `${task}.md`);
   if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
+  // A brief copied from the template must not reach the builder with a placeholder CHECK line: the
+  // runner would run the literal <...> text as a command. Refuse before anything is created.
+  const briefEarly = fs.readFileSync(briefFile, 'utf8');
+  const badCheck = [...briefEarly.matchAll(/^\s*(?:[-*]\s*)?CHECK:\s*`?(.+?)`?\s*$/gm)].map((m) => m[1]).find((c) => /<[^>]*>/.test(c));
+  if (badCheck) die(`tasks/${task}.md still has a template placeholder CHECK line: "${badCheck}". Replace it with a real command or delete it.`, 2);
   if (!fs.existsSync(EXE)) die(`codearts not found at ${EXE}`, 2);
   if (!git(repo, 'rev-parse', '--git-dir')) die(`${repo} is not a git repo`, 2);
   const id = `${path.basename(repo)}--${task}`.replace(/[^\w.-]+/g, '_');
