@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // runner/setup.mjs: one-command setup of the CodeArts lanes MCP server and workflow rules
 // for other agent harnesses. Called by `ca setup <harness> [repo] [--dry-run] [--write]`.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -141,6 +142,39 @@ function addClaudeSettings(plan, errors, file) {
   }
 }
 
+// Structural equality for the plain JSON values we merge (order of keys does not matter).
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+}
+
+// <claude dir>/settings.json: allow the read-only tools, keeping every other key.
+function addClaudeUserSettings(plan, errors, file) {
+  const allow = AUTO_APPROVE.map((t) => `mcp__codearts__${t}`);
+  try {
+    const obj = loadJSON(file);
+    if (!obj.permissions || typeof obj.permissions !== 'object' || Array.isArray(obj.permissions)) obj.permissions = {};
+    obj.permissions.allow = [...new Set([...(Array.isArray(obj.permissions.allow) ? obj.permissions.allow : []), ...allow])];
+    plan.push({ path: file, content: JSON.stringify(obj, null, 2) + '\n' });
+  } catch (e) {
+    if (!e.parseFile) throw e;
+    errors.push({ message: `${e.message}: expected JSON`, snippet: JSON.stringify({ permissions: { allow } }, null, 2) + '\n' });
+  }
+}
+
+// Try the claude CLI to register the user-scope MCP server. stdin is ignored and each call
+// has a hard 30 s timeout, so a missing or hanging CLI just returns false.
+function claudeCliAdd() {
+  const opts = { shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000, windowsHide: true, encoding: 'utf8' };
+  spawnSync('claude', ['mcp', 'remove', '-s', 'user', 'codearts'], opts);
+  const r = spawnSync('claude', ['mcp', 'add', '-s', 'user', 'codearts', '--', 'node', CA_MJS, 'mcp'], opts);
+  return r.status === 0;
+}
+
 // A plan entry is { path, content, action }. Built first, then either printed (--dry-run)
 // or written, so a failed build never half-writes a repo.
 function buildPlan(harness, repo, flags) {
@@ -174,18 +208,35 @@ function buildPlan(harness, repo, flags) {
   }
 
   if (harness === 'claude') {
-    addJSON(plan, errors, path.join(repo, '.mcp.json'), 'mcpServers', 'codearts', SERVER);
-    // Pre-approve the project server and the read-only tools in the personal (gitignored)
-    // settings, so Claude Code neither asks to enable .mcp.json nor prompts on ca_status.
-    addClaudeSettings(plan, errors, path.join(repo, '.claude', 'settings.local.json'));
-    // The /codearts-build skill: repo scope always, user scope too with --user.
-    addSkill(plan, notes, path.join(repo, '.claude', 'skills', 'codearts-build', 'SKILL.md'));
+    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(home(), '.claude');
     if (flags.user) {
-      const claudeHome = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-      addSkill(plan, notes, path.join(claudeHome, 'skills', 'codearts-build', 'SKILL.md'));
-      notes.push(`claude: for the MCP server in every project too, run:\n  claude mcp add -s user codearts -- node ${CA_MJS} mcp`);
+      // User scope: the skill, the read-only tool permissions and the MCP server all live in
+      // the user config; nothing is written in the repo.
+      addSkill(plan, notes, path.join(claudeDir, 'skills', 'codearts-build', 'SKILL.md'));
+      addClaudeUserSettings(plan, errors, path.join(claudeDir, 'settings.json'));
+      const userJson = process.env.CLAUDE_CONFIG_DIR
+        ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json')
+        : path.join(home(), '.claude.json');
+      const entry = { type: 'stdio', ...SERVER, env: {} };
+      let current = null;
+      try { current = loadJSON(userJson).mcpServers?.codearts; } catch { current = null; }
+      if (deepEqual(current, entry)) {
+        notes.push(`claude: MCP server already in ${userJson}`);
+      } else if (!flags.dryRun && process.env.CA_CLAUDE_CLI !== 'none' && claudeCliAdd()) {
+        notes.push('claude: MCP server added with the claude CLI');
+      } else {
+        addJSON(plan, errors, userJson, 'mcpServers', 'codearts', entry);
+      }
+      notes.push('claude: restart Claude Code (or run /mcp), then in any repo type: /codearts-build <goal>');
+      notes.push(`claude: to register the server by hand: claude mcp add -s user codearts -- node ${CA_MJS} mcp`);
+    } else {
+      addJSON(plan, errors, path.join(repo, '.mcp.json'), 'mcpServers', 'codearts', SERVER);
+      // Pre-approve the project server and the read-only tools in the personal (gitignored)
+      // settings, so Claude Code neither asks to enable .mcp.json nor prompts on ca_status.
+      addClaudeSettings(plan, errors, path.join(repo, '.claude', 'settings.local.json'));
+      addSkill(plan, notes, path.join(repo, '.claude', 'skills', 'codearts-build', 'SKILL.md'));
+      notes.push('claude: restart Claude Code in this repo (or run /mcp), then type: /codearts-build <goal>');
     }
-    notes.push('claude: restart Claude Code in this repo (or run /mcp), then type: /codearts-build <goal>');
   }
 
   if (harness === 'codex') {
