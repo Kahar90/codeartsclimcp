@@ -197,6 +197,11 @@ try {
   check('demo=crowd draws a desk under every seated hot worker', hotSeated.length > 0 && hotSeated.every((x) => x.desk === true), hotSeated.map((x) => x.station + ':' + x.desk).join(','));
   check('demo=crowd nameplates stay inside the stage', platesIn(s));
   check('demo=crowd nameplates do not overlap', noOverlap(s));
+  // Found by the lead in the screenshot: depth-sorted sprites and desks drew over a nameplate. Every plate centre must hit its own plate.
+  const covered = await ev('(function(){ return [...document.querySelectorAll("#plates .plate")].filter(function(p){ var r = p.getBoundingClientRect(); if (!r.width) return false; var e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !e || e.closest(".plate") !== p; }).map(function(p){ return p.id || p.textContent.slice(0, 20); }); })()');
+  check('demo=crowd no sprite or desk covers a nameplate', Array.isArray(covered) && covered.length === 0, JSON.stringify(covered));
+  const pillS = await ev('(function(){ var p = document.getElementById("needsPill"); return { shown: getComputedStyle(p).display !== "none", n: document.getElementById("needsPillN").textContent }; })()');
+  check('demo=crowd Needs you pill counts the stalled and failed lanes', pillS && pillS.shown && pillS.n === '2', JSON.stringify(pillS));
   check('demo=crowd pill shows the two overflow lanes', s.overflow.count === 2 && s.overflow.ids.join(',') === 'docs-site,perf-pass', JSON.stringify(s.overflow.ids));
   await shot('8-crowd');
 
