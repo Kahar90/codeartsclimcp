@@ -258,6 +258,16 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .cr-proj-cnt .ca-badge { height: 20px; font-size: 11.5px }
 @media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
+/* ---------- freshness, stale banner, notifications ---------- */
+.ca-fresh { color: var(--faint); font-size: 12.5px; white-space: nowrap }
+.ca-fresh.bad { color: var(--bad); font-weight: 650 }
+.ca-notify { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font: 600 12.5px var(--font); cursor: pointer }
+.ca-notify:hover { border-color: var(--sel); color: var(--fg) }
+.ca-notify.on { border-color: var(--sel); background: var(--sel-bg); color: var(--sel-ink) }
+.ca-notify .ca-ico { width: 15px; height: 15px }
+.ca-stale { display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255, 156, 156, 0.14); border-bottom: 1px solid var(--bad); color: var(--bad); font: 650 13px var(--font); padding: 8px 14px }
+@media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l { display: none } }
+
 /* ---------- motion ---------- */
 @keyframes rowflash { 0% { background: var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel) } 100% { background: transparent; box-shadow: none } }
 .flash { animation: rowflash 1.6s ease-out 1 }
@@ -301,8 +311,10 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
     <a class="ca-tab" href="/office"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/></svg>Office</a>
     <a class="ca-tab" href="/" aria-current="page"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.5 16.5 5.5 9 9.5 1.5 5.5Z"/><path d="M1.5 9 9 13 16.5 9"/><path d="M1.5 12.5 9 16.5 16.5 12.5"/></svg>Lanes</a>
   </nav>
-  <span class="ca-top-fill"></span><span class="ca-counts" id="counts">loading</span>
+  <span class="ca-top-fill"></span><span class="ca-fresh" id="fresh" aria-live="polite"></span><span class="ca-counts" id="counts">loading</span>
+  <button type="button" class="ca-notify" id="notify" aria-pressed="false" title="Notify me when a lane needs me or finishes"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.2a4.3 4.3 0 0 0-4.3 4.3c0 3.1-1.2 4.2-1.2 4.2h11S13.3 9.6 13.3 6.5A4.3 4.3 0 0 0 9 2.2Z"/><path d="M7.4 14.2a1.7 1.7 0 0 0 3.2 0"/></svg><span id="notify-l">Notify off</span></button>
 </header>
+<div class="ca-stale" id="stale" role="alert" hidden></div>
 <div id="shell">
   <details id="rail" open>
     <summary><span class="tri">&#9654;</span>Plans and lanes</summary>
@@ -544,6 +556,7 @@ function demoDoctor() {
   ] };
 }
 async function demoApi(path, opts) {
+  if (demoFailAt) throw new Error('demo: forced runner failure'); // check hook: window.__lanes.fail(true)
   const u = new URL(path, 'http://x');
   if (u.pathname === '/api/plans') return demoPlans();
   if (u.pathname === '/api/lanes') return demoLanes();
@@ -1121,13 +1134,65 @@ window.__lanes = { state: () => {
     quickSteers: document.querySelectorAll('#quickSteers [data-quick]').length,
     overflowX: document.documentElement.scrollWidth > window.innerWidth,
   };
-} };
+}, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; } };
+
+// ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
+let lastOkAt = 0, firstFailAt = 0, staleOn = false;
+let demoFailAt = 0; // check hook: window.__lanes.fail(true) forces every /api call to fail
+let notifyOn = false, notifyPrimed = false;
+const notifyWas = new Map(); // laneId -> bucket at the previous poll, so we only notify on a change
+const clockS = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function setStale(since) {
+  const el = $('stale'); if (!el) return;
+  staleOn = !!since;
+  el.hidden = !since;
+  if (since) el.textContent = `Dashboard cannot reach the runner since ${clockS(since)}`;
+}
+function updateFreshness() {
+  const f = $('fresh'); if (!f) return;
+  if (!lastOkAt) { f.textContent = ''; f.classList.remove('bad'); }
+  else if (!firstFailAt) { f.textContent = `Updated ${Math.max(0, Math.round((Date.now() - lastOkAt) / 1000))}s ago`; f.classList.remove('bad'); }
+  else { f.textContent = 'reconnecting'; f.classList.add('bad'); }
+  setStale(firstFailAt && Date.now() - firstFailAt > 10000 ? firstFailAt : 0);
+}
+function markFresh() { lastOkAt = Date.now(); firstFailAt = 0; updateFreshness(); }
+function markStale() { if (!firstFailAt) firstFailAt = demoFailAt || Date.now(); updateFreshness(); }
+function renderNotify() {
+  const b = $('notify'); if (!b) return;
+  b.classList.toggle('on', notifyOn);
+  b.setAttribute('aria-pressed', String(notifyOn));
+  const l = $('notify-l'); if (l) l.textContent = notifyOn ? 'Notify on' : 'Notify off';
+  b.title = notifyOn ? 'Browser notifications are on' : 'Notify me when a lane needs me or finishes';
+}
+function toggleNotify() {
+  if (notifyOn) { notifyOn = false; renderNotify(); return; }
+  if (typeof Notification === 'undefined') { toast('This browser has no notifications', true); return; }
+  const done = () => { notifyOn = Notification.permission === 'granted'; renderNotify(); if (!notifyOn) toast('Notifications are blocked in the browser', true); };
+  if (Notification.permission === 'granted') done(); else { try { Notification.requestPermission().then(done).catch(done); } catch { done(); } }
+}
+// Diff lane buckets between polls by lane id: a lane that enters attention or done once never notifies twice.
+function diffNotify() {
+  if (!notifyPrimed) { notifyPrimed = true; notifyWas.clear(); for (const l of lanes) notifyWas.set(l.id, laneBucket(l)); return; }
+  if (notifyOn && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    for (const l of lanes) {
+      const b = laneBucket(l), was = notifyWas.get(l.id);
+      if ((b === 'attention' || b === 'done') && was !== b) {
+        try { const n = new Notification(b === 'attention' ? `Needs you: ${l.task}` : `Finished: ${l.task}`, { body: l.bucketWhy || l.task, tag: `${l.id}:${b}` }); n.onclick = () => { window.focus(); location.hash = `#/lane/${encodeURIComponent(l.id)}`; }; } catch {}
+      }
+    }
+  }
+  notifyWas.clear(); for (const l of lanes) notifyWas.set(l.id, laneBucket(l));
+}
 function go(h) { location.hash = h; }
 function parseRoute() { const [k, ...r] = location.hash.slice(1).replace(/^\//, '').split('/'); return { kind: k, id: decodeURIComponent(r.join('/')) }; }
 async function refresh(full) {
   try { [plans, lanes] = await Promise.all([api('/api/plans'), api('/api/lanes')]); }
-  catch { $('counts').textContent = 'dashboard server not reachable'; return; }
+  catch { $('counts').textContent = 'dashboard server not reachable'; markStale(); return; }
+  markFresh();
   $('counts').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`;
+  const attn = lanes.filter((l) => laneBucket(l) === 'attention').length;
+  document.title = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
+  diffNotify();
   renderRail();
   if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
   else if (route.kind === 'lane') {
@@ -1169,6 +1234,7 @@ document.addEventListener('input', (e) => {
 });
 window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; refresh(true); };
 syncRail();
+$('notify').onclick = toggleNotify; renderNotify(); updateFreshness();
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
 </script>
 </body>
