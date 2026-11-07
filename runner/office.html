@@ -334,15 +334,15 @@ async function loadScene() {
   } catch (e) {}
 }
 
-let plansArr = [], lanesArr = [], planSel = null, plansSig = "", planUserPicked = false, knownPlans = null;
+let plansArr = [], lanesArr = [], planSel = null, plansSig = "", planUserPicked = false, knownPlans = null, prevRunningIds = null;
 const RECENT = "__recent"; // the "Recent lanes" view: running lanes and lanes started in the last 24 h
+function planLaneIds(p) { return (p.waves || []).flatMap((w) => (w.lanes || []).map((l) => l.id)); }
 // What to show when the human has not picked: the plan that has a running lane, else the newest open
 // plan, else the newest plan. "Recent lanes" is used only when no plan is registered at all, so the
 // Office always shows the plan that is working and never offers a plan-less view while plans exist.
 function defaultPlanId() {
   const running = new Set(lanesArr.filter((l) => l.running).map((l) => l.id));
-  const laneIds = (p) => (p.waves || []).flatMap((w) => (w.lanes || []).map((l) => l.id));
-  const hasRunning = (p) => laneIds(p).some((id) => running.has(id));
+  const hasRunning = (p) => planLaneIds(p).some((id) => running.has(id));
   const withRun = plansArr.find((p) => !p.closed && hasRunning(p)) || plansArr.find(hasRunning);
   if (withRun) return withRun.id;
   const open = plansArr.find((p) => !p.closed); // /api/plans lists open plans first, newest activity first
@@ -887,7 +887,14 @@ async function tick() {
       const ids = plansArr.map((p) => p.id);
       const fresh = knownPlans ? ids.filter((id) => !knownPlans.has(id)) : [];
       knownPlans = new Set(ids);
+      // A lane that starts running is the work now: show the plan that lists it, even over a hand pick.
+      // The first poll only records the running set, so a lane already running is not treated as new.
+      const runningIds = new Set(lanesArr.filter((l) => l.running).map((l) => l.id));
+      const justRunning = prevRunningIds ? [...runningIds].filter((id) => !prevRunningIds.has(id)) : [];
+      prevRunningIds = runningIds;
+      const runPlan = justRunning.map((id) => plansArr.find((p) => planLaneIds(p).includes(id))).find(Boolean);
       if (fresh.length) { planUserPicked = false; planSel = fresh[0]; }
+      else if (runPlan) { planUserPicked = false; planSel = runPlan.id; }
       else if (!planUserPicked || (planSel !== RECENT && !ids.includes(planSel))) planSel = defaultPlanId(); // follow the work until the human picks a view
       fetchErr = "";
     } catch (e) { fetchErr = "dashboard server not reachable"; }
