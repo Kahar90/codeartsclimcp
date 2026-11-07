@@ -25,8 +25,8 @@ summaries, not transcripts.
     and feeds failures back (up to 3 fix rounds);
   - a step that adds a test hook or script so results can be verified without looking at a UI;
   - "only touch <files>", "do not ask questions", the safety rules from the template;
-  - optional first line `MODEL: maas/glm-5.3` for long or cross-cutting lanes (default builder
-    is the fast model).
+  - no MODEL line by default: flash builds every lane, GLM 5.3 reviews. Add `MODEL: maas/glm-5.3`
+    only for very complex lanes (many files across modules, long context, hard design reasoning).
 
 ## 4. Run and watch
 - `ca_lane_start {repo, task}` (CLI: `ca lane <repo> <task> --detach`). It returns at once.
