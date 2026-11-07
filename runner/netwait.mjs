@@ -61,3 +61,52 @@ export function detectSleep(prevTickMs, nowTickMs, intervalMs) {
   const gap = (nowTickMs || 0) - (prevTickMs || 0);
   return gap > Math.max(120000, 4 * (intervalMs || 0));
 }
+
+// One limit value: 0 or "off" means no cap (Infinity); a positive number is the cap. Anything else
+// (empty, garbage) is null and leaves the default in place.
+function limitValue(raw) {
+  const s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!s) return null;
+  if (s === 'off') return Infinity;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return n <= 0 ? Infinity : n;
+}
+
+// parseLimits("maas/glm-5.3=2,default=4") -> { limitFor(model) }. Default: 3 for any model whose id
+// contains glm (case-insensitive), 4 for others. "default=N" overrides the non-matching default.
+// "0" or "off" disables the cap (Infinity); a bare "off" disables every cap.
+export function parseLimits(spec) {
+  const perModel = new Map();
+  let def = null;
+  let allOff = false;
+  for (const raw of String(spec == null ? '' : spec).split(',')) {
+    const part = raw.trim();
+    if (!part) continue;
+    if (part.toLowerCase() === 'off') { allOff = true; continue; }
+    const eq = part.indexOf('=');
+    const key = (eq < 0 ? part : part.slice(0, eq)).trim().toLowerCase();
+    if (!key) continue;
+    const value = limitValue(eq < 0 ? '' : part.slice(eq + 1));
+    if (value == null) continue;
+    if (key === 'default') def = value; else perModel.set(key, value);
+  }
+  const limitFor = (model) => {
+    if (allOff) return Infinity;
+    const id = String(model == null ? '' : model).toLowerCase();
+    if (perModel.has(id)) return perModel.get(id);
+    if (def != null) return def;
+    return /glm/.test(id) ? 3 : 4;
+  };
+  return { limitFor };
+}
+
+// laneSlots({ model, running, limits }) where running is the list of models the other running lanes
+// use: ok when fewer than the model's limit are on it, else a reason a human can read.
+export function laneSlots({ model, running, limits } = {}) {
+  const limit = limits && typeof limits.limitFor === 'function' ? limits.limitFor(model) : 4;
+  if (!Number.isFinite(limit)) return { ok: true };
+  const n = (running || []).filter((m) => m === model).length;
+  if (n >= limit) return { ok: false, reason: `${n} lanes already use ${model} (limit ${limit})` };
+  return { ok: true };
+}
