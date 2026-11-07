@@ -53,7 +53,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
-import { emptyTokens, addStepTokens } from './tokens.mjs';
+import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +92,7 @@ const dur = (ms) => {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
 };
 const oneLine = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+const compact = (n) => { n = Number(n) || 0; if (n < 1000) return String(n); if (n < 1e6) { const v = n / 1000; return `${v < 10 ? v.toFixed(1) : Math.round(v)}k`.replace('.0k', 'k'); } return `${(n / 1e6).toFixed(n < 1e7 ? 2 : n < 1e8 ? 1 : 0)}M`; };
 const readJSON = (f, d = null) => { for (let i = 0; i < 3; i++) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return d; } } return d; };
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const killTree = (pid) => { if (!pid) return; if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} } } };
@@ -644,7 +645,7 @@ async function runLane(repoArg, task, opts = {}) {
   const reviewBody = review ? (() => { const ls = review.split(/\r?\n/); const i = ls.findIndex((l) => /^\s*1\.\s/.test(l)); return ls.slice(i >= 0 ? i : Math.max(0, ls.length - 16)).filter((l) => l.trim() && !/^\s*VERDICT:/i.test(l)).slice(0, 24).join('\n'); })() : '';
   const md = [
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
-    `models: build ${BUILD}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps`,
+    `models: build ${BUILD}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}`,
     `commits ${S.commits} (brief has ${stepCount} numbered lines):`, log || '(none)',
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
@@ -716,18 +717,21 @@ function findLane(q) {
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
   return { lane: l.id, health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
-    commits: `${s.commits}/${s.steps}`, steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
+    commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
 const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
 // A status row for scripts: every laneRow field plus identity, result, progress and file paths.
 function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '',
-    progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: s.tokens || {},
+    progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s),
     summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
+function tokensByView(s) {
+  return { build: withTotal(s.tokensBy?.build), review: withTotal(s.tokensBy?.review), other: withTotal(s.tokensBy?.other) };
+}
 function printRows(rows) {
-  const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'steers', 'interrupts', 'verdict', 'now'];
+  const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
   const w = cols.map((c) => Math.max(c.length, ...rows.map((r) => String(r[c]).length)));
   console.log(cols.map((c, i) => c.toUpperCase().padEnd(w[i])).join('  '));
   for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
@@ -746,7 +750,7 @@ function cmdSummary(args) {
   if (args.includes('--json')) {
     const pg = stepProgress(s);
     console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', verdict: s.verdict || '',
-      elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: s.tokens || {}, commits: s.commitLog || [], steps: pg.list,
+      elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), commits: s.commitLog || [], steps: pg.list,
       gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
     return;
   }
@@ -1026,7 +1030,7 @@ function stepProgress(s, steps = s.stepList || []) {
 }
 function laneView(l) {
   const s = l.s; const pg = stepProgress(s);
-  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: s.tokens, tools: s.tools || [], models: s.models, session: s.activeSession,
+  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && alive(s.pid), result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0 };
 }
@@ -1039,11 +1043,11 @@ function laneFromLog(file, ref, briefFile) {
   const result = head[1].trim().toLowerCase(); const reason = head[2] || '';
   const commitLog = [...tail.matchAll(/^([0-9a-f]{7,40}) (.+?)\r?$/gm)].map((m) => ({ hash: m[1], subject: m[2] })).reverse();
   let stepList = []; try { stepList = [...fs.readFileSync(briefFile, 'utf8').matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) })); } catch {}
-  const tk = tail.match(/tokens in (\d+) out (\d+)/); const vd = tail.match(/^VERDICT: (.+?)\r?$/m);
+  const tk = tail.match(/tokens in (\d+) out (\d+)(?: \(cache read (\d+)\))? over (\d+) steps/); const vd = tail.match(/^VERDICT: (.+?)\r?$/m);
   let mt = 0; try { mt = fs.statSync(file).mtimeMs; } catch {}
   const secs = [...head[3].matchAll(/(\d+)([hms])/g)].reduce((a, m) => a + Number(m[1]) * { h: 3600, m: 60, s: 1 }[m[2]], 0);
   const s = { result, reason, phase: 'finished', activity: result, verdict: vd && vd[1] !== 'none' ? vd[1] : null, commitLog, commits: commitLog.length, stepList, steps: stepList.length,
-    tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [] };
+    tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]), reasoning: 0, cacheRead: Number(tk[3] || 0), steps: Number(tk[4] || 0) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [] };
   return { ...ref, s };
 }
 function planView(r) {
@@ -1097,8 +1101,11 @@ function planView(r) {
   if (counts.notStarted && state !== 'running') bits.push(`${counts.notStarted} not started`);
   if (counts.dropped) bits.push(`${counts.dropped} dropped`);
   if (state === 'waiting' || state === 'attention' || state === 'paused') bits.push(`idle ${dur(idle)}`);
+  // Plan tokens: every lane counts, folded (continued) ones included; per agent like the lane views.
+  const tokens = sumTokens(planned.map((x) => x.tokens));
+  const tokensBy = { build: sumTokens(planned.map((x) => x.tokensBy?.build)), review: sumTokens(planned.map((x) => x.tokensBy?.review)), other: sumTokens(planned.map((x) => x.tokensBy?.other)) };
   return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', lead: p.lead || 'Claude', status: p.status || '', now: p.now || '',
-    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed',
+    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy,
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
 }
