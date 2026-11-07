@@ -1211,7 +1211,7 @@ function doctorBox(d) {
   const warns = rows.filter((c) => c.status === 'warn').length;
   const credOk = rows.some((c) => c.name === 'credentials' && c.status === 'ok');
   const summary = !rows.length ? '' : (fails ? `<div class="onb-summary bad">${fails} to fix${warns ? ` · ${warns} optional` : ''}</div>` : `<div class="onb-summary ok">Ready: everything checks out${warns ? ` · ${warns} optional` : ''}</div>`);
-  const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0;flex:1"><span class="onb-row"><span class="onb-name">${esc(c.name)}</span>${onbChip(c.status)}${c.name === 'credentials' && c.status !== 'ok' ? '<button type="button" class="btn tiny onb-keys">Connect keys</button>' : ''}</span>${c.detail ? `<div class="onb-detail">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="onb-fix"><code>${esc(c.fix)}</code>${hasCmd(c.fix) ? `<button type="button" class="btn tiny onb-copy" data-copy="${esc(c.fix)}">Copy</button>` : ''}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
+  const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0;flex:1"><span class="onb-row"><span class="onb-name">${esc(c.name)}</span>${onbChip(c.status)}${c.name === 'credentials' && c.status !== 'ok' ? '<button type="button" class="btn tiny onb-keys">Connect keys</button>' : ''}</span>${c.detail ? `<div class="onb-detail">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="onb-fix"><code>${esc(c.fix)}</code>${hasCmd(c.fix) ? `<button type="button" class="btn tiny onb-copy" data-copy="${esc(c.fix)}">Copy</button>` : ''}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">checking this machine...</div>';
   const waiting = authWaiting && !credOk ? `<div class="small onb-waiting" style="margin-top:8px">Waiting for the keys...${authUrl ? ` <a href="${esc(authUrl)}" target="_blank" rel="noopener">Open the keys form</a>` : ''}</div>` : '';
   return `${summary}${doctorRows}${waiting}`;
 }
@@ -1262,7 +1262,9 @@ async function connectKeys() {
   }
 }
 async function renderOnboard() {
-  const d = await fetchDoctor();
+  // Show the panel at once; the doctor (a few seconds: it runs codearts --version) fills its rows in.
+  const d = doctorCache;
+  if (!d) fetchDoctor().then(() => { if (doctorCache && document.getElementById('onboard')) renderOnboard(); });
   const harnesses = [['claude', 'Claude Code'], ['kiro', 'Kiro'], ['cursor', 'Cursor'], ['codex', 'Codex'], ['opencode', 'opencode'], ['vscode', 'VS Code']];
   const html = `<section id="onboard"><div class="pad">
     <h2 class="title">Set up CodeArts lanes</h2>

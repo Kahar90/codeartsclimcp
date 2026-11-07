@@ -1320,11 +1320,14 @@ async function doctorData(repoArg) {
   const nodeMajor = Number(process.versions.node.split('.')[0]);
   add('node', nodeMajor >= 20 ? 'ok' : 'fail', `v${process.versions.node}`, nodeMajor >= 20 ? '' : 'install Node 20 or newer');
 
+  // One --version call per doctor run: the codearts version row reuses it (each call costs about a second).
+  let caVersion = null;
+  const firstLine = (s) => (String(s || '').split(/\r?\n/).find((l) => l.trim()) || '').trim();
   if (!fs.existsSync(EXE)) add('codearts', 'fail', `not found at ${EXE}`, `install the CodeArts CLI: ${INSTALL_HINT}`);
   else {
     const r = spawnSync(EXE, ['--version'], { encoding: 'utf8', timeout: 20000, env: caEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const v = oneLine(((r.stdout || '') + ' ' + (r.stderr || '')).trim(), 120);
-    if (r.status === 0) add('codearts', 'ok', v || 'installed (no --version output)');
+    if (r.status === 0) { caVersion = firstLine(r.stdout) || firstLine(r.stderr); add('codearts', 'ok', v || 'installed (no --version output)'); }
     else add('codearts', 'warn', r.error ? `could not run: ${oneLine(r.error.message, 100)}` : `--version exited ${r.status ?? '?'}${v ? ': ' + v : ''}`, 'run the codearts exe manually to check the install');
   }
 
@@ -1365,7 +1368,7 @@ async function doctorData(repoArg) {
   // CodeArts version vs the last smoke-tested one. A broken lifecycle.mjs must never break doctor.
   try {
     const { lifecycleRows } = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href);
-    for (const row of lifecycleRows()) rows.push(row);
+    for (const row of lifecycleRows({ version: caVersion })) rows.push(row);
   } catch {}
 
   const fails = rows.filter((r) => r.status === 'fail').length;

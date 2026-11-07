@@ -194,7 +194,7 @@ function serverArg0(harness) {
 
 // Doctor rows for the install lifecycle: every recorded harness config still points at this ca.mjs,
 // and the installed CodeArts version matches the one that last passed the smoke test.
-export function lifecycleRows() {
+export function lifecycleRows({ version = null } = {}) {
   const rows = [];
   const recorded = Object.keys(readManifest().harnesses);
   if (!recorded.length) rows.push({ name: 'harness config', status: 'ok', detail: 'no machine-wide setup recorded', fix: '' });
@@ -209,9 +209,9 @@ export function lifecycleRows() {
   }
 
   if (fs.existsSync(EXE)) {
-    const r = spawnSync(EXE, ['--version'], { encoding: 'utf8', timeout: 20000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const first = (s) => (String(s || '').split(/\r?\n/).find((l) => l.trim()) || '').trim();
-    const installed = first(r.stdout) || first(r.stderr);
+    let installed = version; // passed in by ca doctor, which already ran --version
+    if (installed == null) { const r = spawnSync(EXE, ['--version'], { encoding: 'utf8', timeout: 20000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); installed = first(r.stdout) || first(r.stderr); }
     let smoke = null; try { smoke = JSON.parse(fs.readFileSync(SMOKE, 'utf8')); } catch {}
     if (!smoke || !smoke.version) rows.push({ name: 'codearts version', status: 'warn', detail: 'no smoke test recorded yet', fix: 'ca onboard --yes --smoke' });
     else if (String(smoke.version) === installed) rows.push({ name: 'codearts version', status: 'ok', detail: `${installed} matches the last smoke test`, fix: '' });
