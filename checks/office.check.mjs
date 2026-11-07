@@ -45,6 +45,15 @@ try {
   await send('Runtime.enable');
 
   const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
+  const fmtTokens = (n) => n < 1000 ? String(Math.round(n)) : n < 1e6 ? (n < 1e4 ? (n / 1e3).toFixed(1) : Math.round(n / 1e3)) + 'k' : (n < 1e7 ? (n / 1e6).toFixed(2) : (n / 1e6).toFixed(1)) + 'M';
+  const noOverlap = (st) => {
+    const ps = st.stations.filter((x) => x.plate.w > 0);
+    for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+      const a = ps[i].plate, b = ps[j].plate;
+      if (a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1) return false;
+    }
+    return true;
+  };
   const winIn = (s) => s.window.x >= s.stage.x - 1 && s.window.y >= s.stage.y - 1 && s.window.x + s.window.w <= s.stage.x + s.stage.w + 1 && s.window.y + s.window.h <= s.stage.y + s.stage.h + 1;
   const platesIn = (s) => s.stations.every((x) => x.plate.w === 0 || (x.plate.x >= s.stage.x - 1 && x.plate.y >= s.stage.y - 1 && x.plate.x + x.plate.w <= s.stage.x + s.stage.w + 1 && x.plate.y + x.plate.h <= s.stage.y + s.stage.h + 1));
   const feetIn = (s, m = 40) => s.stations.every((x) => x.foot.x >= s.stage.x - m && x.foot.y >= s.stage.y - m && x.foot.x <= s.stage.x + s.stage.w + m && x.foot.y <= s.stage.y + s.stage.h + m);
@@ -138,11 +147,13 @@ try {
   check('stage fills the width at 1920x1080', near(s.stage.w, 1920), `${s.stage.w}x${s.stage.h}`);
   check('stage reaches the bottom at 1920x1080', near(s.stage.y + s.stage.h, 1080), `bottom ${s.stage.y + s.stage.h}`);
   check('nameplates inside the stage at 1920x1080', platesIn(s));
+  check('nameplates do not overlap at 1920x1080', noOverlap(s));
   await size(2560, 1080); await wait(500);
   s = await st();
   check('stage fills the width at 2560x1080', near(s.stage.w, 2560), `${s.stage.w}x${s.stage.h}`);
   check('stage reaches the bottom at 2560x1080', near(s.stage.y + s.stage.h, 1080), `bottom ${s.stage.y + s.stage.h}`);
   check('nameplates inside the stage at 2560x1080', platesIn(s));
+  check('nameplates do not overlap at 2560x1080', noOverlap(s));
 
   await size(1280, 800); await wait(400);
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
@@ -173,6 +184,75 @@ try {
   check('demo=big has 8 lanes', s.lanes.length === 8, String(s.lanes.length));
   check('demo=big sends 5 lanes to the overflow list', s.overflow.length === 5, s.overflow.join(','));
   await shot('5-big');
+
+  await send('Page.navigate', { url: base + '/office?demo=stuck&still=1' }); await wait(1800);
+  s = await st();
+  check('demo=stuck: builder STALLED, artist running, reviewer failed',
+    s.lanes.find((l) => l.id === 'office-scene')?.health === 'STALLED' &&
+    s.lanes.find((l) => l.id === 'office-sprites')?.running === true &&
+    s.lanes.find((l) => l.id === 'office-review')?.health === 'failed',
+    s.lanes.map((l) => `${l.id}:${l.health}`).join(' '));
+  check('demo=stuck: stations suggest kick and resume, artist none',
+    s.stations.find((x) => x.station === 'builder')?.suggest === 'kick' &&
+    s.stations.find((x) => x.station === 'artist')?.suggest === '' &&
+    s.stations.find((x) => x.station === 'reviewer')?.suggest === 'resume',
+    s.stations.map((x) => `${x.station}:${x.suggest}`).join(' '));
+  const bb = await ev('(function(){ var b = document.querySelector("#plate-builder .p-badge"); var r = b.getBoundingClientRect(); return { hidden: b.hidden, title: b.title, x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+  check('builder nameplate has the attention badge with the why', !!bb && bb.hidden === false && bb.title === 'no model activity for 6m', JSON.stringify(bb));
+  await click(bb.x, bb.y); await wait(300);
+  s = await st();
+  check('badge click opens the builder window', s.window.open && s.window.laneId === 'office-scene', s.window.laneId);
+  check('first control is the suggested kick', s.window.suggest === 'kick' && s.window.actions[0] === 'kick' && s.window.actions.join(',') === 'kick,fresh,restart-server,attach,stop', s.window.actions.join(','));
+  const kickBtn = await ev('(function(){ var b = document.querySelector("#winBtns .ctl-btn"); var r = b.getBoundingClientRect(); return { action: b.dataset.action, cls: b.className, label: b.textContent, x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+  check('kick button is primary and labeled Retry turn', kickBtn.action === 'kick' && /primary/.test(kickBtn.cls) && kickBtn.label === 'Retry turn', JSON.stringify(kickBtn));
+  check('why text shows under the controls row', (await ev('document.getElementById("winWhy").hidden')) === false && (await ev('document.getElementById("winWhy").textContent')) === 'no model activity for 6m');
+  await shot('7-stuck-controls');
+  await click(kickBtn.x, kickBtn.y); await wait(250);
+  s = await st();
+  check('Retry turn opens the note box', s.window.noteOpen === true, String(s.window.noteOpen));
+  await ev('document.getElementById("noteText").focus()');
+  await send('Input.insertText', { text: 'pick up at the data layer step' });
+  const noteSend = await ev('(function(){ var b = document.getElementById("noteSend"); var r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+  await click(noteSend.x, noteSend.y); await wait(300);
+  s = await st();
+  const kickLog = s.controls[s.controls.length - 1];
+  check('Send logs a kick with mode turn and the typed note', s.controls.length === 1 && kickLog?.laneId === 'office-scene' && kickLog?.action === 'kick' && kickLog?.body?.mode === 'turn' && kickLog?.body?.text === 'pick up at the data layer step', JSON.stringify(s.controls));
+  check('note box closes after Send', s.window.noteOpen === false, String(s.window.noteOpen));
+  check('toast confirms the control', (await ev('document.getElementById("toast").hidden')) === false && (await ev('document.getElementById("toast").textContent')) === 'Retry turn sent (demo)');
+
+  await ev('window.__office.press("office-review")'); await wait(300);
+  s = await st();
+  check('reviewer window offers Resume', s.window.open && s.window.laneId === 'office-review' && s.window.actions.join(',') === 'resume', s.window.actions.join(','));
+  const resBtn = await ev('(function(){ var b = document.querySelector("#winBtns .ctl-btn"); var r = b.getBoundingClientRect(); return { action: b.dataset.action, cls: b.className, x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+  check('Resume is the primary control', resBtn.action === 'resume' && /primary/.test(resBtn.cls), JSON.stringify(resBtn));
+  await click(resBtn.x, resBtn.y); await wait(250);
+  s = await st();
+  check('Resume opens the note box', s.window.noteOpen === true, String(s.window.noteOpen));
+  await ev('document.getElementById("noteText").focus()');
+  await send('Input.insertText', { text: 'resume after the transport failures' });
+  const noteSend2 = await ev('(function(){ var b = document.getElementById("noteSend"); var r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+  await click(noteSend2.x, noteSend2.y); await wait(300);
+  s = await st();
+  const resLog = s.controls[s.controls.length - 1];
+  check('Resume note logs body.note', s.controls.length === 2 && resLog?.laneId === 'office-review' && resLog?.action === 'resume' && resLog?.body?.note === 'resume after the transport failures' && resLog?.body?.mode === undefined, JSON.stringify(s.controls));
+  check('window token total equals the sum of the three agent parts', s.window.tokens && s.window.tokens.total === s.window.tokens.build + s.window.tokens.review + s.window.tokens.other, JSON.stringify(s.window.tokens));
+  const chip = await ev('(function(){ var c = document.getElementById("tokenChip"); return { hidden: c.hidden, text: c.textContent, title: c.title }; })()');
+  check('top bar shows the plan token total', chip && chip.hidden === false && chip.text === 'Tokens ' + fmtTokens(s.planTokens) && chip.text === 'Tokens 1.24M', `${chip?.text} planTokens=${s.planTokens}`);
+  check('top bar title carries the by-agent split', /^Builder [\d.]+[kM]? \u00b7 Reviewer [\d.]+[kM]? \u00b7 Hidden sessions [\d.]+[kM]?$/.test(chip.title), chip.title);
+
+  await ev('window.__office.press("office-sprites")'); await wait(300);
+  s = await st();
+  check('quick steer chips render for a running lane', s.quickSteers === 5, String(s.quickSteers));
+  const qchip = await ev('(function(){ var b = document.querySelector("#winChips .qchip"); var r = b.getBoundingClientRect(); return { text: b.title, x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()');
+  await click(qchip.x, qchip.y); await wait(200);
+  const draftVal = await ev('document.getElementById("winInput").value');
+  check('a quick chip fills the steer draft without sending', draftVal === qchip.text && (await st()).controls.length === 2, `${String(draftVal).slice(0, 40)}...`);
+  s = await st();
+  check('nameplates do not overlap with token counts', noOverlap(s));
+  await size(390, 844); await wait(600);
+  const scrollW = await ev('Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)');
+  check('no horizontal overflow at 390 px', scrollW <= 391, String(scrollW));
+  await size(1280, 800); await wait(400);
 
   await send('Page.navigate', { url: base + '/office?demo=1' }); await wait(5000);
   s = await st();
