@@ -1658,7 +1658,7 @@ function cmdDash(args) {
           // Open a new console window with the CodeArts TUI on the live session.
           const s = l.s; if (s.result || !s.server) return json({ error: 'lane not running' }, 400);
           const sid = s.activeSession || s.buildSession;
-          spawn('cmd.exe', ['/c', 'start', `"codearts ${l.id}"`, EXE, 'attach', s.server.url, '-s', sid, '-p', s.server.pw], { env: caEnv(), detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+          spawn('cmd.exe', ['/c', 'start', `"codearts ${l.id}"`, `"${EXE}"`, 'attach', s.server.url, '-s', sid, '-p', s.server.pw], { env: caEnv(), detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
           return json({ ok: true });
         }
       }
