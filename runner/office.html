@@ -50,11 +50,18 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 .plate.compact .p-sub { font-size: 10.5px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
 .plate.compact .p-badge { right: -6px; top: -6px; width: 15px; height: 15px; font: 700 10px/15px var(--font); }
 #links path.lk-hover { stroke: var(--faint); stroke-opacity: 0.6; stroke-width: 1; stroke-dasharray: 4 4; }
-#overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; gap: 4px; max-width: 320px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+#overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #overflow[hidden] { display: none; }
-.ov-title { padding: 0 2px 4px; color: var(--muted); font-size: 13px; font-weight: 600; }
-.ov-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px; font: 14px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: left; white-space: nowrap; }
-.ov-row .ov-st { color: var(--muted); font-size: 12.5px; }
+.ov-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border-2); color: var(--fg); font: 650 13px var(--font); cursor: pointer; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); }
+.ov-pill:hover { border-color: var(--sel); }
+.ov-pill:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
+.ov-list { display: flex; flex-direction: column; gap: 4px; max-width: 320px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.ov-list[hidden] { display: none; }
+.ov-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px; font: 13px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: left; white-space: nowrap; }
+.ov-row .ov-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ov-row .ov-st { color: var(--muted); font-size: 12px; }
+.ov-row .ov-flag { color: var(--amber); font-weight: 800; }
+.ov-row .ov-flag[hidden] { display: none; }
 .hit { position: absolute; pointer-events: auto; cursor: pointer; }
 #win { position: absolute; left: 0; top: 0; width: 440px; max-width: calc(100% - 24px); z-index: 10; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); }
 #win[hidden] { display: none; }
@@ -141,7 +148,9 @@ body.no-motion #lamp { display: none; }
 .st-row.st-reviewer { border-left-color: var(--reviewer); }
 body.narrow .plate { display: none !important; }
 body.narrow #links { display: none; }
-body.narrow #overflow { display: none; }
+body.narrow #overflow { left: 0; right: 0; bottom: 0; align-items: stretch; gap: 0; }
+body.narrow .ov-pill { width: 100%; justify-content: center; height: 34px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
+body.narrow .ov-list { max-width: none; border-radius: 0; border-left: 0; border-right: 0; }
 body.narrow #win:not([hidden]) { display: flex; flex-direction: column; width: calc(100% - 24px); max-height: min(55vh, calc(100% - 24px)); }
 body.narrow .win-head, body.narrow #winForm, body.narrow #winErr, body.narrow #winChips { flex: none; }
 body.narrow #winBody { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
@@ -184,7 +193,8 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
       <button type="button" class="plate" id="plate-reviewer" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span></button>
     </div>
     <div id="overflow" hidden>
-      <div class="ov-title" id="ovTitle"></div>
+      <div class="ov-list" id="ovList" hidden></div>
+      <button type="button" id="ovPill" class="ov-pill" aria-expanded="false" aria-controls="ovList"></button>
     </div>
     <div id="win" role="dialog" aria-labelledby="winTitle" hidden>
       <div class="win-head">
@@ -654,6 +664,7 @@ const ovBtns = new Map();
 const stRows = new Map();
 const winHooks = { open: () => {}, close: () => {} };
 let assignedOnce = false, prevPlanId = null, prevRunning = new Map();
+let ovOpen = false;
 
 function spriteScale() { return Math.max(0.25, Math.round(k * 2 * 4) / 4); }
 function deskProp(hd) {
@@ -889,16 +900,30 @@ function layoutStations() {
   renderLinks();
   if (!$("win").hidden) positionWin();
 }
+function ovRank(l) { return isNeedsYou(l) ? 0 : l.running ? 1 : 2; }
+function ovMeta(l) {
+  const st = CAUI.status(l.health).label;
+  const tt = CAUI.tokenTotal(l.tokens);
+  return tt ? st + " \u00b7 " + CAUI.fmtTokens(tt) : st;
+}
 function renderOverflow() {
   if (!model) return;
   const rest = model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id));
-  const box = $("overflow");
+  const box = $("overflow"), list = $("ovList"), pill = $("ovPill");
   for (const [id, b] of [...ovBtns]) {
     if (!rest.some((l) => l.id === id)) { b.remove(); ovBtns.delete(id); }
   }
-  if (!rest.length) { box.hidden = true; return; }
+  if (!rest.length) { box.hidden = true; list.hidden = true; ovOpen = false; pill.setAttribute("aria-expanded", "false"); return; }
   box.hidden = false;
-  $("ovTitle").textContent = "Other lanes (" + rest.length + ")";
+  rest.sort((a, b) => {
+    const ra = ovRank(a), rb = ovRank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 2) return (Date.parse(b.finishedAt) || 0) - (Date.parse(a.finishedAt) || 0);
+    return 0;
+  });
+  pill.textContent = "+" + rest.length + " more";
+  list.hidden = !ovOpen;
+  pill.setAttribute("aria-expanded", ovOpen ? "true" : "false");
   for (const l of rest) {
     let b = ovBtns.get(l.id);
     if (!b) {
@@ -906,19 +931,23 @@ function renderOverflow() {
       b.type = "button";
       b.className = "ov-row";
       b.dataset.lane = l.id;
-      b.innerHTML = '<span class="ov-name"></span><span class="ov-st"></span>';
+      b.innerHTML = '<span class="ov-name"></span><span class="ov-st"></span><span class="ov-flag" hidden>!</span>';
       b.setAttribute("aria-controls", "win");
       b.setAttribute("aria-expanded", "false");
       b.addEventListener("click", (ev) => winHooks.open(l.id, b, ev.detail === 0));
       ovBtns.set(l.id, b);
     }
     b.querySelector(".ov-name").textContent = laneName(l);
-    b.querySelector(".ov-st").textContent = CAUI.status(l.health).label;
+    b.querySelector(".ov-st").textContent = ovMeta(l);
+    const flag = b.querySelector(".ov-flag");
+    flag.hidden = !l.suggest;
+    if (l.suggest) flag.title = l.why || "";
   }
   const want = rest.map((l) => l.id).join(",");
-  const have = [...box.querySelectorAll(".ov-row")].map((b) => b.dataset.lane).join(",");
-  if (want !== have) for (const l of rest) box.appendChild(ovBtns.get(l.id));
+  const have = [...list.querySelectorAll(".ov-row")].map((b) => b.dataset.lane).join(",");
+  if (want !== have) for (const l of rest) list.appendChild(ovBtns.get(l.id));
 }
+$("ovPill").addEventListener("click", () => { ovOpen = !ovOpen; renderOverflow(); });
 function renderNarrowList() {
   const box = $("stlist");
   if (!narrow || !model) { if (!box.hidden) box.hidden = true; return; }
@@ -1311,8 +1340,8 @@ function focusFallback() {
     const row = stRows.get("lead");
     if (row) { row.focus(); return; }
   }
-  const box = $("overflow");
-  const first = box.hidden ? null : box.querySelector(".ov-row");
+  const list = $("ovList");
+  const first = list.hidden ? null : list.querySelector(".ov-row");
   if (first) first.focus();
   else $("plate-lead").focus();
 }
@@ -1358,7 +1387,7 @@ document.addEventListener("pointerdown", (ev) => {
   if ($("win").hidden) return;
   const t = ev.target;
   if ($("win").contains(t) || (winAnchor && winAnchor.contains(t))) return;
-  if (t.closest && t.closest(".plate, .ov-row, .hit")) return;
+  if (t.closest && t.closest(".plate, .ov-row, .ov-pill, .ov-list, .hit")) return;
   closeWin(false);
 });
 $("winInput").addEventListener("input", () => { if (winFor && winFor !== "lead") drafts.set(winFor, $("winInput").value); });
