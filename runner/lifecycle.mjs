@@ -184,8 +184,10 @@ function serverArg0(harness) {
   }
   for (const j of d.json || []) {
     let obj = null; try { obj = JSON.parse(fs.readFileSync(j.file, 'utf8')); } catch {}
-    const a = obj && obj[j.mapKey] && obj[j.mapKey][j.serverKey] && obj[j.mapKey][j.serverKey].args;
-    if (Array.isArray(a) && a.length) return a[0];
+    const s = obj && obj[j.mapKey] && obj[j.mapKey][j.serverKey];
+    if (!s) continue;
+    if (Array.isArray(s.args) && s.args.length) return s.args[0];      // node <ca.mjs> mcp
+    if (Array.isArray(s.command) && s.command.length > 1) return s.command[1]; // opencode: [node, <ca.mjs>, mcp]
   }
   return null;
 }
