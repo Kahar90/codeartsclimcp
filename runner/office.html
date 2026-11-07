@@ -169,10 +169,19 @@ body.narrow #winTail { display: none; }
 #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60; max-width: min(420px, calc(100vw - 32px)); padding: 9px 16px; border-radius: 8px; background: var(--raise); border: 1px solid var(--sel); color: var(--fg); font: 600 13.5px var(--font); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
 #toast.bad { border-color: var(--bad); color: var(--bad); }
 #toast[hidden] { display: none !important; }
-@keyframes win-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-@keyframes win-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
-#win.win-in { animation: win-in 140ms ease-out; }
-#win.win-out { animation: win-out 100ms ease-in forwards; }
+@keyframes win-in { from { opacity: 0; transform: translate(var(--win-dx, 0px), var(--win-dy, 0px)) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes win-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translate(var(--win-dx, 0px), var(--win-dy, 0px)) scale(.96); } }
+#win.win-in { animation: win-in 180ms ease-out; }
+#win.win-out { animation: win-out 120ms ease-in forwards; }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes row-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translateX(-50%); } }
+#planMenu.menu-in, .ov-list.menu-in { animation: menu-in 160ms ease-out; }
+#planMenu.menu-in [role="option"], .ov-list.menu-in .ov-row { animation: row-in 160ms ease-out both; animation-delay: calc(var(--i, 0) * 15ms); }
+#hoverCard.card-in { animation: card-in 160ms ease-out 120ms both; }
+#toast.toast-in { animation: toast-in 180ms ease-out; }
+body.no-motion #planMenu.menu-in, body.no-motion .ov-list.menu-in, body.no-motion #planMenu.menu-in [role="option"], body.no-motion .ov-list.menu-in .ov-row, body.no-motion #hoverCard.card-in, body.no-motion #toast.toast-in { animation: none; }
 @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes sheet-down { from { transform: none; } to { transform: translateY(100%); opacity: 0; } }
 body.narrow #win.win-in { animation: sheet-up 260ms cubic-bezier(.2, .8, .2, 1); }
@@ -820,7 +829,7 @@ function renderPlanMenu() {
     const label = o.textContent.replace(/ \(closed\)$/, "");
     const dot = `<span class="pm-dot${running ? " run" : closed ? " closed" : ""}" aria-hidden="true"></span>`;
     const tag = running ? '<span class="pm-tag run">running</span>' : closed ? '<span class="pm-tag">closed</span>' : "";
-    return `<li role="option" id="pm-${i}" data-i="${i}" aria-selected="${o.value === sel.value}"${i === planMenuActive ? ' class="active"' : ""}>${dot}<span class="pm-t" title="${CAUI.esc(label)}">${CAUI.esc(label)}</span>${tag}<svg class="pm-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></li>`;
+    return `<li role="option" id="pm-${i}" data-i="${i}" style="--i:${Math.min(i, 7)}" aria-selected="${o.value === sel.value}"${i === planMenuActive ? ' class="active"' : ""}>${dot}<span class="pm-t" title="${CAUI.esc(label)}">${CAUI.esc(label)}</span>${tag}<svg class="pm-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></li>`;
   };
   const isPlan = ([o]) => plansArr.some((x) => x.id === o.value);
   const views = opts.filter((x) => !isPlan(x)), plans = opts.filter(isPlan);
@@ -841,15 +850,19 @@ function openPlanMenu() {
   hideHoverCard();
   planMenuActive = $("planSel").selectedIndex;
   renderPlanMenu();
-  $("planMenu").hidden = false;
+  const menu = $("planMenu");
+  menu.hidden = false;
+  menu.classList.remove("menu-in");
+  if (!winInstant()) { void menu.offsetWidth; menu.classList.add("menu-in"); }
   $("planBtn").setAttribute("aria-expanded", "true");
-  placeFloat($("planMenu"), $("planBtn"), "right");
-  const a = $("planMenu").querySelector(".active"); if (a) a.scrollIntoView({ block: "nearest" });
-  $("planMenu").focus();
+  placeFloat(menu, $("planBtn"), "right");
+  const a = menu.querySelector(".active"); if (a) a.scrollIntoView({ block: "nearest" });
+  menu.focus();
 }
 function closePlanMenu(focusBtn) {
   if ($("planMenu").hidden) return;
   $("planMenu").hidden = true;
+  $("planMenu").classList.remove("menu-in");
   $("planBtn").setAttribute("aria-expanded", "false");
   if (focusBtn) $("planBtn").focus();
 }
@@ -870,8 +883,10 @@ function showHoverCard(id) {
   if (card.innerHTML !== html) card.innerHTML = html;
   hoverOn = id; card.hidden = false;
   placeFloat(card, anchor, "center");
+  card.classList.remove("card-in");
+  if (!winInstant()) { void card.offsetWidth; card.classList.add("card-in"); }
 }
-function hideHoverCard() { hoverOn = null; $("hoverCard").hidden = true; }
+function hideHoverCard() { hoverOn = null; const card = $("hoverCard"); card.hidden = true; card.classList.remove("card-in"); }
 
 function render() {
   model = mode === "demo" ? demoModel() : liveModel();
@@ -1244,6 +1259,7 @@ function renderOverflow() {
   pill.textContent = "+" + rest.length + " more";
   list.hidden = !ovOpen;
   pill.setAttribute("aria-expanded", ovOpen ? "true" : "false");
+  let oi = 0;
   for (const l of rest) {
     let b = ovBtns.get(l.id);
     if (!b) {
@@ -1259,6 +1275,7 @@ function renderOverflow() {
     }
     b.querySelector(".ov-name").textContent = laneName(l);
     b.querySelector(".ov-st").textContent = ovMeta(l);
+    b.style.setProperty("--i", Math.min(oi++, 7));
     const flag = b.querySelector(".ov-flag");
     flag.hidden = !l.suggest;
     if (l.suggest) flag.title = l.why || "";
@@ -1267,7 +1284,13 @@ function renderOverflow() {
   const have = [...list.querySelectorAll(".ov-row")].map((b) => b.dataset.lane).join(",");
   if (want !== have) for (const l of rest) list.appendChild(ovBtns.get(l.id));
 }
-$("ovPill").addEventListener("click", () => { ovOpen = !ovOpen; renderOverflow(); });
+$("ovPill").addEventListener("click", () => {
+  ovOpen = !ovOpen;
+  renderOverflow();
+  const list = $("ovList");
+  list.classList.remove("menu-in");
+  if (ovOpen && !winInstant()) { void list.offsetWidth; list.classList.add("menu-in"); }
+});
 function renderNarrowList() {
   const box = $("stlist");
   if (!narrow || !model) { if (!box.hidden) box.hidden = true; return; }
@@ -1413,6 +1436,8 @@ function toast(msg, bad) {
   t.textContent = msg;
   t.classList.toggle("bad", !!bad);
   t.hidden = false;
+  t.classList.remove("toast-in");
+  if (!winInstant()) { void t.offsetWidth; t.classList.add("toast-in"); }
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
 }
@@ -1634,6 +1659,10 @@ function positionWin() {
     tail.style.top = (pick.side === "below" ? -T / 2 - 1 : h - T / 2 - 1) + "px";
     tail.style.left = Math.min(Math.max(a.cx - pick.x - T / 2, 6), Math.max(6, w - T - 6)) + "px";
   }
+  // Grow the window out of its anchor side: the tail edge is the transform origin, and the 4px nudge points at the anchor.
+  win.style.transformOrigin = pick.side === "right" ? "left center" : pick.side === "left" ? "right center" : pick.side === "below" ? "center top" : "center bottom";
+  win.style.setProperty("--win-dx", pick.side === "right" ? "-4px" : pick.side === "left" ? "4px" : "0px");
+  win.style.setProperty("--win-dy", pick.side === "below" ? "-4px" : pick.side === "above" ? "4px" : "0px");
 }
 // Keep the window on screen when the viewport or the page/stage scrolls, or when its own content changes
 // (every poll re-renders the body). Throttle with requestAnimationFrame so a burst of events is one pass.
