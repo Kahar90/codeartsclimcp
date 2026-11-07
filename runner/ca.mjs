@@ -1458,6 +1458,7 @@ function withPlanLock(planFile, fn) {
   try { return fn(); }
   finally { if (fd !== null) { try { fs.closeSync(fd); } catch {} try { fs.rmSync(lock, { force: true }); } catch {} } }
 }
+const planStamp = (d = new Date()) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
 // Bind a lane `ca lane` is starting to its repo's plan. CA_NO_PLAN=1 (smoke lanes) is left alone.
 // A plan the lead wrote is only ever appended to; a lane already listed is not added twice.
 function ensurePlan(repo, task, briefText) {
@@ -1466,6 +1467,8 @@ function ensurePlan(repo, task, briefText) {
   const planFile = path.join(main, 'tasks', 'plan.json');
   const rel = (path.relative(main, repo) || '.').split(path.sep).join('/') || '.';
   const goal = planGoal(briefText, task);
+  // A file that exists but cannot be parsed is left untouched (never overwritten): warn, do not stop the lane.
+  if (fs.existsSync(planFile) && readJSON(planFile) === null) throw new Error(`tasks/plan.json is not valid JSON; the lane runs without a plan`);
   const existing = readJSON(planFile);
   if (existing && !planClosed(existing) && planListsLane(existing, main, repo, task)) { registerPlan(planFile); return planFile; }
   return withPlanLock(planFile, () => {
@@ -1485,7 +1488,31 @@ function ensurePlan(repo, task, briefText) {
         writeAtomic(planFile, JSON.stringify(cur, null, 2) + '\n');
       }
       registerPlan(planFile);
+      return planFile;
     }
+    // No plan file, or a closed one: archive the closed plan (it stays listed as closed) and create a
+    // fresh open plan from the brief, so the new lane always has a plan.
+    if (cur && planClosed(cur)) {
+      const stamp = planStamp();
+      const archiveDir = path.join(main, 'tasks', 'plans'); fs.mkdirSync(archiveDir, { recursive: true });
+      const dest = path.join(archiveDir, `${stamp}.json`);
+      let moved = false;
+      try { fs.renameSync(planFile, dest); moved = true; } catch {}
+      if (!moved) { try { fs.copyFileSync(planFile, dest); fs.rmSync(planFile, { force: true }); } catch {} }
+      if (fs.existsSync(dest)) {
+        const oldId = planId(planFile); const newId = `${oldId}~${stamp}`;
+        try { fs.rmSync(path.join(PLANS, `${oldId}.json`), { force: true }); } catch {}
+        fs.mkdirSync(PLANS, { recursive: true });
+        fs.writeFileSync(path.join(PLANS, `${newId}.json`), JSON.stringify({ id: newId, file: dest }, null, 2));
+      }
+    }
+    const plan = { title: goal, goal, lead: process.env.CA_LEAD || 'lead', status: 'running', now: '',
+      waves: [{ name: 'Lanes', lanes: [task] }], lanes: [{ task, repo: rel, why: goal }],
+      decisions: [{ at: new Date().toISOString(), text: `Plan created by the runner: lane ${task} started without an open plan.` }],
+      next: [], risks: [] };
+    fs.mkdirSync(path.dirname(planFile), { recursive: true });
+    writeAtomic(planFile, JSON.stringify(plan, null, 2) + '\n');
+    registerPlan(planFile);
     return planFile;
   });
 }
