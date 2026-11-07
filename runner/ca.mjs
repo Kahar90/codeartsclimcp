@@ -171,6 +171,24 @@ function caEnv(extra = {}) {
     ...maasEnv(), ...extra,
   };
 }
+// The CA_DUMP_ENV debug dump must never carry a secret. Blank out every variable whose name looks
+// like a credential, then scrub the remaining values of those secret values wherever they appear
+// (this also covers the MaaS apiKey embedded in OPENCODE_CONFIG_CONTENT).
+const SECRET_NAME = /KEY|SECRET|TOKEN|PASSWORD|(^|_)AK$|(^|_)SK$/i;
+function redactEnv(env) {
+  const out = {}; const secrets = [];
+  for (const [k, v] of Object.entries(env || {})) {
+    if (SECRET_NAME.test(k)) { if (typeof v === 'string' && v.length >= 6) secrets.push(v); out[k] = '<redacted>'; }
+    else out[k] = v;
+  }
+  for (const k of Object.keys(out)) {
+    if (SECRET_NAME.test(k) || typeof out[k] !== 'string') continue;
+    let s = out[k];
+    for (const sec of secrets) s = s.split(sec).join('<redacted>');
+    out[k] = s;
+  }
+  return out;
+}
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); s.on('error', rej); });
 const splitModel = (m) => { const i = m.indexOf('/'); return { providerID: m.slice(0, i), modelID: m.slice(i + 1) }; };
 
@@ -183,7 +201,7 @@ class Server {
     this.pw = this.pw || crypto.randomBytes(16).toString('hex');
     this.url = `http://127.0.0.1:${this.port}`;
     const out = fs.openSync(this.logFile, 'a');
-    if (process.env.CA_DUMP_ENV) fs.writeFileSync(process.env.CA_DUMP_ENV, JSON.stringify({ env: caEnv({ CODEARTS_SERVER_PASSWORD: 'pw' }), cwd: this.cwd }, null, 1));
+    if (process.env.CA_DUMP_ENV) fs.writeFileSync(process.env.CA_DUMP_ENV, JSON.stringify({ env: redactEnv(caEnv({ CODEARTS_SERVER_PASSWORD: this.pw })), cwd: this.cwd }, null, 1));
     this.child = spawn(EXE, ['serve', '--port', String(this.port), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'WARN'],
       { cwd: this.cwd, env: caEnv({ CODEARTS_SERVER_PASSWORD: this.pw }), stdio: ['ignore', out, out] });
     this.alive = true;
@@ -239,6 +257,11 @@ async function runLane(repoArg, task, opts = {}) {
   const repo = path.resolve(repoArg);
   const briefFile = path.join(repo, 'tasks', `${task}.md`);
   if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
+  // A brief copied from the template must not reach the builder with a placeholder CHECK line: the
+  // runner would run the literal <...> text as a command. Refuse before anything is created.
+  const briefEarly = fs.readFileSync(briefFile, 'utf8');
+  const badCheck = [...briefEarly.matchAll(/^\s*(?:[-*]\s*)?CHECK:\s*`?(.+?)`?\s*$/gm)].map((m) => m[1]).find((c) => /<[^>]*>/.test(c));
+  if (badCheck) die(`tasks/${task}.md still has a template placeholder CHECK line: "${badCheck}". Replace it with a real command or delete it.`, 2);
   if (!fs.existsSync(EXE)) die(`codearts not found at ${EXE}`, 2);
   if (!git(repo, 'rev-parse', '--git-dir')) die(`${repo} is not a git repo`, 2);
   const id = `${path.basename(repo)}--${task}`.replace(/[^\w.-]+/g, '_');
@@ -847,12 +870,25 @@ function health(s) {
   if (idle > 60000) return 'quiet';
   return 'running';
 }
+// One lookup for lanes and plans: exact id, then exact task (lanes only), then a substring match.
+// Zero substring matches means "not found"; more than one is ambiguous and must be refused, never
+// guessed, so a short prefix can never steer, stop or close the wrong thing.
+function pickOne(items, q, idOf, taskOf) {
+  if (!q) return { hit: null };
+  const exact = items.find((x) => idOf(x) === q) || (taskOf ? items.find((x) => taskOf(x) === q) : null);
+  if (exact) return { hit: exact };
+  const subs = items.filter((x) => idOf(x).includes(q));
+  if (subs.length === 1) return { hit: subs[0] };
+  if (subs.length > 1) return { hit: null, matches: subs.map(idOf) };
+  return { hit: null };
+}
 function findLane(q) {
   const all = lanes();
   if (!q) { const runningLanes = all.filter((l) => !l.s.result); if (runningLanes.length === 1) return runningLanes[0]; die('which lane? ' + all.map((l) => l.id).join(', '), 2); }
-  const hit = all.find((l) => l.id === q) || all.find((l) => l.task === q) || all.find((l) => l.id.includes(q));
-  if (!hit) die(`no lane matches "${q}". Lanes: ${all.map((l) => l.id).join(', ') || '(none)'}`, 2);
-  return hit;
+  const r = pickOne(all, q, (l) => l.id, (l) => l.task);
+  if (r.matches) die(`ambiguous lane "${q}": matches ${r.matches.join(', ')}; use the full id`, 2);
+  if (!r.hit) die(`no lane matches "${q}". Lanes: ${all.map((l) => l.id).join(', ') || '(none)'}`, 2);
+  return r.hit;
 }
 // Server side acknowledgement of finished lanes (Control room). acks.json maps a lane id to the
 // finishedAt that was acknowledged, so a lane resumed and finished again reads as unseen.
@@ -974,15 +1010,19 @@ async function cmdTail(args) {
     if (s?.result) { await sleep(500); process.stdout.write(`\n[lane ${s.result}]\n`); return; }
   }
 }
+// Queue a steering message. Returns { error, code } instead of dying, so a dashboard route can
+// answer 409 without ever exiting the long-lived dashboard process.
 function steer(l, text) {
-  if (l.s.result) die(`lane ${l.id} already ${l.s.result}`, 2);
-  if (!alive(l.s.pid)) die(`lane ${l.id} supervisor is not running`, 2);
+  if (l.s.result) return { error: `lane ${l.id} already ${l.s.result}`, code: 409 };
+  if (!alive(l.s.pid)) return { error: `lane ${l.id} supervisor is not running`, code: 409 };
   fs.mkdirSync(path.join(l.dir, 'inbox'), { recursive: true });
   fs.writeFileSync(path.join(l.dir, 'inbox', `${now()}-${crypto.randomBytes(3).toString('hex')}.txt`), text);
+  return { ok: true };
 }
 function cmdSteer(args) {
   const [q, ...rest] = args; if (!q || !rest.length) die('usage: ca steer <lane> <message>', 2);
-  const l = findLane(q); steer(l, rest.join(' '));
+  const l = findLane(q); const r = steer(l, rest.join(' '));
+  if (r.error) die(r.error, 2);
   console.log(`queued for ${l.id}; it goes into the session within 2 s (phase ${l.s.phase}). Follow: ca tail ${l.id} -f`);
 }
 function cmdAttach(args) {
@@ -1263,7 +1303,13 @@ function plans() {
     .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
 }
 // ca plan [file] registers; ca plan list | close [id] [--reason t] | rm <id> manage registered plans.
-const findPlan = (q) => { const all = plans(); return q ? all.find((x) => x.id === q) || all.find((x) => x.id.includes(q)) : all[0]; };
+const findPlan = (q) => {
+  const all = plans();
+  if (!q) return all[0];
+  const r = pickOne(all, q, (x) => x.id, null);
+  if (r.matches) die(`ambiguous plan "${q}": matches ${r.matches.join(', ')}; use the full id`, 2);
+  return r.hit;
+};
 async function cmdPlan(args) {
   const sub = args[0];
   if (sub === 'list' || sub === 'ls') {
@@ -1510,10 +1556,27 @@ async function ensureDash() {
 function cmdDash(args) {
   const port = Number(args[0] || process.env.CA_DASH_PORT || 4777);
   const page = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8');
+  // DNS-rebinding guard: the dashboard drives lanes, so trust only loopback Host headers for this
+  // port. CA_DASH_HOSTS adds host or host:port names for a proxy in front of the dashboard.
+  const allowHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
+  for (const h of String(process.env.CA_DASH_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) { allowHosts.add(h); if (!h.includes(':')) allowHosts.add(`${h}:${port}`); }
+  // One JSON reader for every POST body: invalid JSON or a body over 64 KB is a client error, not a 500.
+  const MAX_BODY = 64 * 1024;
+  const readJson = (req) => new Promise((resolve, reject) => {
+    let b = ''; let size = 0; let done = false;
+    const fail = (code) => { if (done) return; done = true; const e = new Error(code === 413 ? 'body too large' : 'invalid JSON body'); e.statusCode = code; reject(e); };
+    req.on('data', (c) => { if (done) return; size += c.length; if (size > MAX_BODY) return fail(413); b += c; });
+    req.on('end', () => { if (done) return; done = true; try { resolve(b.trim() ? JSON.parse(b) : {}); } catch { const e = new Error('invalid JSON body'); e.statusCode = 400; reject(e); } });
+    req.on('error', () => fail(400));
+  });
+  const readBody = async (req) => { try { return { body: await readJson(req) }; } catch (e) { return { error: { error: e.statusCode === 413 ? 'request body too large' : 'invalid JSON body' }, code: e.statusCode || 400 }; } };
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     try {
+      // A foreign Host header is a DNS-rebinding attempt: reject it before any route runs.
+      const reqHost = String(req.headers.host || '').toLowerCase();
+      if (!allowHosts.has(reqHost)) return json({ error: `forbidden host ${req.headers.host || '(none)'}; allow it with CA_DASH_HOSTS` }, 403);
       // Every POST under /api/ must be JSON: a cross-site form post cannot steer, stop, kick or resume.
       if (req.method === 'POST' && u.pathname.startsWith('/api/') && !/application\/json/i.test(String(req.headers['content-type'] || ''))) return json({ error: 'POST /api/ needs content-type application/json' }, 415);
       if (u.pathname === '/') { let html = page; try { html = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8'); } catch {} res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(html); }
@@ -1555,7 +1618,9 @@ function cmdDash(args) {
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
-        const l = all.find((x) => x.id === q) || all.find((x) => x.task === q) || all.find((x) => x.id.includes(q));
+        const pr = pickOne(all, q, (x) => x.id, (x) => x.task);
+        if (pr.matches) return json({ error: `ambiguous lane "${q}": matches ${pr.matches.join(', ')}; use the full id` }, 409);
+        const l = pr.hit;
         if (!l) return json({ error: `no lane matches "${q}"` }, 404); // never die(): one stale browser tab must not kill the dashboard
         if (m[2] === 'detail') return json(laneDetail(l));
         if (m[2] === 'log') {
@@ -1565,17 +1630,17 @@ function cmdDash(args) {
           return json({ size, text, reset: from > size });
         }
         if (m[2] === 'summary') { const f = path.join(l.dir, 'summary.md'); return json({ text: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '' }); }
-        if (req.method === 'POST' && m[2] === 'steer') { let b = ''; for await (const c of req) b += c; const text = JSON.parse(b || '{}').text?.trim(); if (!text) return json({ error: 'empty' }, 400); steer(l, text); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'steer') { const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code); const text = String(rb.body.text ?? '').trim(); if (!text) return json({ error: 'empty' }, 400); const sr = steer(l, text); if (sr.error) return json({ error: sr.error }, sr.code || 409); return json({ ok: true }); }
         if (req.method === 'POST' && m[2] === 'kick') {
-          let b = ''; for await (const c of req) b += c;
-          const body = JSON.parse(b || '{}');
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const body = rb.body;
           const r = kickLane(l, { mode: String(body.mode || 'turn'), text: String(body.text || '').trim(), by: 'dashboard' });
           if (r.error) return json({ error: r.error }, r.code || 409);
           return json({ ok: true, mode: String(body.mode || 'turn'), file: r.file });
         }
         if (req.method === 'POST' && m[2] === 'resume') {
-          let b = ''; for await (const c of req) b += c;
-          const body = JSON.parse(b || '{}');
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const body = rb.body;
           const r = resumeLane(l, { note: String(body.note || '').trim(), by: 'dashboard' });
           if (r.error) return json({ error: r.error }, r.code || 409);
           return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
@@ -1583,8 +1648,8 @@ function cmdDash(args) {
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
         if (req.method === 'POST' && m[2] === 'ack') {
           // Mark a finished lane seen (or unseen again) for this finishedAt; a later finish is unseen anew.
-          let b = ''; for await (const c of req) b += c;
-          const body = JSON.parse(b || '{}');
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const body = rb.body;
           if (body.seen !== false && !l.s.result) return json({ error: 'lane is not finished: resume or stop it instead' }, 409);
           setAck(l.id, body.seen !== false, l.s.finishedAt || null, typeof body.note === 'string' ? oneLine(body.note, 200) : '');
           return json({ ok: true, seen: laneSeen(l.id, l.s.finishedAt || null) });
@@ -1593,7 +1658,7 @@ function cmdDash(args) {
           // Open a new console window with the CodeArts TUI on the live session.
           const s = l.s; if (s.result || !s.server) return json({ error: 'lane not running' }, 400);
           const sid = s.activeSession || s.buildSession;
-          spawn('cmd.exe', ['/c', 'start', `"codearts ${l.id}"`, EXE, 'attach', s.server.url, '-s', sid, '-p', s.server.pw], { env: caEnv(), detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+          spawn('cmd.exe', ['/c', 'start', `"codearts ${l.id}"`, `"${EXE}"`, 'attach', s.server.url, '-s', sid, '-p', s.server.pw], { env: caEnv(), detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
           return json({ ok: true });
         }
       }
