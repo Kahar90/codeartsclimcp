@@ -6,6 +6,8 @@ Your agent (Claude Code, Kiro, Cursor, Codex, opencode, VS Code) plans the work.
 **lane** writes the code in your repo, commits each step, runs your tests, fixes what fails
 and gets a review. You read one summary and decide.
 
+Runs on Windows, macOS and Linux (Node 20+, git).
+
 ![The Office view: the lead, builder and reviewer at work, with a live lane window](docs/images/office.png)
 
 ## Set it up in one prompt
