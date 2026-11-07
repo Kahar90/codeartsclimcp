@@ -169,6 +169,61 @@ export function parseChangelog(text) {
   return sections.sort((a, b) => compareVersions(b.version, a.version));
 }
 
+// The update check: is a newer release published? Reads package.json and CHANGELOG.md from the
+// release base URL (CA_UPDATE_URL overrides it, used by the checks), caches the result and never throws.
+const PKG_FILE = path.resolve(HERE, '..', 'package.json');
+const UPDATE_FILE = path.join(STATE_DIR, 'update.json');
+// How long a cached result is trusted before a refresh: 24 h, CA_UPDATE_TTL_H hours overrides it.
+export const UPDATE_TTL_MS = (() => { const h = Number(process.env.CA_UPDATE_TTL_H); return (Number.isFinite(h) && h > 0 ? h : 24) * 3600 * 1000; })();
+
+function currentVersion() { try { return String(JSON.parse(fs.readFileSync(PKG_FILE, 'utf8')).version || '0.0.0'); } catch { return '0.0.0'; } }
+function updateBaseUrl() { const u = process.env.CA_UPDATE_URL || 'https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/'; return u.endsWith('/') ? u : `${u}/`; }
+
+// null when the cache is missing or unreadable.
+export function readUpdateCache() {
+  try { const v = JSON.parse(fs.readFileSync(UPDATE_FILE, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+}
+// Atomic: write a temp file, then rename it over the cache (retry briefly: a Windows reader can hold it).
+function writeUpdateCache(obj) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    const tmp = `${UPDATE_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
+    for (let i = 0; i < 5; i++) { try { fs.renameSync(tmp, UPDATE_FILE); return; } catch { const t = Date.now() + 15; while (Date.now() < t); } }
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  } catch {}
+}
+
+// Is a newer release published? Result { current, latest, available, notes, cmd, checkedAt, error? }.
+// Every successful result is cached in STATE_DIR/update.json; a failure never overwrites a good cache.
+export async function checkUpdate({ force = false, timeoutMs = 5000 } = {}) {
+  const cmd = installCommand();
+  const current = currentVersion();
+  if (!force) {
+    const c = readUpdateCache();
+    if (c && typeof c.checkedAt === 'number' && Date.now() - c.checkedAt < UPDATE_TTL_MS) return c;
+  }
+  const base = updateBaseUrl();
+  try {
+    const res = await fetch(`${base}package.json`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) throw new Error(`package.json HTTP ${res.status}`);
+    const pkg = await res.json();
+    const latest = String((pkg && pkg.version) || '').trim();
+    if (!latest) throw new Error('remote package.json has no version');
+    const available = compareVersions(latest, current) > 0;
+    let notes = [];
+    if (available) {
+      const cr = await fetch(`${base}CHANGELOG.md`, { signal: AbortSignal.timeout(timeoutMs) });
+      if (cr.ok) notes = parseChangelog(await cr.text()).filter((s) => compareVersions(s.version, current) > 0 && compareVersions(s.version, latest) <= 0);
+    }
+    const result = { current, latest, available, notes, cmd, checkedAt: Date.now() };
+    writeUpdateCache(result);
+    return result;
+  } catch (e) {
+    return { current, latest: null, available: false, notes: [], cmd, checkedAt: Date.now(), error: String((e && e.message) || e) };
+  }
+}
+
 // `ca update [--dry-run]`: reinstall the latest version, then rerun `ca setup <h> --user` for every
 // recorded harness so each config is refreshed. A failing install command changes nothing.
 export async function update(args) {
