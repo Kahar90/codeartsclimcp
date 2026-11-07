@@ -36,9 +36,21 @@ Make a change, run the check, read its output. Do not reason for a long time wit
    browser notification when a lane enters attention or done (diff by lane id between polls, never on first
    load). Commit.
 6. Lane detail header: show the bucket badge and bucketWhy prominently above the controls bar, and a "Back to
-   Control room" link. Rail lanes get a small bucket dot. Commit.
-7. Office view: the top bar gets a "Needs you N" pill (hidden at 0) linking to `/#/`, and the plan status there uses
-   the same bucket wording. Only this change in runner/office.html. Commit.
+   Control room" link. Rail lanes get a small bucket dot. Office view (runner/office.html): the top bar gets a
+   "Needs you N" pill (hidden at 0) linking to `/#/`, and the plan status there uses the same bucket wording. Commit.
+7. Tokens by model, lead included. Lanes and plans already expose tokensByModel ({"maas/glm-5.3": {..., total}, ...}).
+   Server (ca.mjs planView): a plan may name its lead's usage in plan.json as `leadSession` (path to a Claude Code
+   transcript .jsonl) or `leadTokens` ({"<model>": {input, output, cacheRead, cacheWrite}}, written by any harness).
+   For leadSession, parse the jsonl lines whose message.role is assistant and message.usage exists, count each
+   message.id once, and sum per message.model: input = input_tokens, cacheRead = cache_read_input_tokens,
+   cacheWrite = cache_creation_input_tokens, output = output_tokens; only lines with timestamp >= plan.leadSince when
+   set. Cache the result by file mtime. planView adds `lead: { tokensByModel }` and merges it into tokensByModel and
+   tokens (total includes cacheWrite) with each entry marked `who: 'lead' | 'worker'`. New CLI `ca lead-tokens
+   [--plan id] [--session file]` sets leadSession on the plan (default session: newest .jsonl in
+   ~/.claude/projects/<cwd with : \ / replaced by ->/) and prints the per-model totals. UI: a "Tokens by model" table
+   on the plan home and the Control room (model short name, lead or worker tag, total, in / out / cache) sorted by
+   total, plus the same per lane in lane detail; the Office top bar Tokens pill title lists the per-model lines.
+   Add asserts to checks/overview.check.mjs with a small fake transcript (duplicate message ids counted once). Commit.
 8. Test hook and checks: window.__lanes.state() adds overview { counts, group, filter, sections: [{ bucket, ids }],
    projects: [ids], title: document.title, banner: bool }. Extend the ?demo=1 fixture with bucket, bucketWhy and
    project on every lane (at least two projects, one lane per bucket, one seen done lane) and demo answers for
