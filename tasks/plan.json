@@ -2,8 +2,8 @@
   "title": "Onboarding and hardening",
   "goal": "Make installing and using CodeArts lanes as easy as possible for a new user on any harness: one prompt, one keys form, then any repo works; wrong keys explained in seconds; a first-run dashboard that says what to do.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "Waiting for scope and firstrun; wave 2 briefs ready",
+  "status": "done",
+  "now": "Closed: waves 1 and 2 merged, checks green, synced to the skill and pushed",
   "waves": [
     {
       "name": "Wave 1 · Setup scope, keys, first-run page",
@@ -100,6 +100,10 @@
     {
       "at": "2026-11-07T12:38:48.993Z",
       "text": "Audit wave queued. Deleted D:/Coding/codearts testing/runner-env.json (env dump with live keys, never in git). Contract checks mcpwave and runnerwave reproduce every item; also found the MaaS key inside OPENCODE_CONFIG_CONTENT (name-based redaction alone would leak it) and fuzzy plan lookup (sho closed shop-admin)."
+    },
+    {
+      "at": "2026-11-07T13:26:49.497Z",
+      "text": "Plan closed: waves 1 and 2 merged, checks green, synced to the skill and pushed."
     }
   ],
   "risks": [
