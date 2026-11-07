@@ -582,7 +582,9 @@ function render() {
   renderTop();
   const cues = diffCues();
   assignStations();
+  assignHot();
   renderStations();
+  renderHotDesks();
   renderOverflow();
   renderNarrowList();
   fireCues(cues);
@@ -703,6 +705,46 @@ function assignStations() {
   }
   prevRunning = new Map(lanes.map((l) => [l.id, !!l.running]));
 }
+function isNeedsYou(l) {
+  const h = String(l.health || "").toUpperCase();
+  if (h === "STALLED" || h === "DEAD") return true;
+  const low = String(l.health || "").toLowerCase();
+  if (low === "failed" || low === "paused" || low === "thinking" || low === "needs review") return true;
+  return l.bucket === "attention";
+}
+function isReleased(l) {
+  const r = String(l.result || "").toLowerCase();
+  const h = String(l.health || "").toLowerCase();
+  return ["done", "stopped", "continued", "dropped"].some((x) => r === x || h === x);
+}
+function hotCandidates(lanes) {
+  const rank = (l) => isNeedsYou(l) ? 0 : l.running ? 1 : 2;
+  return lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 2) return (Date.parse(b.finishedAt) || 0) - (Date.parse(a.finishedAt) || 0);
+    return 0;
+  });
+}
+function assignHot() {
+  const lanes = model.lanes;
+  const keys = SCENE.hotdesks.map((h) => h.key);
+  for (const key of keys) if (!(key in hotSeat)) hotSeat[key] = null;
+  const alive = new Set(lanes.map((l) => l.id));
+  for (const [id, key] of [...laneHot]) {
+    if (!alive.has(id) || laneStation.has(id)) { laneHot.delete(id); if (hotSeat[key] === id) hotSeat[key] = null; }
+  }
+  for (const l of hotCandidates(lanes)) {
+    let free = keys.find((key) => !hotSeat[key]);
+    if (!free) {
+      const victim = keys.map((key) => hotSeat[key]).find((id) => id && isReleased(lanes.find((x) => x.id === id)));
+      if (victim) { const vk = laneHot.get(victim); laneHot.delete(victim); hotSeat[vk] = null; free = vk; }
+    }
+    if (!free) break;
+    hotSeat[free] = l.id;
+    laneHot.set(l.id, free);
+  }
+}
 function setStation(key, opts) {
   const plate = $("plate-" + key);
   const sp = sprites[key];
@@ -734,6 +776,24 @@ function renderStations() {
     const l = id && model.lanes.find((x) => x.id === id);
     if (!l) { setStation(stKey, null); continue; }
     setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
+  }
+}
+function renderHotDesks() {
+  if (!model) return;
+  for (const hd of SCENE.hotdesks) {
+    const id = hotSeat[hd.key];
+    const l = id && model.lanes.find((x) => x.id === id);
+    const sp = hotSprites[hd.key];
+    const desk = desks[hd.key];
+    const hit = hotHits[hd.key];
+    if (!l) {
+      if (sp) sp.el.style.display = "none";
+      if (desk) desk.style.display = "none";
+      if (hit) hit.style.display = "none";
+      continue;
+    }
+    if (sp) { sp.el.style.display = ""; sp.setClip(CLIP_BY_KEY[CAUI.status(l.health).key] || "idle"); }
+    if (desk) desk.style.display = "";
   }
 }
 function renderLinks() {
@@ -806,7 +866,7 @@ function layoutStations() {
 }
 function renderOverflow() {
   if (!model) return;
-  const rest = model.lanes.filter((l) => !laneStation.has(l.id));
+  const rest = model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id));
   const box = $("overflow");
   for (const [id, b] of [...ovBtns]) {
     if (!rest.some((l) => l.id === id)) { b.remove(); ovBtns.delete(id); }
@@ -900,6 +960,7 @@ async function initSprites() {
   }
   layoutStations();
   renderStations();
+  renderHotDesks();
 }
 for (const key of STATION_KEYS) {
   $("plate-" + key).addEventListener("click", (ev) => {
@@ -1397,7 +1458,7 @@ window.__office = {
       goal: (model && model.plan && model.plan.goal) || "",
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
       stations,
-      overflow: model ? model.lanes.filter((l) => !laneStation.has(l.id)).map((l) => l.id) : [],
+      overflow: model ? model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).map((l) => l.id) : [],
       window: { open: !win.hidden && !!winFor, laneId: winFor, x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement), tokens: winTk, actions: [...$("winBtns").children].map((b) => b.dataset.action), suggest: (winLane && winLane.suggest) || "", noteOpen: !$("winNote").hidden },
       effects: effects.slice(),
       motion: PixelSprites.motion(),
