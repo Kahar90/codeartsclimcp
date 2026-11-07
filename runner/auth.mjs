@@ -87,7 +87,10 @@ function unprotect(map) {
 
 let cacheKey = '';
 let cacheCreds = {};
-function cacheStore(key, creds) { cacheKey = key; cacheCreds = creds; return creds; }
+let problem = '';
+
+export function credsProblem() { return problem; }
+function cacheStore(key, creds, why) { cacheKey = key; cacheCreds = creds; problem = why; return creds; }
 
 // Rewrite a plain v1 file as the encrypted v2 form, once, on Windows.
 function migrate(plain) {
@@ -103,20 +106,20 @@ function migrate(plain) {
 
 export function readCreds() {
   let st;
-  try { st = fs.statSync(CRED_FILE); } catch { return cacheStore('', {}); }
+  try { st = fs.statSync(CRED_FILE); } catch { return cacheStore('', {}, ''); }
   const key = `${st.mtimeMs}:${st.size}`;
   if (key === cacheKey) return cacheCreds;
   let v;
   try {
     v = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8').replace(/^﻿/, ''));
-  } catch { return cacheStore(key, {}); }
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return cacheStore(key, {});
+  } catch { return cacheStore(key, {}, 'the file is not valid JSON'); }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return cacheStore(key, {}, 'the file is not a key file');
   if (v.v === 2 && v.protection === 'dpapi' && v.keys && typeof v.keys === 'object') {
     const dec = unprotect(v.keys);
-    if (!dec) return cacheStore(key, {});
-    return cacheStore(key, dec);
+    if (!dec) return cacheStore(key, {}, 'the file could not be decrypted (another user or machine, or a damaged blob)');
+    return cacheStore(key, dec, '');
   }
-  cacheStore(key, v);
+  cacheStore(key, v, '');
   if (process.platform === 'win32') migrate(v);
   return v;
 }
@@ -134,7 +137,7 @@ function saveCreds(values) {
     : JSON.stringify(cur, null, 2);
   fs.writeFileSync(CRED_FILE, body + '\n', { mode: 0o600 });
   try { fs.chmodSync(CRED_FILE, 0o600); } catch {}
-  try { const st = fs.statSync(CRED_FILE); cacheStore(`${st.mtimeMs}:${st.size}`, cur); } catch { cacheStore('', {}); }
+  try { const st = fs.statSync(CRED_FILE); cacheStore(`${st.mtimeMs}:${st.size}`, cur, ''); } catch { cacheStore('', {}, ''); }
   return saved;
 }
 
@@ -255,7 +258,12 @@ export default async function auth(args) {
 
   if (flags.has('--status')) {
     const s = status();
-    return out({ ready: ready(s), keys: s, file: CRED_FILE }, `${KEYS.map((k) => `${k}: ${s[k] ? 'set' : 'not set'}`).join('\n')}\n${ready(s) ? 'auth: ready' : 'auth: missing keys, run: ca auth'}`);
+    const p = credsProblem();
+    const note = p ? `the keys file could not be read (${p}); run ca auth --force to enter the keys again` : '';
+    const lines = KEYS.map((k) => `${k}: ${s[k] ? 'set' : 'not set'}`);
+    if (note) lines.push(note);
+    lines.push(ready(s) ? 'auth: ready' : 'auth: missing keys, run: ca auth');
+    return out({ ready: ready(s), keys: s, file: CRED_FILE, problem: note || undefined }, lines.join('\n'));
   }
 
   if (flags.has('--stdin')) {
