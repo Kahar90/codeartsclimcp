@@ -57,12 +57,17 @@ const UNPROTECT_PS = [
   'ConvertTo-Json $o -Compress',
 ].join('\n');
 
+// Why the last DPAPI call failed (one line, never contains a key value), for the save warning.
+let lastVaultError = '';
 function psResult(names, r) {
-  if (!r || r.status !== 0) return null;
-  let j; try { j = JSON.parse(r.stdout); } catch { return null; }
+  const fail = (why) => { lastVaultError = String(why || 'unknown error').replace(/\s+/g, ' ').trim().slice(0, 200); return null; };
+  if (!r) return fail('PowerShell is only used on Windows');
+  if (r.error) return fail(r.error.message);
+  if (r.status !== 0) return fail((String(r.stderr || '').split(/\r?\n/).find((l) => l.trim()) || `PowerShell exited ${r.status}`));
+  let j; try { j = JSON.parse(r.stdout); } catch { return fail(`unexpected PowerShell output: ${String(r.stdout || '').slice(0, 80)}`); }
   const out = {};
   for (let i = 0; i < names.length; i++) {
-    if (typeof j[String(i)] !== 'string') return null;
+    if (typeof j[String(i)] !== 'string') return fail(`PowerShell returned no value for key ${i + 1} of ${names.length}`);
     out[names[i]] = j[String(i)];
   }
   return out;
@@ -94,6 +99,7 @@ function cacheStore(key, creds, why) { cacheKey = key; cacheCreds = creds; probl
 
 // Rewrite a plain v1 file as the encrypted v2 form, once, on Windows.
 function migrate(plain) {
+  if (lastVaultError) return; // DPAPI already failed in this process: keep the plain file, do not retry on every read
   try {
     const enc = protect(plain);
     if (!enc) return;
@@ -134,7 +140,10 @@ export function readCredsAt(file) {
   return v;
 }
 
+// Set by saveCreds when the keys could not be encrypted; ca auth prints it.
+export let saveWarning = '';
 function saveCreds(values) {
+  saveWarning = '';
   const cur = readCreds();
   const saved = [];
   for (const k of KEYS) {
@@ -144,9 +153,13 @@ function saveCreds(values) {
   fs.mkdirSync(path.dirname(CRED_FILE), { recursive: true });
   let enc = null;
   if (process.platform === 'win32') {
-    // Never write a vault that lost keys: if DPAPI did not return a blob for every key, keep the old file.
+    // Never write a vault that lost keys: if DPAPI did not return a blob for every key, save the keys
+    // in the user-only plain file instead and say so (blocking setup over DPAPI would be worse).
     enc = protect(cur);
-    if (!enc || Object.keys(cur).some((k) => typeof enc[k] !== 'string' || !enc[k])) throw new Error('could not encrypt the keys with Windows DPAPI; nothing was saved (the old keys file is unchanged)');
+    if (!enc || Object.keys(cur).some((k) => typeof enc[k] !== 'string' || !enc[k])) {
+      enc = null;
+      saveWarning = `Windows DPAPI is not available here (${lastVaultError || 'no reason given'}); the keys were saved unencrypted in a file only your user can read`;
+    }
   }
   const body = enc ? JSON.stringify({ v: 2, protection: 'dpapi', keys: enc }, null, 2) : JSON.stringify(cur, null, 2);
   fs.writeFileSync(CRED_FILE, body + '\n', { mode: 0o600 });
@@ -252,7 +265,7 @@ function serve(portFile) {
         }
         try { saveCreds(v); } catch (e) { return j(200, { ok: false, error: e.message }); } // AK/SK (and a MaaS key that was not rejected) are saved; the form stays on a rejection
         if (rejected) return j(200, { ok: false, error: rejected });
-        j(200, { ok: true, warning });
+        j(200, { ok: true, warning: [warning, saveWarning].filter(Boolean).join('; ') });
         setTimeout(() => process.exit(0), 300);
       });
       return;
@@ -297,7 +310,7 @@ export default async function auth(args) {
     let saved;
     try { saved = saveCreds(v); } catch (e) { out({ saved: [], ready: false, error: e.message }, `auth: ${e.message}`); process.exitCode = 1; return; }
     const s = status();
-    out({ saved, ready: ready(s), maasRejected }, [`saved: ${saved.join(', ') || 'nothing'}`, ...msgs, ready(s) ? 'auth: ready' : 'auth: AK and SK still missing'].join('\n'));
+    out({ saved, ready: ready(s), maasRejected }, [`saved: ${saved.join(', ') || 'nothing'}`, ...msgs, ...(saveWarning ? [`warning: ${saveWarning}`] : []), ready(s) ? 'auth: ready' : 'auth: AK and SK still missing'].join('\n'));
     process.exitCode = maasRejected ? 1 : (ready(s) ? 0 : 3);
     return;
   }

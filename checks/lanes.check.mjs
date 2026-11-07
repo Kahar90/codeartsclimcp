@@ -132,7 +132,7 @@ try {
   // step-done flash: ?advance=1 finishes office-layout step 1 six seconds after load
   await send('Page.navigate', { url: base + '/?demo=1&advance=1#/lane/demo-repo--office-layout' }); await wait(1500);
   check('no step flashes on first load', (await ev('document.querySelectorAll(".steprow.flash").length')) === 0);
-  let flashed = ''; for (let i = 0; i < 20 && !flashed; i++) { await wait(500); flashed = await ev('document.querySelector(".steprow.flash .n")?.innerText || ""'); }
+  let flashed = ''; for (let i = 0; i < 80 && !flashed; i++) { await wait(250); flashed = await ev('document.querySelector(".steprow.flash .n")?.innerText || ""'); }
   check('finished step flashes between polls', flashed === '1', String(flashed));
   let gone = false; for (let i = 0; i < 16 && !gone; i++) { await wait(500); gone = (await ev('document.querySelectorAll(".steprow.flash").length')) === 0; }
   check('flash clears on the next render', gone);

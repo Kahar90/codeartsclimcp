@@ -289,6 +289,9 @@ export default async function onboard(args) {
           run(process.execPath, [CA_MJS, 'ack', laneId, '--note', 'onboard smoke test'], { timeout: 30000 });
           recordSmoke();
           add(smokeRows, 'smoke test', 'ok', `probe lane done in ${took} (${dir})`);
+          // The doctor rows were read before the smoke ran: this version is now smoke-tested.
+          const vr = envRows.find((x) => x.name === 'codearts version');
+          if (vr && vr.status === 'warn') { vr.status = 'ok'; vr.detail = 'smoke-tested just now'; vr.fix = ''; }
         } else if (r.status === 3) {
           const reason = authReason(path.join(dir, 'tasks', 'probe.lane', 'summary.md')) || finishedReason(path.join(dir, 'tasks', 'probe.lane', 'live.log'));
           add(smokeRows, 'smoke test', 'fail', `keys rejected: ${reason}`, 'ca auth --force (re-enter the keys), then ca onboard --smoke');

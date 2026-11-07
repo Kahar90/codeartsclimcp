@@ -21,7 +21,13 @@ const win = process.platform === 'win32';
 
 let r = ca(['auth', '--stdin'], `CODEARTS_CLI_AK=${AK}\nCODEARTS_CLI_SK=${SK}\n`);
 check('ca auth --stdin saves the keys', r.code === 0, r.out.slice(0, 160));
-if (win) {
+// Where DPAPI itself is unavailable (some CI runners, locked-down machines) the keys must still be
+// saved, user-only, with a warning that says why: check that instead of the encrypted format.
+const noDpapi = win && /DPAPI is not available here \(([^)]*)\)/.exec(r.out);
+if (noDpapi) {
+  if (process.env.GITHUB_ACTIONS) console.log(`::warning title=vault.check.mjs::DPAPI unavailable on this machine: ${noDpapi[1]}`);
+  check(`DPAPI unavailable (${noDpapi[1]}): keys saved anyway with a warning, readable, nothing lost`, /saved: CODEARTS_CLI_AK, CODEARTS_CLI_SK/.test(r.out) && raw().includes(AK));
+} else if (win) {
   check('Windows: the file never holds a plain key value', raw() && !raw().includes(AK) && !raw().includes(SK), raw().slice(0, 160));
   let j = null; try { j = JSON.parse(raw()); } catch {}
   check('Windows: file format is versioned and marked dpapi', j && j.v === 2 && j.protection === 'dpapi' && typeof j.keys === 'object', raw().slice(0, 160));
@@ -39,7 +45,7 @@ check('no key value is ever printed', ![AK, SK].some((v) => (r.stdout + r.stderr
 fs.writeFileSync(cred, JSON.stringify({ CODEARTS_CLI_AK: AK, CODEARTS_CLI_SK: SK }));
 r = ca(['auth', '--status', '--json']); try { st = JSON.parse(r.out); } catch { st = null; }
 check('an old plaintext file still reads as set', st && st.ready === true, r.out.slice(0, 160));
-if (win) check('Windows: an old plaintext file is migrated to the encrypted format on first read', !raw().includes(AK) && /dpapi/.test(raw()), raw().slice(0, 120));
+if (win && !noDpapi) check('Windows: an old plaintext file is migrated to the encrypted format on first read', !raw().includes(AK) && /dpapi/.test(raw()), raw().slice(0, 120));
 // unreadable / corrupt file
 fs.writeFileSync(cred, JSON.stringify({ v: 2, protection: 'dpapi', keys: { CODEARTS_CLI_AK: 'not-a-dpapi-blob', CODEARTS_CLI_SK: '00ff' } }));
 r = ca(['auth', '--status', '--json']); try { st = JSON.parse(r.out); } catch { st = null; }

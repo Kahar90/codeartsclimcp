@@ -43,6 +43,22 @@ check('it did not loop forever (under 60 s)', r.ms < 60000, `${r.ms} ms`);
 r = lane('net-then-ok', ['net', 'ok'], { MAX_RETRIES: '0' });
 check('a network error waits for the network and resumes without using a retry (MAX_RETRIES 0, lane DONE)', r.code === 0 && r.st?.result === 'done' && r.turns.length === 2, `${r.code} ${r.st?.result} ${r.turns.join(',')} ${r.out.split(/\r?\n/).filter((l) => /network|===/.test(l)).slice(-3).join(' | ')}`);
 
+// --detach returns only when the lane is running (an immediate wait finds it), and reports a lane that cannot start
+{
+  const repo = path.join(tmp, 'detach'); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
+  fs.writeFileSync(path.join(repo, 'fake-script.json'), '["ok"]'); fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-turns.log\n');
+  fs.writeFileSync(path.join(repo, 'tasks', 'probe.md'), 'Reply done.\n'); fs.writeFileSync(path.join(repo, 'tasks', 'bad.md'), '1. x. Commit.\nCHECK: <exact command>\n');
+  const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' }); g('init', '-q'); g('add', '-A'); g('-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'init');
+  const run = (args) => spawnSync(process.execPath, [CA, ...args], { cwd: repo, env: base, encoding: 'utf8', timeout: 120000 });
+  let d = run(['lane', repo, 'probe', '--detach']);
+  const w = run(['wait', 'detach--probe', '--timeout', '90', '--quiet']);
+  check('lane --detach then an immediate wait finds the lane and gets its result', d.status === 0 && w.status === 0 && /"result":"done"/.test(w.stdout), `${d.status} ${w.status} ${(w.stdout + w.stderr).slice(-200)}`);
+  d = run(['lane', repo, 'bad', '--detach']);
+  check('lane --detach reports a lane that cannot start, with its exit code', d.status === 2 && /did not start/.test(d.stderr) && /placeholder/.test(d.stderr), `${d.status} ${d.stderr.slice(0, 200)}`);
+  check('the lane log stays out of git status', !/lane\.log/.test(g('status', '--short').stdout), g('status', '--short').stdout);
+}
+
 r = lane('bad-keys', ['auth']);
 check('a sign-in error in the server log ends the lane with exit 3 and names the AK/SK', r.code === 3 && /AK\/SK/.test(r.out), `${r.code} ${r.out.split('\n').filter((l) => /===|keys|AK/.test(l)).slice(-3).join(' | ')}`);
 

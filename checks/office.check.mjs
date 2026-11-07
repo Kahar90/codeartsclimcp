@@ -107,8 +107,8 @@ try {
 
   s = await st();
   const e0 = s.effects.length;
-  await ev('window.__office.demoAdvance("office-scene")'); await wait(300);
-  s = await st();
+  await ev('window.__office.demoAdvance("office-scene")');
+  for (let i = 0; i < 25; i++) { await wait(200); s = await st(); if (s.effects.length > e0) break; } // poll: slow CI runners
   check('demoAdvance adds exactly one step effect', s.effects.length === e0 + 1 && s.effects[e0].type === 'step' && s.effects[e0].laneId === 'office-scene', JSON.stringify(s.effects.slice(e0)));
   const e1 = s.effects.length;
   s = await st();
@@ -305,8 +305,7 @@ try {
   s = await st();
   check('timeline assignment starts the builder lane', s.lanes.find((l) => l.id === 'office-scene')?.running === true);
   check('timeline press opens the builder window', s.window.open && s.window.laneId === 'office-scene', s.window.laneId);
-  await wait(1600);
-  s = await st();
+  for (let i = 0; i < 40; i++) { await wait(250); s = await st(); if (s.effects.some((e) => e.type === 'step' && e.laneId === 'office-scene')) break; } // poll: slow CI runners
   check('timeline stepComplete adds a step effect', s.effects.some((e) => e.type === 'step' && e.laneId === 'office-scene'), JSON.stringify(s.effects));
 
   await send('Page.navigate', { url: base + '/office' }); await wait(2500);

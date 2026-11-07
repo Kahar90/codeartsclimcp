@@ -272,7 +272,6 @@ async function runLane(repoArg, task, opts = {}) {
   const briefEarly = fs.readFileSync(briefFile, 'utf8');
   const badCheck = [...briefEarly.matchAll(/^\s*(?:[-*]\s*)?CHECK:\s*`?(.+?)`?\s*$/gm)].map((m) => m[1]).find((c) => /<[^>]*>/.test(c));
   if (badCheck) die(`tasks/${task}.md still has a template placeholder CHECK line: "${badCheck}". Replace it with a real command or delete it.`, 2);
-  if (!fs.existsSync(EXE)) die(`codearts not found at ${EXE}`, 2);
   if (!git(repo, 'rev-parse', '--git-dir')) die(`${repo} is not a git repo`, 2);
   const id = `${path.basename(repo)}--${task}`.replace(/[^\w.-]+/g, '_');
   const dir = path.join(repo, 'tasks', `${task}.lane`);
@@ -281,6 +280,8 @@ async function runLane(repoArg, task, opts = {}) {
   // --resume keeps the lane folder, its base commit, tokens and history; a fresh run starts clean.
   const resumed = opts.resume ? prev : null;
   if (opts.resume && !(prev && prev.result && prev.result !== 'done')) die(`nothing to resume: lane ${id} has no paused, stopped or failed run`, 2);
+  // Request errors first (they need no CodeArts), then the install.
+  if (!fs.existsSync(EXE)) die(`codearts not found at ${EXE}; ca onboard --yes installs it`, 2);
   if (!resumed) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
   fs.rmSync(path.join(dir, 'KICK'), { force: true }); // a stale kick must not fire at once on resume
@@ -291,7 +292,7 @@ async function runLane(repoArg, task, opts = {}) {
   // Keep CodeArts' folder and lane files out of commits.
   const gi = path.join(repo, '.gitignore');
   const giText = fs.existsSync(gi) ? fs.readFileSync(gi, 'utf8') : '';
-  const want = ['.codeartsdoer/', 'tasks/*.lane/', 'tasks/*.out'].filter((p) => !giText.split(/\r?\n/).includes(p));
+  const want = ['.codeartsdoer/', 'tasks/*.lane/', 'tasks/*.lane.log', 'tasks/*.out'].filter((p) => !giText.split(/\r?\n/).includes(p));
   if (want.length) {
     fs.writeFileSync(gi, giText + (giText && !giText.endsWith('\n') ? '\n' : '') + want.join('\n') + '\n');
     git(repo, 'add', '.gitignore'); git(repo, 'commit', '-qm', 'chore: ignore codearts state and lane files');
@@ -934,9 +935,27 @@ function cmdDetach(repoArg, task) {
   const logFile = path.join(repo, 'tasks', `${task}.lane.log`);
   const out = fs.openSync(logFile, 'a');
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'lane', repoArg, task, ...(process.argv.includes('--resume') ? ['--resume'] : [])], { detached: true, stdio: ['ignore', out, out], windowsHide: true });
-  child.unref();
-  console.log(`lane ${id} started (pid ${child.pid}). Log: ${logFile}. Wait: ca wait ${id}. Watch: ${dashUrl()}`);
-  process.exit(0);
+  // Return only once the lane is really running (its state.json carries this supervisor's pid), so an
+  // immediate `ca wait` / ca_wait finds it; if it dies at startup, say why and pass its exit code on.
+  const stateFile = path.join(repo, 'tasks', `${task}.lane`, 'state.json');
+  let exited = null; child.on('exit', (code) => { exited = code ?? 1; });
+  const t0 = now();
+  const tick = () => {
+    const s = readJSON(stateFile);
+    if (s && s.pid === child.pid && fs.existsSync(path.join(REG, `${id}.json`))) {
+      child.unref();
+      console.log(`lane ${id} started (pid ${child.pid}). Log: ${logFile}. Wait: ca wait ${id}. Watch: ${dashUrl()}`);
+      process.exit(0);
+    }
+    if (exited !== null) {
+      let tail = ''; try { tail = fs.readFileSync(logFile, 'utf8').trim().split(/\r?\n/).slice(-6).join('\n'); } catch {}
+      console.error(`lane ${id} did not start (exit ${exited}):\n${tail}`);
+      process.exit(exited || 1);
+    }
+    if (now() - t0 > 30000) { child.unref(); console.log(`lane ${id} is still starting (pid ${child.pid}). Log: ${logFile}. Wait: ca wait ${id}`); process.exit(0); }
+    setTimeout(tick, 200);
+  };
+  tick();
 }
 
 // ---------- control commands ----------
