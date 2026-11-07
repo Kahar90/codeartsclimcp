@@ -51,6 +51,7 @@
 //        STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
 //        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
 //        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
+//        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
 //        lane, 3 missing credentials, 4 needs review, 5 paused at LANE_TIMEOUT (resume with --resume),
 //        124 wait timeout.
@@ -67,6 +68,7 @@ import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './
 import { laneActions, laneBucket, laneKind } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
+import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
@@ -98,6 +100,7 @@ const CFG = {
   fixes: num('MAX_FIXES', 3),          // gate failures fed back to the builder
   laneTimeout: num('LANE_TIMEOUT', 5400),
   checkTimeout: num('CHECK_TIMEOUT', 900),
+  netWait: num('NET_WAIT_S', 1800),    // a network error waits up to this long for the network (no retry spent)
   noReview: process.env.NO_REVIEW === '1',
 };
 
@@ -635,8 +638,12 @@ async function runLane(repoArg, task, opts = {}) {
         if (label === 'build' || label === 'fix') S.buildSession = sid;
         continue;
       }
-      const cls = o.kind === 'error' ? classify(o.error) : o.kind;
+      const rawCls = o.kind === 'error' ? classify(o.error) : o.kind;
       const what = o.kind === 'error' ? `${o.error.name || 'error'}: ${oneLine(o.error.data?.message || o.error.message || '', 200)}` : (o.what || o.kind);
+      // The transport itself is down (DNS, connect, reset, unreachable, fetch failed): wait for the
+      // network instead of spending a retry. Auth problems are handled separately below.
+      const netErr = o.kind === 'error' && rawCls !== 'auth' && isNetworkError(what);
+      const cls = netErr ? 'transport' : rawCls;
       S.interruptions.push({ at: now(), phase: label, kind: cls, what }); save(true);
       // A rejected key can look like a plain 503 (AK/SK) or a maas/ authorization error: the classifier
       // reads the server log, so catch it here even when the error class is not 'auth'. End at once.
@@ -645,6 +652,26 @@ async function runLane(repoArg, task, opts = {}) {
         if (ap) { L(`  ! ${ap.message}`); S.keysMessage = ap.message; return { ok: false, sid, reason: 'auth', exit: 3, what: ap.message, keys: ap.message }; }
       }
       if (cls === 'auth') return { ok: false, sid, reason: 'auth', exit: 3, what };
+      if (netErr) {
+        const netWaitS = CFG.netWait > 0 ? CFG.netWait : 1800;
+        let netLoggedAt = 0;
+        const onWait = ({ tries, waitedMs }) => {
+          S.activity = `offline: waiting for the network (${dur(waitedMs)})`;
+          if (now() - netLoggedAt >= 60000) { netLoggedAt = now(); L(`  ! network down, waiting (try ${tries})`); }
+          save();
+        };
+        onWait({ tries: 0, waitedMs: 0 });
+        say(`network down (${oneLine(what, 140)}); waiting up to ${netWaitS}s (no retry used)`);
+        const net = await waitOnline({ timeoutMs: netWaitS * 1000, onWait });
+        if (net.online) {
+          say(`network is back after ${dur(net.waitedMs)}; resuming the same session (no retry used)`);
+          phase(label, 'resuming after network returned');
+          await send(sid, resumeText('transport', `the network was down (${what})`), model, agent);
+          if (label === 'build' || label === 'fix') S.buildSession = sid;
+          continue;
+        }
+        L(`  ! still offline after ${dur(net.waitedMs)}; ending the phase as a transport failure`);
+      }
       if (cls === 'other' && o.kind === 'error' && /Abort/i.test(o.error.name || '')) { /* user aborted in TUI: resume */ }
       // Rate limits are not failures: own budget (RATE_WAIT_S, default 1800 s), jittered backoff, no retry count.
       if (cls === 'rate' && rateWaited < CFG.rateWait) {
