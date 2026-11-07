@@ -42,6 +42,9 @@
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
 //        ca plan list | close [id] [--reason t] | rm <id>   plan state; close drops unstarted lanes
 //        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
+//        ca lead-tokens [--plan id] [--session file]   point the plan at the lead's Claude transcript and print totals
+//        ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]
+//                                  report the lead's own token use on the plan (any harness; --add accumulates)
 //        ca help | -h | --help             this usage
 //        Env knobs: STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
 //        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
@@ -777,7 +780,8 @@ function cmdDetach(repoArg, task) {
 // ---------- control commands ----------
 function lanes() {
   let files = []; try { files = fs.readdirSync(REG).filter((f) => f.endsWith('.json')); } catch {}
-  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r) return null; const s = readJSON(path.join(r.dir, 'state.json')) || readJSON(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
+  // Skip non-lane json in the registry (acks.json): a registration always carries a string dir.
+  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r || typeof r.dir !== 'string') return null; const s = readJSON(path.join(r.dir, 'state.json')) || readJSON(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
     .sort((a, b) => (b.s.startedAt || 0) - (a.s.startedAt || 0));
 }
 // Lanes written before 'paused' existed recorded a timeout as failed (timeout).
@@ -805,9 +809,22 @@ function findLane(q) {
   if (!hit) die(`no lane matches "${q}". Lanes: ${all.map((l) => l.id).join(', ') || '(none)'}`, 2);
   return hit;
 }
+// Server side acknowledgement of finished lanes (Control room). acks.json maps a lane id to the
+// finishedAt that was acknowledged, so a lane resumed and finished again reads as unseen.
+const ACKS = path.join(REG, 'acks.json');
+let acksCache = {}, acksMtime = -1;
+function readAcks() {
+  try { const m = fs.statSync(ACKS).mtimeMs; if (m !== acksMtime) { acksCache = readJSON(ACKS, {}) || {}; acksMtime = m; } }
+  catch { acksCache = {}; acksMtime = -1; }
+  return acksCache;
+}
+function writeAcks(a) { try { fs.mkdirSync(REG, { recursive: true }); fs.writeFileSync(ACKS, JSON.stringify(a, null, 2) + '\n'); } catch {} acksMtime = -1; }
+function laneSeen(id, finishedAt) { return !!(finishedAt && readAcks()[id] === finishedAt); }
+function setAck(id, seen, finishedAt) { const a = { ...readAcks() }; if (seen && finishedAt) a[id] = finishedAt; else delete a[id]; writeAcks(a); }
+function bucketOf(l) { const s = l.s; return laneBucket({ s, alive: alive(s.pid), health: health(s) }).bucket; }
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
-  return { lane: l.id, health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
+  return { lane: l.id, bucket: bucketOf(l), health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
     commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
 const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
@@ -818,20 +835,36 @@ function statusRow(l) {
     progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
     summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
+// cacheWrite bills into the totals but is not modeled by tokens.mjs (kept read-only): carry it here.
+const tokTotal = (t) => (!t ? 0 : (t.input || 0) + (t.output || 0) + (t.reasoning || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0));
+function sumTok(list = []) {
+  const r = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0 };
+  for (const t of list || []) { if (!t) continue; r.input += t.input || 0; r.output += t.output || 0; r.reasoning += t.reasoning || 0; r.cacheRead += t.cacheRead || 0; r.cacheWrite += t.cacheWrite || 0; r.steps += t.steps || 0; }
+  r.total = tokTotal(r); return r;
+}
+// One by-model row: who spent it and where the numbers come from. A lane whose steps ran but whose
+// provider returned no usage is 'none' (unknown), never a false 0.
+function modelRow(t, who, source) {
+  const e = { input: t.input || 0, output: t.output || 0, reasoning: t.reasoning || 0, cacheRead: t.cacheRead || 0, cacheWrite: t.cacheWrite || 0, steps: t.steps || 0, who };
+  e.total = tokTotal(e); e.source = (e.steps > 0 && e.total === 0) ? 'none' : source; return e;
+}
 function tokensByView(s) {
   return { build: withTotal(s.tokensBy?.build), review: withTotal(s.tokensBy?.review), other: withTotal(s.tokensBy?.other) };
 }
 function tokensByModelView(s) {
-  const out = {}; for (const [m, t] of Object.entries(s.tokensByModel || {})) out[m] = withTotal({ ...emptyTokens(), ...t }); return out;
+  const out = {}; for (const [m, t] of Object.entries(s.tokensByModel || {})) out[m] = modelRow(t, 'worker', 'runner'); return out;
 }
 function printRows(rows) {
-  const cols = ['lane', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
+  const cols = ['lane', 'bucket', 'health', 'phase', 'elapsed', 'idle', 'commits', 'tokens', 'steers', 'interrupts', 'verdict', 'now'];
   const w = cols.map((c) => Math.max(c.length, ...rows.map((r) => String(r[c]).length)));
   console.log(cols.map((c, i) => c.toUpperCase().padEnd(w[i])).join('  '));
   for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
 }
 function cmdStatus(args) {
-  const ls = lanes().filter((l) => args.includes('--all') || !l.s.result || now() - (l.s.finishedAt || 0) < 24 * 3600e3);
+  // Control room order: what needs a human first (attention), then running, done, ended.
+  const rank = { attention: 0, running: 1, done: 2, ended: 3 };
+  const all = lanes().filter((l) => args.includes('--all') || !l.s.result || now() - (l.s.finishedAt || 0) < 24 * 3600e3);
+  const ls = all.map((l) => ({ l, b: bucketOf(l) })).sort((a, b) => (rank[a.b] ?? 9) - (rank[b.b] ?? 9)).map((x) => x.l);
   if (args.includes('--json')) { console.log(JSON.stringify(ls.map(statusRow), null, 2)); return; }
   const rows = ls.map(laneRow);
   if (!rows.length) { console.log('no lanes (ca status --all for older ones)'); return; }
@@ -1184,6 +1217,41 @@ function cmdNote(args) {
   fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n');
   console.log(`${nowFlag ? 'now' : 'decision'} noted on plan ${r.id}`);
 }
+// ca lead-tokens [--plan id] [--session file]         point the plan at the lead's transcript, print totals
+// ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]  report numbers
+// The lead harness reports its own model usage so the plan counts the lead, not only the CodeArts workers.
+// Default session: the newest .jsonl under ~/.claude/projects/<cwd, non [A-Za-z0-9-] -> ->/.
+function defaultSession() {
+  const dir = path.join(os.homedir(), '.claude', 'projects', process.cwd().replace(/[^A-Za-z0-9-]/g, '-'));
+  let files = []; try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch { return null; }
+  if (!files.length) return null;
+  return files.map((f) => ({ f: path.join(dir, f), m: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0].f;
+}
+function cmdLeadTokens(args) {
+  const asJson = args.includes('--json');
+  const num = (flag) => { const i = args.indexOf(flag); if (i < 0) return 0; const n = Number(args[i + 1]); return Number.isFinite(n) ? n : 0; };
+  const pi = args.indexOf('--plan'); const pq = pi >= 0 ? args[pi + 1] : null;
+  const r = findPlan(pq); if (!r) die(`no registered plan matches ${pq || '(latest)'}; ca plan list`, 2);
+  const p = readJSON(r.file) || {};
+  const si = args.indexOf('--set');
+  if (si >= 0) {
+    const model = args[si + 1]; if (!model || model.startsWith('--')) die('usage: ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]', 2);
+    const add = args.includes('--add'); const prev = (add && p.leadTokens?.[model]) || {};
+    const next = { input: (prev.input || 0) + num('--input'), output: (prev.output || 0) + num('--output'), cacheRead: (prev.cacheRead || 0) + num('--cache-read'), cacheWrite: (prev.cacheWrite || 0) + num('--cache-write') };
+    (p.leadTokens ||= {})[model] = next; fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n');
+    if (asJson) return console.log(JSON.stringify({ plan: r.id, model, ...next, total: tokTotal(next) }, null, 2));
+    return console.log(`plan ${r.id}: leadTokens ${model} total ${tokTotal(next)} (in ${next.input} out ${next.output} cache read ${next.cacheRead} write ${next.cacheWrite})`);
+  }
+  const sfi = args.indexOf('--session'); const session = sfi >= 0 ? args[sfi + 1] : (p.leadSession || defaultSession());
+  if (!session) die('no session given and none under ~/.claude/projects; use --session <file.jsonl>', 2);
+  const abs = path.resolve(session); if (!fs.existsSync(abs)) die(`session file not found: ${abs}`, 2);
+  p.leadSession = abs; fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n');
+  const t = parseLeadSession(abs, p.leadSince); const keys = Object.keys(t);
+  if (asJson) return console.log(JSON.stringify({ plan: r.id, session: abs, tokensByModel: t }, null, 2));
+  console.log(`plan ${r.id}: leadSession ${abs}`);
+  if (!keys.length) return console.log('  no assistant usage in the transcript');
+  for (const m of keys.sort((a, b) => t[b].total - t[a].total)) console.log(`  ${m}  ${t[m].total}  (in ${t[m].input} out ${t[m].output} cache read ${t[m].cacheRead} write ${t[m].cacheWrite})`);
+}
 const laneId = (repo, task) => `${path.basename(path.resolve(repo))}--${task}`.replace(/[^\w.-]+/g, '_');
 const briefSteps = (file) => { try { return [...fs.readFileSync(file, 'utf8').matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) })); } catch { return []; } };
 // Step state from commits: "step N" in a subject wins, otherwise commits map to steps in order.
@@ -1215,7 +1283,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
-    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo) };
+    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), seen: laneSeen(l.id, s.finishedAt) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1232,6 +1300,37 @@ function laneFromLog(file, ref, briefFile) {
   const s = { result, reason, phase: 'finished', activity: result, verdict: vd && vd[1] !== 'none' ? vd[1] : null, commitLog, commits: commitLog.length, stepList, steps: stepList.length,
     tokens: tk ? { input: Number(tk[1]), output: Number(tk[2]), reasoning: 0, cacheRead: Number(tk[3] || 0), steps: Number(tk[4] || 0) } : {}, startedAt: mt - secs * 1000, finishedAt: mt, steers: [], interruptions: [] };
   return { ...ref, s };
+}
+// The lead's own usage: a Claude Code transcript (leadSession) or harness-reported numbers
+// (leadTokens). Cached by file mtime/size so a poll never re-reads a large jsonl.
+const leadCache = new Map();
+function parseLeadSession(file, since) {
+  let st; try { st = fs.statSync(file); } catch { return {}; }
+  const key = path.resolve(file); const stamp = `${st.mtimeMs}:${st.size}:${since || ''}`;
+  const hit = leadCache.get(key); if (hit && hit.stamp === stamp) return hit.result;
+  const out = {}; const seen = new Set(); const sinceT = since ? new Date(since).getTime() : null;
+  let txt = ''; try { txt = fs.readFileSync(file, 'utf8'); } catch { return {}; }
+  for (const line of txt.split(/\r?\n/)) {
+    const s = line.trim(); if (!s) continue;
+    let rec; try { rec = JSON.parse(s); } catch { continue; }
+    const msg = rec.message; if (!msg || msg.role !== 'assistant' || !msg.usage) continue;
+    if (sinceT != null && rec.timestamp && new Date(rec.timestamp).getTime() < sinceT) continue;
+    const id = msg.id || rec.uuid || rec.id; if (id && seen.has(id)) continue; if (id) seen.add(id);
+    const m = msg.model || 'lead'; const u = msg.usage; const e = (out[m] ||= { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0 });
+    e.input += u.input_tokens || 0; e.output += u.output_tokens || 0;
+    e.cacheRead += u.cache_read_input_tokens || 0; e.cacheWrite += u.cache_creation_input_tokens || 0; e.steps += 1;
+  }
+  for (const v of Object.values(out)) v.total = tokTotal(v);
+  leadCache.set(key, { stamp, result: out }); return out;
+}
+// The lead rows a plan shows: transcript or reported numbers, else one 'none' row so the lead is
+// never silently a zero. The fallback model name is plan.lead (the author) or literally "lead".
+function leadView(p) {
+  const out = {};
+  if (p.leadSession) { const t = parseLeadSession(path.resolve(p.leadSession), p.leadSince); for (const [m, v] of Object.entries(t)) out[m] = modelRow(v, 'lead', 'transcript'); }
+  else if (p.leadTokens && typeof p.leadTokens === 'object') { for (const [m, v] of Object.entries(p.leadTokens)) out[m] = modelRow(v, 'lead', 'reported'); }
+  if (!Object.keys(out).length) { const m = (typeof p.lead === 'string' && p.lead) || 'lead'; out[m] = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0, total: null, who: 'lead', source: 'none' }; }
+  return out;
 }
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
@@ -1285,12 +1384,24 @@ function planView(r) {
   if (counts.dropped) bits.push(`${counts.dropped} dropped`);
   if (state === 'waiting' || state === 'attention' || state === 'paused') bits.push(`idle ${dur(idle)}`);
   // Plan tokens: every lane counts, folded (continued) ones included; per agent like the lane views.
-  const tokens = sumTokens(planned.map((x) => x.tokens));
   const tokensBy = { build: sumTokens(planned.map((x) => x.tokensBy?.build)), review: sumTokens(planned.map((x) => x.tokensBy?.review)), other: sumTokens(planned.map((x) => x.tokensBy?.other)) };
   const modelKeys = [...new Set(planned.flatMap((x) => Object.keys(x.tokensByModel || {})))];
-  const tokensByModel = Object.fromEntries(modelKeys.map((m) => [m, sumTokens(planned.map((x) => x.tokensByModel?.[m]))]));
-  return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', lead: p.lead || 'Claude', status: p.status || '', now: p.now || '',
-    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel,
+  const tokensByModel = {};
+  for (const m of modelKeys) { const e = sumTok(planned.map((x) => x.tokensByModel?.[m])); tokensByModel[m] = { ...e, who: 'worker', source: (e.steps > 0 && e.total === 0) ? 'none' : 'runner' }; }
+  // The lead spends tokens too: merge its by-model usage into the same table, tagged who and source.
+  const leadModel = leadView(p);
+  for (const [m, e] of Object.entries(leadModel)) {
+    const cur = tokensByModel[m];
+    if (cur && e.source !== 'none') tokensByModel[m] = modelRow({ input: cur.input + e.input, output: cur.output + e.output, reasoning: cur.reasoning + e.reasoning, cacheRead: cur.cacheRead + e.cacheRead, cacheWrite: cur.cacheWrite + e.cacheWrite, steps: cur.steps + e.steps }, 'lead', e.source);
+    else if (!cur) tokensByModel[m] = e;
+  }
+  const missing = Object.entries(tokensByModel).filter(([, e]) => e.source === 'none').map(([m]) => m);
+  // Every lane's aggregate counts (the sum the plan shows), plus the lead's known spend. 'none' rows stay
+  // unknown rather than a false 0, so a lane that never reported usage is not silently dropped from the total.
+  const tokens = sumTok([sumTokens(planned.map((x) => x.tokens)), ...Object.values(leadModel).filter((e) => e.source !== 'none')]);
+  tokens.complete = missing.length === 0; tokens.missing = missing; tokens.count = Object.keys(tokensByModel).length;
+  return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
+    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead: { tokensByModel: leadModel },
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
 }
@@ -1345,7 +1456,7 @@ function cmdDash(args) {
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
-      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume)$/);
+      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
         const l = all.find((x) => x.id === q) || all.find((x) => x.task === q) || all.find((x) => x.id.includes(q));
@@ -1374,6 +1485,13 @@ function cmdDash(args) {
           return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
         }
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'ack') {
+          // Mark a finished lane seen (or unseen again) for this finishedAt; a later finish is unseen anew.
+          let b = ''; for await (const c of req) b += c;
+          const body = JSON.parse(b || '{}');
+          setAck(l.id, body.seen !== false, l.s.finishedAt || null);
+          return json({ ok: true, seen: laneSeen(l.id, l.s.finishedAt || null) });
+        }
         if (req.method === 'POST' && m[2] === 'attach') {
           // Open a new console window with the CodeArts TUI on the live session.
           const s = l.s; if (s.result || !s.server) return json({ error: 'lane not running' }, 400);
@@ -1395,7 +1513,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();

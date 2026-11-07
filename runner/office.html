@@ -17,6 +17,12 @@ body.narrow .runstrip .pnow { flex: 1 1 100%; white-space: normal; overflow: vis
 .runstrip .pnow { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .runstrip .topfill { flex: 1; }
 .chip { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border-2); color: var(--muted); white-space: nowrap; }
+.needs-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; background: rgba(255, 156, 156, 0.16); border: 1.5px solid var(--bad); color: var(--bad); font-weight: 650; font-size: 13px; text-decoration: none; white-space: nowrap; }
+.needs-pill:hover { background: rgba(255, 156, 156, 0.28) }
+.needs-pill b { font-weight: 800 }
+body.narrow .ca-counts { display: none }
+.np-mark { display: none }
+body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; font-weight: 800 } body.narrow .needs-pill { padding: 0 9px } /* phone: the Needs you pill matters more than the counts */
 #planSel { height: 28px; padding: 0 6px; background: var(--panel); color: var(--fg); border: 1px solid var(--border-2); border-radius: 6px; font: 13px var(--font); max-width: 260px; }
 #motionBtn { flex: none; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font: 600 13px var(--font); cursor: pointer; }
 #motionBtn[aria-pressed="true"] { color: var(--fg); border-color: var(--sel); }
@@ -147,7 +153,7 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
     <a class="ca-tab" href="/office" aria-current="page"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 2h5v5H2zM11 2h5v5h-5zM2 11h5v5H2zM11 11h5v5h-5z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Office</a>
     <a class="ca-tab" href="/"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2 16 6 9 10 2 6ZM2 10.5l7 4 7-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Lanes</a>
   </nav>
-  <span class="ca-top-fill"></span><span class="ca-counts" id="counts"></span>
+  <span class="ca-top-fill"></span><a class="needs-pill" id="needsPill" href="/#/" title="Lanes that need you: open the Control room" hidden><span class="np-word">Needs you</span><span class="np-mark" aria-hidden="true">!</span> <b id="needsPillN">0</b></a><span class="ca-counts" id="counts"></span>
 </header>
 <div class="runstrip" id="runstrip">
   <span class="ptitle" id="planTitle"></span>
@@ -509,20 +515,45 @@ function planStatus(p, lanes) {
   return "planned";
 }
 
+// The office speaks the Control room buckets, so both views name a state the same way.
+function laneBucket(l) {
+  if (l.bucket) return l.bucket;
+  if (l.running) return "running";
+  if (l.result === "done" || l.result === "continued") return "done";
+  return "ended";
+}
+const BUCKET_WORD = { attention: "Needs you", running: "Running", done: "Done", ended: "Ended" };
+const BUCKET_TONE = { attention: "bad", running: "run", done: "done", ended: "idle" };
+function planBucket(lanes) {
+  const bs = lanes.map(laneBucket);
+  if (bs.includes("attention")) return "attention";
+  if (bs.includes("running")) return "running";
+  if (bs.length && bs.every((b) => b === "done")) return "done";
+  return "ended";
+}
+function bucketBadge(b) { return '<span class="ca-badge s-' + BUCKET_TONE[b] + '">' + BUCKET_WORD[b] + "</span>"; }
+// The plan carries the author name as leadName (lead is now the lead token table); old/demo fixtures still use a string.
+function leadName(p) { return (p && (p.leadName || (typeof p.lead === "string" ? p.lead : ""))) || "Lead"; }
+
 function renderTop() {
   const p = model.plan;
   $("planTitle").textContent = p.title || p.goal || "(no plan)";
   const now = fetchErr ? fetchErr + " (retrying every 2 s)" : (p.now || "");
   $("nowLine").hidden = !now;
   $("nowLine").textContent = now ? "Now: " + now : "";
-  $("leadChip").hidden = !p.lead;
-  if (p.lead) $("leadChip").textContent = p.lead;
-  $("statusBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+  $("leadChip").hidden = !leadName(p);
+  $("leadChip").textContent = leadName(p);
+  $("statusBadge").innerHTML = bucketBadge(planBucket(model.lanes));
+  const attn = model.lanes.filter((l) => laneBucket(l) === "attention").length;
+  const pill = $("needsPill");
+  if (pill) { pill.hidden = attn === 0; const pn = $("needsPillN"); if (pn) pn.textContent = String(attn); }
   const pt = CAUI.tokenTotal(p.tokens);
   $("tokenChip").hidden = !pt;
   if (pt) {
     $("tokenChip").textContent = "Tokens " + CAUI.fmtTokens(pt);
-    $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).join(" \u00b7 ");
+    const mm = Object.entries(p.tokensByModel || {}).sort((a, b) => ((typeof b[1]?.total === "number" ? b[1].total : -1) - (typeof a[1]?.total === "number" ? a[1].total : -1)))
+      .map(([m, e]) => CAUI.shortModel(m) + " " + ((e.source === "none" || typeof e.total !== "number") ? "not reported" : CAUI.fmtTokens(e.total)) + " (" + (e.who === "lead" ? "lead" : "worker") + ")");
+    $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).concat(mm).join(" \u00b7 ");
   }
   const nPlans = mode === "demo" ? 1 : plansArr.length;
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
@@ -678,7 +709,7 @@ function renderStations() {
   if (!model) return;
   const p = model.plan;
   const planKey = CAUI.status(planStatus(p, model.lanes)).key;
-  setStation("lead", { name: p.lead || "Lead", sub: "Orchestrator", laneId: "lead", clip: CLIP_BY_KEY[planKey] || "idle" });
+  setStation("lead", { name: leadName(p), sub: "Orchestrator", laneId: "lead", clip: CLIP_BY_KEY[planKey] || "idle" });
   for (const stKey of WORKER_STATIONS) {
     const id = stationLane[stKey];
     const l = id && model.lanes.find((x) => x.id === id);
@@ -760,7 +791,7 @@ function renderNarrowList() {
   const box = $("stlist");
   if (!narrow || !model) { if (!box.hidden) box.hidden = true; return; }
   box.hidden = false;
-  const want = [{ id: "lead", name: model.plan.lead || "Lead", sub: "Orchestrator", cls: "st-lead" }];
+  const want = [{ id: "lead", name: leadName(model.plan), sub: "Orchestrator", cls: "st-lead" }];
   for (const stKey of WORKER_STATIONS) {
     const id = stationLane[stKey];
     const l = id && model.lanes.find((x) => x.id === id);
@@ -951,7 +982,7 @@ function renderTokensRow(tokens, by) {
 function renderWinContent(keepInput) {
   if (winFor === "lead") {
     const p = model.plan;
-    $("winTitle").textContent = p.lead || "Lead";
+    $("winTitle").textContent = leadName(p);
     $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
     $("winMeta").textContent = "Orchestrator";
     renderTokensRow(p.tokens, p.tokensBy);
@@ -1281,7 +1312,7 @@ window.__office = {
       const st = key === "lead" ? (model ? CAUI.status(planStatus(model.plan, model.lanes)) : { key: "idle" }) : l ? CAUI.status(l.health) : { key: "idle" };
       return {
         station: key, role: key, laneId: id || null,
-        name: key === "lead" ? ((model && model.plan.lead) || "Lead") : (l ? laneName(l) : ""),
+        name: key === "lead" ? leadName(model && model.plan) : (l ? laneName(l) : ""),
         status: st.key,
         clip: sp ? sp.clip : "",
         frame: sp && sp.el && sp.el.dataset.frame !== undefined ? Number(sp.el.dataset.frame) : null,

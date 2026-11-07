@@ -132,6 +132,15 @@ ul.plain li:first-child { border-top: 0 }
 .tokrow .tk-bar > i { display: block; height: 100%; background: var(--run) }
 .tokrow .tk-bar > i.review { background: var(--sel) }
 .tokrow .tk-bar > i.other { background: var(--amber) }
+.modeltable { display: grid; gap: 7px; margin-top: 4px }
+.mtrow { display: grid; grid-template-columns: minmax(0, 1.4fr) 62px minmax(72px, auto) minmax(0, 1.6fr); align-items: baseline; gap: 10px; font-size: 12.5px }
+.mtrow.mt-h { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .04em }
+.mt-model { color: var(--fg); font: 12px var(--mono); overflow-wrap: anywhere; min-width: 0 }
+.mt-who { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted) }
+.mt-who.lead { color: var(--lead, var(--run)); font-weight: 700 }
+.mt-n { font: 12px var(--mono); color: var(--fg); text-align: right; white-space: nowrap }
+.mt-split { color: var(--faint); font-size: 11.5px; overflow-wrap: anywhere; min-width: 0 }
+.mt-none { color: var(--amber); font-size: 11.5px; white-space: nowrap }
 .wt { font: 12px var(--mono); color: var(--faint); margin-top: 10px; overflow-wrap: anywhere; user-select: all }
 .pipe { display: flex; margin-top: 16px; flex-wrap: wrap }
 .seg { padding: 6px 16px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font-size: 12.5px; font-weight: 600; margin-right: -1px; white-space: nowrap }
@@ -205,6 +214,72 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .small { color: var(--muted); font-size: 12.5px }
 .mute { color: var(--muted) }
 
+/* ---------- control room ---------- */
+.cr-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap }
+.cr-head h1 { font: 700 28px/1.2 var(--font-display); margin: 0 }
+.cr-sub { color: var(--muted); font-size: 13.5px }
+.crtiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px }
+.crtile { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 2px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; color: var(--muted); font: inherit; text-align: left }
+.crtile:hover { border-color: var(--border-2) }
+.crtile.on { border-color: var(--sel); background: var(--sel-bg) }
+.crtile .buk-ico { width: 20px; height: 20px; flex: none }
+.crtile .crn { font: 700 22px/1 var(--font-display); margin-left: auto }
+.crtile .crw { font-size: 12.5px; font-weight: 650 }
+.crtile.s-bad { color: var(--bad) } .crtile.s-run, .crtile.s-done { color: var(--run) } .crtile.s-idle { color: var(--muted) }
+.cr-list { margin-top: 18px; display: grid; gap: 12px }
+.cr-sec { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); overflow: hidden }
+.cr-sec-h { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px; background: none; border: 0; color: var(--fg); font: 700 13.5px var(--font); cursor: pointer; text-align: left }
+.cr-sec-h:hover { background: var(--panel-2) }
+.cr-sec-h .buk-ico { width: 16px; height: 16px; flex: none }
+.cr-sec-h .cnt { margin-left: auto; color: var(--faint); font-size: 12.5px; font-weight: 400 }
+.cr-sec-h .tri, .cr-seen-h .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+.cr-sec-h[aria-expanded="true"] .tri, .cr-seen-h[aria-expanded="true"] .tri { transform: rotate(90deg) }
+.cr-row { padding: 12px 14px; border-top: 1px solid var(--border); min-width: 0 }
+.cr-row:first-child { border-top: 0 }
+.cr-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
+.cr-task { font: 700 15px/1.2 var(--font-display); color: var(--sel-ink); overflow-wrap: anywhere }
+.cr-task:hover { text-decoration: underline }
+.cr-time { color: var(--muted); font-size: 12.5px }
+.cr-open { margin-left: auto; font-size: 12.5px; white-space: nowrap }
+.cr-why { color: var(--muted); font-size: 12.5px; margin-top: 4px; overflow-wrap: anywhere }
+.cr-row-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; min-width: 0 }
+.cr-row-foot .prog { width: 150px; max-width: 40vw; flex: none }
+.cr-meta { color: var(--faint); font: 12px var(--mono) }
+.cr-row-foot .ctlbar { flex: none }
+.cr-seen-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px; background: var(--panel-2); border: 0; border-top: 1px solid var(--border); color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left }
+.cr-seen-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
+.ca-badge.buk { gap: 5px }
+.ca-badge.buk .buk-ico { width: 13px; height: 13px }
+button.btn.tiny { padding: 5px 10px; font-size: 12px }
+.cr-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px }
+.cr-group { display: inline-flex; border: 1px solid var(--border-2); border-radius: var(--radius-sm); overflow: hidden }
+.cr-gbtn { background: var(--panel); border: 0; color: var(--muted); font: 600 12.5px var(--font); padding: 7px 12px; cursor: pointer }
+.cr-gbtn + .cr-gbtn { border-left: 1px solid var(--border-2) }
+.cr-gbtn.on { background: var(--sel); color: #171320 }
+.cr-chips { display: flex; flex-wrap: wrap; gap: 6px }
+.cr-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--border-2); border-radius: 999px; color: var(--muted); font: 600 12px var(--font); padding: 5px 11px; cursor: pointer }
+.cr-chip:hover { border-color: var(--sel) }
+.cr-chip.on { border-color: var(--sel); background: var(--sel-bg); color: var(--sel-ink) }
+.cr-chip .ca-badge { height: 18px; padding: 0 7px; font-size: 11px }
+.cr-proj-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2) }
+.cr-proj-nm { font-weight: 700 }
+.cr-proj-cnt { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto }
+.cr-proj-cnt .ca-badge { height: 20px; font-size: 11.5px }
+.crumb { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 6px }
+.lane-bucket { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px }
+.lane-bucket .cr-why-big { color: var(--muted); font-size: 14px; overflow-wrap: anywhere }
+@media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+
+/* ---------- freshness, stale banner, notifications ---------- */
+.ca-fresh { color: var(--faint); font-size: 12.5px; white-space: nowrap }
+.ca-fresh.bad { color: var(--bad); font-weight: 650 }
+.ca-notify { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font: 600 12.5px var(--font); cursor: pointer }
+.ca-notify:hover { border-color: var(--sel); color: var(--fg) }
+.ca-notify.on { border-color: var(--sel); background: var(--sel-bg); color: var(--sel-ink) }
+.ca-notify .ca-ico { width: 15px; height: 15px }
+.ca-stale { display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255, 156, 156, 0.14); border-bottom: 1px solid var(--bad); color: var(--bad); font: 650 13px var(--font); padding: 8px 14px }
+@media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l { display: none } }
+
 /* ---------- motion ---------- */
 @keyframes rowflash { 0% { background: var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel) } 100% { background: transparent; box-shadow: none } }
 .flash { animation: rowflash 1.6s ease-out 1 }
@@ -237,7 +312,7 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
   .ca-top { gap: 8px; padding: 0 10px }
   .ca-brand { font-size: 15px }
   .ca-tab { padding: 0 8px; font-size: 13px; gap: 6px }
-  .ca-counts { font-size: 11px }
+  .ca-counts { display: none } /* the Control room tiles carry the counts; the phone top bar has no room */
 }
 </style>
 </head>
@@ -248,8 +323,10 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
     <a class="ca-tab" href="/office"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/></svg>Office</a>
     <a class="ca-tab" href="/" aria-current="page"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.5 16.5 5.5 9 9.5 1.5 5.5Z"/><path d="M1.5 9 9 13 16.5 9"/><path d="M1.5 12.5 9 16.5 16.5 12.5"/></svg>Lanes</a>
   </nav>
-  <span class="ca-top-fill"></span><span class="ca-counts" id="counts">loading</span>
+  <span class="ca-top-fill"></span><span class="ca-fresh" id="fresh" aria-live="polite"></span><span class="ca-counts" id="counts">loading</span>
+  <button type="button" class="ca-notify" id="notify" aria-pressed="false" title="Notify me when a lane needs me or finishes"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.2a4.3 4.3 0 0 0-4.3 4.3c0 3.1-1.2 4.2-1.2 4.2h11S13.3 9.6 13.3 6.5A4.3 4.3 0 0 0 9 2.2Z"/><path d="M7.4 14.2a1.7 1.7 0 0 0 3.2 0"/></svg><span id="notify-l">Notify off</span></button>
 </header>
+<div class="ca-stale" id="stale" role="alert" hidden></div>
 <div id="shell">
   <details id="rail" open>
     <summary><span class="tri">&#9654;</span>Plans and lanes</summary>
@@ -271,6 +348,35 @@ const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new D
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const short = (m) => String(m || '').replace(/^huaweicloud-maas\//, 'codearts/');
+const leadName = (p) => (p && (p.leadName || (typeof p.lead === 'string' ? p.lead : ''))) || 'Lead';
+// Tokens by model: one row per model, sorted by total, lead and worker tagged; unknown is never shown as a zero.
+const mtWho = (e) => (e && e.who === 'lead' ? 'lead' : 'worker');
+function mtRows(byModel) {
+  return Object.entries(byModel || {}).map(([m, e]) => ({ m, e: e || {} })).sort((a, b) => {
+    const at = typeof a.e.total === 'number' ? a.e.total : -1, bt = typeof b.e.total === 'number' ? b.e.total : -1;
+    return bt - at || a.m.localeCompare(b.m);
+  });
+}
+function mtSplit(e) {
+  const cache = (e.cacheRead || 0) + (e.cacheWrite || 0);
+  const bits = [`${CAUI.fmtTokens(e.input || 0)} in`, `${CAUI.fmtTokens(e.output || 0)} out`];
+  if (cache) bits.push(`${CAUI.fmtTokens(cache)} cache`);
+  return bits.join(' / ');
+}
+function modelTable(byModel) {
+  const rows = mtRows(byModel);
+  if (!rows.length) return '<div class="small">No model usage reported yet.</div>';
+  const body = rows.map(({ m, e }) => {
+    const unknown = e.source === 'none' || typeof e.total !== 'number';
+    const val = unknown
+      ? '<span class="mt-none" title="ca lead-tokens --set ... or leadTokens in plan.json">not reported</span>'
+      : `<span class="mt-n">${CAUI.fmtTokens(e.total)}</span><span class="mt-split">${esc(mtSplit(e))}</span>`;
+    return `<div class="mtrow"><span class="mt-model" title="${esc(m)}">${esc(short(m))}</span><span class="mt-who ${mtWho(e)}">${mtWho(e)}</span>${val}</div>`;
+  }).join('');
+  return `<div class="modeltable"><div class="mtrow mt-h"><span class="mt-model">Model</span><span class="mt-who">Who</span><span class="mt-n">Total</span><span class="mt-split">Breakdown</span></div>${body}</div>`;
+}
+function tokLabel(tokens) { return `${tokens && tokens.complete === false ? 'Known' : 'Tokens'} ${CAUI.fmtTokens(CAUI.tokenTotal(tokens))}`; }
+function tokTitle(tokens) { const miss = (tokens && tokens.missing) || []; return miss.length ? `not reported by ${miss.map(short).join(', ')}` : ''; }
 
 // ---------- demo fixture (?demo=1): one fetch-layer swap used for every /api call ----------
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -292,6 +398,7 @@ function dLane(id, task, o) {
   return Object.assign({ lane: id, id, task, repo: D_REPO, health: 'planned', phase: 'planned', elapsed: '', idle: '-', commits: '0/0',
     steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tokensBy: {}, actions: [], suggest: '', why: '', tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
     session: '', reason: '', running: false, result: '', progress: { done: 0, total: 0, current: null },
+    seen: false, bucket: '', bucketWhy: '', project: null,
     startedAt: DEMO_T0 - 600000, finishedAt: null, fixes: 0 }, o);
 }
 const dSteps = (texts, done, cur, open) => texts.map((t, i) => ({ n: i + 1, text: t, state: i < done ? 'done' : i + 1 === cur ? 'current' : open ? 'open' : 'pending', commit: i < done ? D_HASHES[i % D_HASHES.length] : '' }));
@@ -320,22 +427,30 @@ const D_CHECKS_FULL = ['node --check runner/ca.mjs', 'node checks/assets.check.m
 const dBrief = (task, goal, steps, checks) => `# ${task}\n\n${goal}\n\n## Steps\n\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n## Checks\n\n${checks.map((c) => `- CHECK: ${c}`).join('\n')}\n\nWork in the worktree, commit per step with "step N" in the subject and run every CHECK line before you report back.\n`;
 const D_REVIEW_CHAOS = '## Review\n\nVerdict: needs fixes\n\nThe layout work landed but two things block the verdict:\n\n- The evidence panel overlaps the sticky action bar at 390 px; add the 80 px bottom padding the brief asks for.\n- `checks/lanes.check.mjs` never asserts the phone-width counts, so the clip regressed silently.\n\nEverything else matches the brief: waves are full width, the step disclosure stays put across polls and the transcript keeps its position with Follow live off.';
 const D_SUMMARY_CHAOS = '## Summary\n\nReworked the Lanes dashboard as Pixel Workshop Lanes: plum shell, persistent plans rail, plan homescreen with full-width waves and a full-page lane detail.\n\nKept every route, data call and action. The demo fixture renders both routes without real lanes; steer, stop and open TUI answer through the same handlers.';
+// Two projects so the "By project" toggle has something to group; a bucket on every lane so the
+// Control room reads the same payload the server sends. dSeen survives the polls: Mark seen toggles it.
+const D_PROJ_A = { key: 'demo-repo', name: 'demo-repo' };
+const D_PROJ_B = { key: 'sandbox', name: 'sandbox' };
+const dSeen = new Set(['demo-repo--path-join']);
 function demoLanes() {
-  return [
-    dLane('demo-repo--office-layout', 'office-layout', { health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', ...dTokBy(dTok(48000, 150, { reasoning: 4200, cacheRead: 9000 }), dTok(3900, 40), dTok(864, 12)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7011', startedAt: DEMO_T0 - 231000,
+  const ls = [
+    dLane('demo-repo--office-layout', 'office-layout', { bucket: 'running', bucketWhy: 'building wave 1, step 1/7', project: D_PROJ_A, health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', ...dTokBy(dTok(48000, 150, { reasoning: 4200, cacheRead: 9000 }), dTok(3900, 40), dTok(864, 12)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7011', startedAt: DEMO_T0 - 231000,
       runs: 2, continues: [{ id: 'demo-repo--office-v2', task: 'office-v2', reason: 'paused by the operator for a scope change', commits: 6, progress: { done: 6, total: 8 }, elapsed: '41m 12s' }],
       progress: dAdv() ? { done: 1, total: 7, current: { n: 2, text: D_STEPS_LAYOUT[1] } } : { done: 0, total: 7, current: { n: 1, text: D_STEPS_LAYOUT[0] } }, tools: [{ tool: 'edit', input: 'runner/dash.html', since: DEMO_T0 - 9000 }] }),
-    dLane('demo-repo--string-utils', 'string-utils', { health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', ...dTokBy(dTok(21014, 5302, { reasoning: 1100, cacheRead: 3000 }), dTok(1200, 90), dTok(300, 20)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7012', startedAt: DEMO_T0 - 437000,
+    dLane('demo-repo--string-utils', 'string-utils', { bucket: 'running', bucketWhy: 'building step 3/4', project: D_PROJ_B, health: 'running', phase: 'build', running: true, elapsed: '7m 17s', idle: '1s', commits: '2/4', now: 'Thinking', ...dTokBy(dTok(21014, 5302, { reasoning: 1100, cacheRead: 3000 }), dTok(1200, 90), dTok(300, 20)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7012', startedAt: DEMO_T0 - 437000,
       progress: { done: 2, total: 4, current: { n: 3, text: D_STEPS_STRINGS[2] } } }),
-    dLane('demo-repo--stuck', 'stuck', { health: 'STALLED', phase: 'build', running: true, elapsed: '9m 04s', idle: '6m', commits: '1/4', now: 'Waiting on the model', ...dTokBy(dTok(16000, 2400, { reasoning: 800, cacheRead: 2000 }), dTok(0, 0), dTok(0, 0)), actions: D_RUN_ACTIONS, suggest: 'kick', why: 'no model activity for 6m', session: 's-7013', startedAt: DEMO_T0 - 544000,
+    dLane('demo-repo--stuck', 'stuck', { bucket: 'attention', bucketWhy: 'no model activity for 6m', project: D_PROJ_B, health: 'STALLED', phase: 'build', running: true, elapsed: '9m 04s', idle: '6m', commits: '1/4', now: 'Waiting on the model', ...dTokBy(dTok(16000, 2400, { reasoning: 800, cacheRead: 2000 }), dTok(0, 0), dTok(0, 0)), actions: D_RUN_ACTIONS, suggest: 'kick', why: 'no model activity for 6m', session: 's-7013', startedAt: DEMO_T0 - 544000,
       progress: { done: 1, total: 4, current: { n: 2, text: D_STEPS_STRINGS[1] } } }),
-    dLane('demo-repo--path-join', 'path-join', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', ...dTokBy(dTok(12050, 3211), dTok(900, 120), dTok(150, 10)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
-    dLane('demo-repo--cli-dx', 'cli-dx', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '41m 10s', commits: '8/8', ...dTokBy(dTok(8600, 12300), dTok(600, 200), dTok(200, 30)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 1800000, progress: { done: 8, total: 8, current: null } }),
-    dLane('demo-repo--office-scene', 'office-scene', { health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '46m 03s', commits: '6/6', ...dTokBy(dTok(12100, 21400), dTok(500, 150), dTok(100, 20)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 2600000, progress: { done: 6, total: 6, current: null } }),
-    dLane('demo-repo--stall', 'stall', { health: 'failed', phase: 'finished', result: 'failed', reason: 'no progress for 20 minutes', elapsed: '22m 41s', commits: '1/5', ...dTokBy(dTok(4300, 690), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: 'resume', why: 'gave up after 3 interruptions (transport)', finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 5, current: null } }),
-    dLane('demo-repo--orphan', 'orphan', { health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', ...dTokBy(dTok(900, 80), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
-    dLane('demo-repo--chaos', 'chaos', { health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', ...dTokBy(dTok(7300, 1060), dTok(2200, 300), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
+    dLane('demo-repo--path-join', 'path-join', { bucket: 'done', bucketWhy: 'finished, verdict ready', project: D_PROJ_B, health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '5m 02s', commits: '4/4', ...dTokBy(dTok(12050, 3211), dTok(900, 120), dTok(150, 10)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 340000, progress: { done: 4, total: 4, current: null } }),
+    dLane('demo-repo--cli-dx', 'cli-dx', { bucket: 'done', bucketWhy: 'finished, verdict ready', project: D_PROJ_A, health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '41m 10s', commits: '8/8', ...dTokBy(dTok(8600, 12300), dTok(600, 200), dTok(200, 30)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 1800000, progress: { done: 8, total: 8, current: null } }),
+    dLane('demo-repo--office-scene', 'office-scene', { bucket: 'done', bucketWhy: 'finished, verdict ready', project: D_PROJ_A, health: 'done', phase: 'finished', result: 'done', verdict: 'ready', elapsed: '46m 03s', commits: '6/6', ...dTokBy(dTok(12100, 21400), dTok(500, 150), dTok(100, 20)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 2600000, progress: { done: 6, total: 6, current: null } }),
+    dLane('demo-repo--stall', 'stall', { bucket: 'attention', bucketWhy: 'failed: gave up after 3 interruptions', project: D_PROJ_A, health: 'failed', phase: 'finished', result: 'failed', reason: 'no progress for 20 minutes', elapsed: '22m 41s', commits: '1/5', ...dTokBy(dTok(4300, 690), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: 'resume', why: 'gave up after 3 interruptions (transport)', finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 5, current: null } }),
+    dLane('demo-repo--orphan', 'orphan', { bucket: 'ended', bucketWhy: 'stopped by the operator', project: D_PROJ_A, health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', ...dTokBy(dTok(900, 80), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
+    dLane('demo-repo--chaos', 'chaos', { bucket: 'attention', bucketWhy: 'needs review: two fixes asked', project: D_PROJ_A, health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', ...dTokBy(dTok(7300, 1060), dTok(2200, 300), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
+    dLane('demo-repo--archive', 'archive', { bucket: 'ended', bucketWhy: 'archived after cleanup', project: D_PROJ_A, health: 'idle', phase: 'finished', result: 'archived', elapsed: '12m 40s', commits: '2/2', ...dTokBy(dTok(5200, 400), dTok(0, 0), dTok(0, 0)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 6 * 86400000, progress: { done: 2, total: 2, current: null } }),
   ];
+  for (const l of ls) l.seen = dSeen.has(l.id);
+  return ls;
 }
 function demoPlans() {
   const by = Object.fromEntries(demoLanes().map((l) => [l.id, l]));
@@ -481,7 +596,13 @@ async function demoPost(what, id, body) {
   }
   if (what === 'kick') { demoControls.push({ laneId: id, action: 'kick', body: body || {} }); return { ok: true, message: `Kick sent (${(body && body.mode) || 'turn'})` }; }
   if (what === 'resume') { demoControls.push({ laneId: id, action: 'resume', body: body || {} }); return { ok: true, message: 'Lane resumed' }; }
+  if (what === 'ack') { const seen = !(body && body.seen === false); if (seen) dSeen.add(id); else dSeen.delete(id); return { ok: true, seen }; }
   return { ok: true };
+}
+function demoOverview() {
+  const ls = demoLanes(); const counts = { attention: 0, running: 0, done: 0, ended: 0 };
+  for (const l of ls) { const b = l.bucket; if (b === 'done') { if (!l.seen) counts.done++; } else if (counts[b] != null) counts[b]++; }
+  return { counts, lanes: ls };
 }
 function demoDoctor() {
   return { checks: [
@@ -491,11 +612,13 @@ function demoDoctor() {
   ] };
 }
 async function demoApi(path, opts) {
+  if (demoFailAt) throw new Error('demo: forced runner failure'); // check hook: window.__lanes.fail(true)
   const u = new URL(path, 'http://x');
   if (u.pathname === '/api/plans') return demoPlans();
   if (u.pathname === '/api/lanes') return demoLanes();
+  if (u.pathname === '/api/overview') return demoOverview();
   if (u.pathname === '/api/doctor') return demoDoctor();
-  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume)$/);
+  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume|ack)$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
     if (m[2] === 'detail') return demoDetail(id);
@@ -548,6 +671,7 @@ async function sendControl(laneId, action, extra) {
 function rerenderLane(laneId) {
   if (route.kind === 'lane' && detail && detail.id === laneId) patchLane(detail);
   else if (route.kind === 'plan' && curPlan) renderPlan(curPlan);
+  else if (route.kind === '') renderControl();
 }
 function runControl(action, laneId) {
   const A = CAUI.ACTIONS[action]; if (!A || !laneId) return;
@@ -573,6 +697,144 @@ function prog(p, res) {
   const k = res === 'failed' ? 'bad' : res === 'done' ? 'ok' : '';
   return `<div class="prog ${k}"><i style="width:${pct}%"></i></div>`;
 }
+// ---------- control room: the default route (#/) ----------
+// Bucket order and wording; tone maps to the shared badge colours (s-bad / s-run / s-done / s-idle).
+const CR_BUCKETS = [
+  { key: 'attention', word: 'Needs you', tone: 'bad' },
+  { key: 'running', word: 'Running', tone: 'run' },
+  { key: 'done', word: 'Done', tone: 'done' },
+  { key: 'ended', word: 'Ended', tone: 'idle' },
+];
+// Every bucket gets its own icon shape so a status is never colour-only.
+const CR_SHAPE = { attention: 'triangle', running: 'circle', done: 'diamond', ended: 'square' };
+function crIcon(key) {
+  const s = CR_SHAPE[key] || 'circle';
+  const d = s === 'triangle' ? '<path d="M9 2.2 16.2 15.4H1.8Z"/>'
+    : s === 'diamond' ? '<path d="M9 2.2 15.8 9 9 15.8 2.2 9Z"/>'
+    : s === 'square' ? '<rect x="2.6" y="2.6" width="12.8" height="12.8" rx="1.6"/>'
+    : '<circle cx="9" cy="9" r="6.6"/>';
+  return `<svg class="buk-ico" data-shape="${s}" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+// The server sends bucket on every lane; this fallback keeps old payloads (and the demo fixture
+// until it carries bucket itself) rendering by mirroring the server's laneBucket rules.
+function laneBucket(l) {
+  if (l && l.bucket) return l.bucket;
+  const x = l || {}, r = String(x.result || '');
+  const h = String(x.health || '').toLowerCase();
+  if (/stall|dead/.test(h) || ['failed', 'stopped', 'killed', 'paused', 'needs review'].includes(r)) return 'attention';
+  if (x.running) return 'running';
+  if (r === 'done' || r === 'continued') return 'done';
+  return 'ended';
+}
+// Small localStorage helpers: a remembered control room never throws on a locked-down browser.
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+let crFilter = lsGet('ca-cr-filter', '') || ''; // '' = show all; a bucket key filters the list
+let crProject = lsGet('ca-cr-project', '') || ''; // '' = all projects; else a project key
+let crGroup = lsGet('ca-cr-group', 'status') === 'project' ? 'project' : 'status';
+const crOpen = new Set(String(lsGet('ca-cr-open', 'attention,running')).split(',').filter(Boolean)); // expanded sections
+let crSeenOpen = lsGet('ca-cr-seen', '') === '1'; // the "Seen earlier" block inside Done
+function crCounts() {
+  const c = { attention: 0, running: 0, done: 0, ended: 0 };
+  for (const l of lanes) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; }
+  return c;
+}
+function crMeta(key) { return CR_BUCKETS.find((x) => x.key === key) || CR_BUCKETS[3]; }
+function crTile(b, n) {
+  const on = crFilter === b.key;
+  return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}">${crIcon(b.key)}<span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></button>`;
+}
+function crBadge(key) { const m = crMeta(key); return `<span class="ca-badge s-${m.tone} buk">${crIcon(key)}${esc(m.word)}</span>`; }
+function crDot(key) { const m = crMeta(key); return `<span class="ca-dot s-${m.tone}" title="${esc(m.word)}"></span>`; }
+// "running 24m, step 3/8", "stuck 6m", "finished 2h ago": a phrase, never just a colour.
+function crTime(l) {
+  const b = laneBucket(l), p = l.progress || {};
+  if (b === 'running') return `running ${l.elapsed || ''}${p.total ? `, step ${p.done}/${p.total}` : ''}`.trim();
+  if (b === 'attention' && l.running) return `stuck ${(l.idle && l.idle !== '-') ? l.idle : 'quiet'}`.trim();
+  if (b === 'attention') return `${esc(l.result || 'needs you')} ${ago(l.finishedAt)}`.trim();
+  if (b === 'done') return `finished ${ago(l.finishedAt)}`.trim();
+  return `ended ${ago(l.finishedAt)}`.trim();
+}
+function crRow(l) {
+  const b = laneBucket(l), p = l.progress || {};
+  const why = l.bucketWhy || l.why || '';
+  const proj = (l.project && (l.project.name || l.project.key)) || '';
+  const sug = (l.suggest && (l.actions || []).includes(l.suggest)) ? ctlBar({ ...l, suggest: l.suggest, why: l.why && l.why !== why ? l.why : '' }, true) : '';
+  const seenBtn = b === 'done'
+    ? (l.seen
+      ? `<button type="button" class="btn tiny" data-ack-id="${esc(l.id)}" data-ack-mark="0">Mark unseen</button>`
+      : `<button type="button" class="btn tiny" data-ack-id="${esc(l.id)}" data-ack-mark="1">Mark seen</button>`)
+    : '';
+  const href = `#/lane/${esc(l.id)}`;
+  return `<div class="cr-row" data-lane="${esc(l.id)}">
+    <div class="cr-row-top">${crBadge(b)}${proj ? `<span class="chip">${esc(proj)}</span>` : ''}<a class="cr-task" href="${href}">${esc(l.task)}</a><span class="cr-time">${crTime(l)}</span><span class="cr-open"><a href="${href}">Open</a></span></div>
+    ${why ? `<div class="cr-why">${esc(why)}</div>` : ''}
+    <div class="cr-row-foot">${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${p.total || 0} steps</span><span class="cr-meta">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</span>${sug}${seenBtn}</div>
+  </div>`;
+}
+const projKey = (l) => (l.project && l.project.key) || '';
+const projName = (l) => (l.project && (l.project.name || l.project.key)) || '';
+function crProjectKeys() { const m = new Map(); for (const l of lanes) { const k = projKey(l); if (k && !m.has(k)) m.set(k, projName(l)); } return m; }
+function crBucketCounts(list) { const c = { attention: 0, running: 0, done: 0, ended: 0 }; for (const l of list) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; } return c; }
+function crModels() {
+  const by = {};
+  for (const l of lanes) for (const [m, e] of Object.entries(l.tokensByModel || {})) {
+    const cur = by[m] || (by[m] = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0, who: 'worker', source: 'runner' });
+    cur.input += e.input || 0; cur.output += e.output || 0; cur.reasoning += e.reasoning || 0; cur.cacheRead += e.cacheRead || 0; cur.cacheWrite += e.cacheWrite || 0; cur.steps += e.steps || 0;
+  }
+  for (const e of Object.values(by)) { e.total = (e.input || 0) + (e.output || 0) + (e.reasoning || 0) + (e.cacheRead || 0) + (e.cacheWrite || 0); e.source = (e.steps > 0 && e.total === 0) ? 'none' : 'runner'; }
+  return by;
+}
+function crSection(b, ls) {
+  const open = crOpen.has(b.key) || crFilter === b.key;
+  let body = ls.map(crRow).join('');
+  if (b.key === 'done') {
+    const seen = ls.filter((l) => l.seen);
+    body = ls.filter((l) => !l.seen).map(crRow).join('');
+    if (seen.length) body += `<div class="cr-seen"><button type="button" class="cr-seen-h" data-crseen="1" aria-expanded="${crSeenOpen}"><span class="tri">&#9654;</span>Seen earlier<span class="cnt">${seen.length}</span></button>${crSeenOpen ? seen.map(crRow).join('') : ''}</div>`;
+  }
+  if (!ls.length) body = '<div class="small" style="padding:10px 14px">none</div>';
+  return `<section class="cr-sec" data-bucket="${b.key}"><button type="button" class="cr-sec-h" data-crsec="${b.key}" aria-expanded="${open}"><span class="tri">&#9654;</span>${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></button>${open ? body : ''}</section>`;
+}
+const CR_RANK = { attention: 0, running: 1, done: 2, ended: 3 };
+function crProjectBlock(key, name, ls) {
+  const cnt = crBucketCounts(ls);
+  const sorted = [...ls].sort((a, b) => (CR_RANK[laneBucket(a)] ?? 9) - (CR_RANK[laneBucket(b)] ?? 9));
+  const summary = CR_BUCKETS.filter((b) => cnt[b.key]).map((b) => `<span class="ca-badge s-${b.tone}">${cnt[b.key]} ${esc(b.word)}</span>`).join(' ');
+  return `<section class="cr-sec" data-project="${esc(key)}"><div class="cr-proj-h"><span class="cr-proj-nm">${esc(name)}</span><span class="cr-proj-cnt">${summary}</span></div>${sorted.map(crRow).join('') || '<div class="small" style="padding:10px 14px">none</div>'}</section>`;
+}
+function crStatusView(shown) { return CR_BUCKETS.map((b) => (crFilter && b.key !== crFilter) ? '' : crSection(b, shown.filter((l) => laneBucket(l) === b.key))).join(''); }
+function crProjectView(shown) {
+  return [...crProjectKeys()].filter(([k]) => !crProject || k === crProject).map(([k, n]) => crProjectBlock(k, n, shown.filter((l) => projKey(l) === k))).join('') || '<div class="small" style="padding:10px 0">No projects.</div>';
+}
+function renderControl() {
+  const c = crCounts();
+  const shown = lanes.filter((l) => (!crFilter || laneBucket(l) === crFilter) && (!crProject || projKey(l) === crProject));
+  const tiles = CR_BUCKETS.map((b) => crTile(b, c[b.key] || 0)).join('');
+  const chips = `<button type="button" class="cr-chip${crProject === '' ? ' on' : ''}" data-crproj="" aria-pressed="${crProject === ''}">All projects</button>` +
+    [...crProjectKeys()].map(([k, n]) => { const a = lanes.filter((l) => projKey(l) === k && laneBucket(l) === 'attention').length; return `<button type="button" class="cr-chip${crProject === k ? ' on' : ''}" data-crproj="${esc(k)}" aria-pressed="${crProject === k}">${esc(n)}${a ? ` <span class="ca-badge s-bad">${a}</span>` : ''}</button>`; }).join('');
+  const groups = ['status', 'project'].map((g) => `<button type="button" class="cr-gbtn${crGroup === g ? ' on' : ''}" data-crgroup="${g}" aria-pressed="${crGroup === g}">${g === 'status' ? 'By status' : 'By project'}</button>`).join('');
+  const body = crGroup === 'project' ? crProjectView(shown) : crStatusView(shown);
+  $('view').innerHTML = `<div class="pad">
+    <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · ${crGroup === 'project' ? 'by project' : 'by status'}</div></div>
+    <div class="crtiles" role="group" aria-label="Lane buckets">${tiles}</div>
+    <div class="cr-controls"><div class="cr-group" role="group" aria-label="Group lanes">${groups}</div><div class="cr-chips">${chips}</div></div>
+    <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div>
+    <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(crModels())}</div></div>`;
+  for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; lsSet('ca-cr-filter', crFilter); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); lsSet('ca-cr-open', [...crOpen].join(',')); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
+  for (const g of $('view').querySelectorAll('[data-crgroup]')) g.onclick = () => { crGroup = g.dataset.crgroup; lsSet('ca-cr-group', crGroup); renderControl(); };
+  for (const p of $('view').querySelectorAll('[data-crproj]')) p.onclick = () => { crProject = crProject === p.dataset.crproj ? '' : p.dataset.crproj; lsSet('ca-cr-project', crProject); renderControl(); };
+  for (const x of $('view').querySelectorAll('[data-ack-id]')) x.onclick = () => setSeen(x.dataset.ackId, x.dataset.ackMark === '1');
+  syncBarPad();
+}
+async function setSeen(id, seen) {
+  try { await api(`/api/lane/${encodeURIComponent(id)}/ack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seen }) }); } catch {}
+  const l = lanes.find((x) => x.id === id); if (l) l.seen = seen;
+  renderControl();
+}
+
 // ---------- plan-home state that survives the 2.5 s polls ----------
 let curPlan = null;
 const waveCollapsed = new Map(); // "planId::waveIndex" -> true
@@ -615,8 +877,12 @@ function renderRail() {
   const loose = lanes.filter((l) => !inPlan.has(l.id));
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
   const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
-  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${dot(CAUI.status(l.health))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
-  let h = '<div class="rail-h">Plans</div>';
+  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
+  const attention = lanes.filter((l) => laneBucket(l) === 'attention').length;
+  let h = `<div class="rail-card cr${route.kind === '' ? ' sel' : ''}" data-go="/">
+    <div class="rail-row"><span class="ca-dot" style="color:var(--sel)"></span><span class="rail-title">Control room</span>${attention ? `<span class="ca-badge s-bad">${attention}</span>` : ''}</div>
+    <div class="rail-sub">what needs you, running, done, ended</div></div>`;
+  h += '<div class="rail-h">Plans</div>';
   h += plans.length ? plans.map((p) => {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
@@ -686,13 +952,14 @@ function renderPlan(p) {
   $('view').innerHTML = `<div class="pad">
     <div class="plan-head">
       <h1>${esc(p.title)}</h1>
-      <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(p.lead)} · updated ${ago(p.updatedAt)}</div>
+      <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
       ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
-      <div class="plan-tok" title="${esc(planTokTitle)}">Tokens ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))}</div>
+      <div class="plan-tok" title="${esc(tokTitle(p.tokens) || planTokTitle)}">${tokLabel(p.tokens)}</div>
     </div>
     ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${p.closed ? 'Outcome' : 'Lead now'}</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
+    <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(p.tokensByModel)}</div>
     ${waves}
     <div class="grid2">
       <div class="box"><h4>Planned next (lead)</h4>${next}${risks}</div>
@@ -743,7 +1010,8 @@ function renderLane(d, keep) {
   const evtsBody = evts.length ? evts.slice(0, 20).map((e) => `<div class="small"><span class="mute">${esc(clock(e.at))}</span> <span style="color:${e.c}">${esc(e.t)}</span></div>`).join('') : '<div class="small">none</div>';
   const ctx = (k, title, sum, body) => `<div class="ctxrow"><button type="button" data-ctx="${k}" aria-expanded="${openCtx(k)}"><span class="ci">&#9654;</span>${title}<span class="sum">${sum}</span></button><div class="ctxbody" ${openCtx(k) ? '' : 'style="display:none"'}>${body}</div></div>`;
   $('view').innerHTML = `<div class="pad has-bar" style="flex:1">
-    ${plan ? `<a class="backlink" href="#/plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a>` : ''}
+    <div class="crumb"><a class="backlink" href="#/">&larr; Control room</a>${plan ? `<a class="backlink" href="#/plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a>` : ''}</div>
+    <div class="lane-bucket" data-bucket="${esc(d.bucket || laneBucket(d))}">${crBadge(d.bucket || laneBucket(d))}${d.bucketWhy ? `<span class="cr-why-big">${esc(d.bucketWhy)}</span>` : ''}</div>
     <div class="idrow"><span class="spot" data-spot="lane:${esc(d.id)}" data-role="${d.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.875" data-work="${d.running ? 1 : 0}"></span><h1>${esc(d.task)}</h1>${CAUI.badge(st)}${d.verdict ? `<span class="ca-badge s-${d.verdict === 'ready' ? 'done' : 'warn'}">review: ${esc(d.verdict)}</span>` : ''}</div>
     ${metrics}
     ${contLine(d.continues ? d : wl)}
@@ -751,6 +1019,7 @@ function renderLane(d, keep) {
     ${pipeline(d)}
     <div class="nowband"><span class="lb">${d.running ? 'Now' : 'Result'}</span><div class="bd">${nowInner}${tools}</div></div>
     <div class="box tokbox"><h4>Tokens by agent</h4>${tokRows}</div>
+    <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(d.tokensByModel)}</div>
     <div class="grid21">
       <div class="box"><h4>Plan steps (brief) &middot; ${d.progress.done}/${d.progress.total}</h4>${steps}
         ${extraCommits.length ? `<h4 style="margin-top:14px">Other commits</h4><ul class="plain">${extraCommits.map((c) => `<li><span style="font:11.5px var(--mono);color:var(--faint);flex:none;min-width:64px">${esc(c.hash)}</span><span style="min-width:0">${esc(c.subject)}</span></li>`).join('')}</ul>` : ''}${todos}</div>
@@ -935,21 +1204,85 @@ window.__lanes = { state: () => {
     controls: demoControls.slice(),
     quickSteers: document.querySelectorAll('#quickSteers [data-quick]').length,
     overflowX: document.documentElement.scrollWidth > window.innerWidth,
+    // Control room snapshot for the check harness: buckets, grouping, filters, the rendered
+    // sections (bucket -> lane ids), the project keys shown, the tab title and the stale banner.
+    overview: {
+      counts: crCounts(),
+      group: crGroup,
+      filter: crFilter,
+      sections: [...document.querySelectorAll('.cr-sec[data-bucket]')].map((s) => ({ bucket: s.dataset.bucket, ids: [...s.querySelectorAll('[data-lane]')].map((x) => x.dataset.lane) })),
+      projects: [...document.querySelectorAll('.cr-sec[data-project]')].map((s) => s.dataset.project),
+      title: document.title,
+      banner: staleOn,
+    },
   };
-} };
+}, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; } };
+
+// ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
+let lastOkAt = 0, firstFailAt = 0, staleOn = false;
+let demoFailAt = 0; // check hook: window.__lanes.fail(true) forces every /api call to fail
+let notifyOn = false, notifyPrimed = false;
+const notifyWas = new Map(); // laneId -> bucket at the previous poll, so we only notify on a change
+const clockS = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function setStale(since) {
+  const el = $('stale'); if (!el) return;
+  staleOn = !!since;
+  el.hidden = !since;
+  if (since) el.textContent = `Dashboard cannot reach the runner since ${clockS(since)}`;
+}
+function updateFreshness() {
+  const f = $('fresh'); if (!f) return;
+  if (!lastOkAt) { f.textContent = ''; f.classList.remove('bad'); }
+  else if (!firstFailAt) { f.textContent = `Updated ${Math.max(0, Math.round((Date.now() - lastOkAt) / 1000))}s ago`; f.classList.remove('bad'); }
+  else { f.textContent = 'reconnecting'; f.classList.add('bad'); }
+  setStale(firstFailAt && Date.now() - firstFailAt > 10000 ? firstFailAt : 0);
+}
+function markFresh() { lastOkAt = Date.now(); firstFailAt = 0; updateFreshness(); }
+function markStale() { if (!firstFailAt) firstFailAt = demoFailAt || Date.now(); updateFreshness(); }
+function renderNotify() {
+  const b = $('notify'); if (!b) return;
+  b.classList.toggle('on', notifyOn);
+  b.setAttribute('aria-pressed', String(notifyOn));
+  const l = $('notify-l'); if (l) l.textContent = notifyOn ? 'Notify on' : 'Notify off';
+  b.title = notifyOn ? 'Browser notifications are on' : 'Notify me when a lane needs me or finishes';
+}
+function toggleNotify() {
+  if (notifyOn) { notifyOn = false; renderNotify(); return; }
+  if (typeof Notification === 'undefined') { toast('This browser has no notifications', true); return; }
+  const done = () => { notifyOn = Notification.permission === 'granted'; renderNotify(); if (!notifyOn) toast('Notifications are blocked in the browser', true); };
+  if (Notification.permission === 'granted') done(); else { try { Notification.requestPermission().then(done).catch(done); } catch { done(); } }
+}
+// Diff lane buckets between polls by lane id: a lane that enters attention or done once never notifies twice.
+function diffNotify() {
+  if (!notifyPrimed) { notifyPrimed = true; notifyWas.clear(); for (const l of lanes) notifyWas.set(l.id, laneBucket(l)); return; }
+  if (notifyOn && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    for (const l of lanes) {
+      const b = laneBucket(l), was = notifyWas.get(l.id);
+      if ((b === 'attention' || b === 'done') && was !== b) {
+        try { const n = new Notification(b === 'attention' ? `Needs you: ${l.task}` : `Finished: ${l.task}`, { body: l.bucketWhy || l.task, tag: `${l.id}:${b}` }); n.onclick = () => { window.focus(); location.hash = `#/lane/${encodeURIComponent(l.id)}`; }; } catch {}
+      }
+    }
+  }
+  notifyWas.clear(); for (const l of lanes) notifyWas.set(l.id, laneBucket(l));
+}
 function go(h) { location.hash = h; }
 function parseRoute() { const [k, ...r] = location.hash.slice(1).replace(/^\//, '').split('/'); return { kind: k, id: decodeURIComponent(r.join('/')) }; }
 async function refresh(full) {
   try { [plans, lanes] = await Promise.all([api('/api/plans'), api('/api/lanes')]); }
-  catch { $('counts').textContent = 'dashboard server not reachable'; return; }
+  catch { $('counts').textContent = 'dashboard server not reachable'; markStale(); return; }
+  markFresh();
   $('counts').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`;
-  if (!route.kind) { const p = plans[0], l = lanes.find((x) => x.running) || lanes[0]; if (p) return go('plan/' + p.id); if (l) return go('lane/' + l.id); }
+  const attn = lanes.filter((l) => laneBucket(l) === 'attention').length;
+  document.title = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
+  diffNotify();
   renderRail();
   if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
   else if (route.kind === 'lane') {
     try { const d = await api(`/api/lane/${encodeURIComponent(route.id)}/detail`); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
     catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-  }   else if (!plans.length && !lanes.length) await renderOnboard();
+  }
+  else if (!plans.length && !lanes.length) await renderOnboard();
+  else renderControl();
 }
 // Control buttons and inline note boxes are wired once by delegation so re-renders never double-bind them.
 document.addEventListener('click', (e) => {
@@ -983,6 +1316,7 @@ document.addEventListener('input', (e) => {
 });
 window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; refresh(true); };
 syncRail();
+$('notify').onclick = toggleNotify; renderNotify(); updateFreshness();
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
 </script>
 </body>
