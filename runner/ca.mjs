@@ -779,7 +779,8 @@ function cmdDetach(repoArg, task) {
 // ---------- control commands ----------
 function lanes() {
   let files = []; try { files = fs.readdirSync(REG).filter((f) => f.endsWith('.json')); } catch {}
-  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r) return null; const s = readJSON(path.join(r.dir, 'state.json')) || readJSON(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
+  // Skip non-lane json in the registry (acks.json): a registration always carries a string dir.
+  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r || typeof r.dir !== 'string') return null; const s = readJSON(path.join(r.dir, 'state.json')) || readJSON(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
     .sort((a, b) => (b.s.startedAt || 0) - (a.s.startedAt || 0));
 }
 // Lanes written before 'paused' existed recorded a timeout as failed (timeout).
