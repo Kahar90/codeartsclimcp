@@ -9,7 +9,11 @@ summaries, not transcripts.
 - `ca_doctor` (or `ca doctor`). Fix every `fail` row before starting; `warn` rows are optional.
 - The repo must be a git repo with a first commit: if it is not, run `git init` and
   `git commit --allow-empty -m "first commit"` yourself (`ca lane` trusts the folder by itself).
-  Know its check commands (tests, typecheck, lint); if there are none, plan a step that adds one.
+- Run `git status`. If the human's own files are untracked or modified (common right after
+  `git init`), tell them and ask to commit them first (or commit them yourself as a baseline if
+  they agree): otherwise the lane's first step commits them together with its change, and the
+  reviewer reports them as rewritten. Never commit `.env` files or secrets.
+- Know the repo's check commands (tests, typecheck, lint); if there are none, plan a step that adds one.
 
 ## 2. Plan
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.
@@ -74,6 +78,8 @@ summaries, not transcripts.
 What was built, commits, checks and in-app results, verdicts and what you overruled, open items.
 If you registered a plan, close it when the work is done or a wave will not run: `ca_plan_close
 {id, reason}` (never-started lanes become Dropped). Never leave a plan open.
+The brief stays in `tasks/<task>.md` (lane logs and state are gitignored): say so in the report, and
+commit it with the work or delete it as the human prefers. Do not push unless the human asks.
 
 ## Rules
 - Never commit secrets, CLI configs or lane logs (`tasks/*.lane/`, `tasks/*.lane.log`).
