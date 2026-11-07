@@ -292,9 +292,14 @@ try {
   const resLog = s.controls[s.controls.length - 1];
   check('Resume note logs body.note', s.controls.length === 2 && resLog?.laneId === 'office-review' && resLog?.action === 'resume' && resLog?.body?.note === 'resume after the transport failures' && resLog?.body?.mode === undefined, JSON.stringify(s.controls));
   check('window token total equals the sum of the three agent parts', s.window.tokens && s.window.tokens.total === s.window.tokens.build + s.window.tokens.review + s.window.tokens.other, JSON.stringify(s.window.tokens));
-  const chip = await ev('(function(){ var c = document.getElementById("tokenChip"); return { hidden: c.hidden, text: c.textContent, title: c.title }; })()');
+  const chip = await ev('(function(){ var c = document.getElementById("tokenChip"); return { hidden: c.hidden, text: c.textContent, label: c.getAttribute("aria-label") || "" }; })()');
   check('top bar shows the plan token total', chip && chip.hidden === false && chip.text === 'Tokens ' + fmtTokens(s.planTokens) && chip.text === 'Tokens 1.24M', `${chip?.text} planTokens=${s.planTokens}`);
-  check('top bar title carries the by-agent split', /^Builder [\d.]+[kM]? \u00b7 Reviewer [\d.]+[kM]? \u00b7 Hidden sessions [\d.]+[kM]?$/.test(chip.title), chip.title);
+  check('token chip label carries the by-agent split', /^Tokens [\d.]+[kM]?: Builder [\d.]+[kM]?, Reviewer [\d.]+[kM]?, Hidden sessions [\d.]+[kM]?/.test(chip.label), chip.label);
+  await ev('document.getElementById("tokenChip").dispatchEvent(new MouseEvent("mouseenter"))');
+  const card = await ev('(function(){ var c = document.getElementById("hoverCard"); var r = c.getBoundingClientRect(); return { hidden: c.hidden, text: c.innerText, w: r.width, left: r.left, right: r.right, vw: innerWidth }; })()');
+  check('hovering the token chip opens the styled token card', card && !card.hidden && /Builder/.test(card.text) && /Reviewer/.test(card.text) && card.left >= 0 && card.right <= card.vw, JSON.stringify(card));
+  await ev('document.getElementById("tokenChip").dispatchEvent(new MouseEvent("mouseleave"))');
+  check('leaving the token chip hides the card', await ev('document.getElementById("hoverCard").hidden'));
 
   await ev('window.__office.press("office-sprites")'); await wait(300);
   s = await st();

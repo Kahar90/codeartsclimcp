@@ -6,8 +6,7 @@
   var BASE = '/assets/';
   var manifest = null, loading = null, images = {};
   var sprites = new Set();
-  var motionPref = true;
-  try { motionPref = localStorage.getItem('ca-motion') !== 'off'; } catch (e) {}
+  var motionPref = true; // motion is always on; only the OS reduced-motion setting turns effects off
   var mq = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   var listeners = [];
   function motionOn() { return motionPref && !(mq && mq.matches); }
@@ -105,9 +104,6 @@
     get manifest() { return manifest; },
     anchor: function () { return manifest ? manifest.anchor : [32, 57]; },
     motion: function () { return motionOn(); },
-    // Explicit Motion toggle (persisted per viewer). Reduced-motion media query always wins.
-    setMotion: function (on) { motionPref = !!on; try { localStorage.setItem('ca-motion', on ? 'on' : 'off'); } catch (e) {} notify(); },
-    motionPref: function () { return motionPref; },
     onMotion: function (f) { listeners.push(f); },
     count: function () { return sprites.size; },
   };

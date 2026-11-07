@@ -25,9 +25,9 @@ body.narrow .ca-counts { display: none }
 .np-mark { display: none }
 body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; font-weight: 800 } body.narrow .needs-pill { padding: 0 9px } /* phone: the Needs you pill matters more than the counts */
 #planSel { display: none !important; } /* keeps the value, the change event and the test hook; #planPick is what people see */
-#planPick { position: relative; flex: 0 1 auto; min-width: 0; }
+#planPick { position: relative; flex: 0 1 auto; min-width: 120px; max-width: 320px; }
 #planPick[hidden] { display: none; }
-#planBtn { display: flex; align-items: center; gap: 8px; height: 28px; max-width: 320px; padding: 0 9px 0 11px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 13px var(--font); cursor: pointer; transition: border-color .15s, background .15s; }
+#planBtn { display: flex; align-items: center; gap: 8px; height: 28px; max-width: 100%; padding: 0 9px 0 11px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 13px var(--font); cursor: pointer; transition: border-color .15s, background .15s; }
 #planBtn:hover, #planBtn[aria-expanded="true"] { border-color: var(--sel); background: var(--raise); }
 #planBtn .pp-cap { color: var(--faint); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
 #planBtn .pp-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -70,8 +70,6 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #stagewrap { flex: 1; min-height: 420px; background: var(--stage); display: flex; align-items: center; justify-content: center; }
 #stage { position: relative; overflow: hidden; background: var(--stage); }
 #room { position: absolute; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
-#links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-#links path { fill: none; stroke: var(--sel); stroke-opacity: 0.75; }
 #sprites { position: absolute; inset: 0; pointer-events: none; z-index: 1; } /* own stacking context: depth-sorted sprite z values never rise above plates */
 #sprites .px-sprite { position: absolute; }
 .desk { position: absolute; background-repeat: no-repeat; image-rendering: pixelated; pointer-events: none; }
@@ -90,7 +88,6 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 .plate.compact .p-name { font-size: 12px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
 .plate.compact .p-sub { font-size: 10.5px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
 .plate.compact .p-badge { right: -6px; top: -6px; width: 15px; height: 15px; font: 700 10px/15px var(--font); }
-#links path.lk-hover { stroke: var(--faint); stroke-opacity: 0.6; stroke-width: 1; stroke-dasharray: 4 4; }
 #overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #overflow[hidden] { display: none; }
 .ov-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border-2); color: var(--fg); font: 650 13px var(--font); cursor: pointer; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); }
@@ -189,7 +186,6 @@ body.no-motion #lamp { display: none; }
 .st-row.st-artist { border-left-color: var(--artist); }
 .st-row.st-reviewer { border-left-color: var(--reviewer); }
 body.narrow .plate { display: none !important; }
-body.narrow #links { display: none; }
 body.narrow #overflow { left: 0; right: 0; bottom: 0; align-items: stretch; gap: 0; }
 body.narrow .ov-pill { width: 100%; justify-content: center; height: 34px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
 body.narrow .ov-list { max-width: none; border-radius: 0; border-left: 0; border-right: 0; }
@@ -229,7 +225,6 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
 <main id="stagewrap">
   <div id="stage">
     <img id="room" src="/assets/workshop.png" alt="" aria-hidden="true">
-    <svg id="links" aria-hidden="true"></svg>
     <div id="sprites"></div>
     <div id="fx" aria-hidden="true"><div id="lamp"></div></div>
     <div id="plates">
@@ -694,14 +689,18 @@ function planBucket(lanes) {
 function bucketBadge(b) { return '<span class="ca-badge s-' + BUCKET_TONE[b] + '">' + BUCKET_WORD[b] + "</span>"; }
 // How a lane finished, for the plan outcome card. Continued lanes live on in their follow-up and are not counted.
 const OUTCOME = {
+  attention: { word: "Needs you", color: "var(--bad)" },
+  running: { word: "Running", color: "var(--builder)" },
   done: { word: "Done", color: "var(--run)" },
-  handled: { word: "Failed, handled by the lead", color: "var(--amber)" },
+  handled: { word: "Handled by the lead", color: "var(--amber)" },
   stopped: { word: "Stopped", color: "var(--bad)" },
   dropped: { word: "Dropped, never started", color: "var(--faint)" },
   notrun: { word: "Never ran", color: "var(--faint)" },
   continued: { word: "Continued in a later lane", color: "var(--border-2)" },
 };
 function laneOutcome(l) {
+  const b = laneBucket(l);
+  if (b === "attention" || b === "running") return b;
   const r = l.result || "";
   if (r === "done") return "done";
   if (r === "continued") return "continued";
@@ -720,6 +719,8 @@ function planOutcome(lanes) {
   else { word = "Not finished"; tone = "bad"; }
   return { n, done, counted, word, tone };
 }
+// The plan's own lanes: running lanes from outside the plan join the cast but do not decide how the plan stands.
+function ownLanes() { const w = model.plan && model.plan.waves; return Array.isArray(w) && w.length ? w.flatMap((x) => x.lanes || []) : model.lanes; }
 function planBadgeHtml(lanes) {
   const b = planBucket(lanes);
   if (b !== "ended") return bucketBadge(b);
@@ -730,14 +731,11 @@ function outcomeCard(lanes) {
   const b = planBucket(lanes), o = planOutcome(lanes);
   const head = b === "ended" ? "Plan finished" : "Plan " + BUCKET_WORD[b].toLowerCase();
   const big = b === "ended" ? o.word : BUCKET_WORD[b];
-  const bucketsN = {}; for (const l of lanes) { const k = laneBucket(l); bucketsN[k] = (bucketsN[k] || 0) + 1; }
-  const live = b === "ended" ? "" : '<div class="hc-sec">' + ["attention", "running"].filter((k) => bucketsN[k]).map((k) =>
-    `<div class="hc-row"><span class="hc-sw" style="background:var(--${k === "running" ? "run" : "bad"})"></span><span class="hc-l">${BUCKET_WORD[k]}</span><span class="hc-v">${bucketsN[k]}</span></div>`).join("") + "</div>";
   const rows = Object.keys(OUTCOME).filter((k) => o.n[k]).map((k) =>
     `<div class="hc-row"><span class="hc-sw" style="background:${OUTCOME[k].color}"></span><span class="hc-l">${OUTCOME[k].word}</span><span class="hc-v">${o.n[k]}</span></div>`).join("");
-  const bar = o.counted > 0 ? '<div class="hc-bar">' + ["done", "handled", "stopped", "notrun"].filter((k) => o.n[k]).map((k) =>
+  const bar = o.counted > 0 ? '<div class="hc-bar">' + ["attention", "running", "done", "handled", "stopped", "notrun"].filter((k) => o.n[k]).map((k) =>
     `<span style="width:${(100 * o.n[k]) / o.counted}%;background:${OUTCOME[k].color}"></span>`).join("") + "</div>" : "";
-  return `<div class="hc-kicker">${head}</div><div class="hc-big">${CAUI.esc(big)}<small>${lanes.length} lane${lanes.length === 1 ? "" : "s"}</small></div>${bar}${live}${rows ? '<div class="hc-sec">' + rows + "</div>" : ""}`;
+  return `<div class="hc-kicker">${head}</div><div class="hc-big">${CAUI.esc(big)}<small>${lanes.length} lane${lanes.length === 1 ? "" : "s"}</small></div>${bar}${rows ? '<div class="hc-sec">' + rows + "</div>" : ""}`;
 }
 function tokenCard(p) {
   const total = CAUI.tokenTotal(p.tokens);
@@ -765,7 +763,7 @@ function renderTop() {
   $("nowLine").textContent = now ? "Now: " + now : "";
   $("leadChip").hidden = !leadName(p);
   $("leadChip").textContent = leadName(p);
-  const badgeHtml = planBadgeHtml(model.lanes);
+  const badgeHtml = planBadgeHtml(ownLanes());
   if ($("statusBadge").innerHTML !== badgeHtml) $("statusBadge").innerHTML = badgeHtml;
   const attn = model.lanes.filter((l) => laneBucket(l) === "attention").length;
   const pill = $("needsPill");
@@ -860,7 +858,7 @@ let hoverOn = null;
 function showHoverCard(id) {
   const anchor = $(id), card = $("hoverCard");
   if (!model || !anchor || anchor.hidden || !$("planMenu").hidden) return hideHoverCard();
-  const html = id === "tokenChip" ? tokenCard(model.plan) : outcomeCard(model.lanes);
+  const html = id === "tokenChip" ? tokenCard(model.plan) : outcomeCard(ownLanes());
   if (card.innerHTML !== html) card.innerHTML = html;
   hoverOn = id; card.hidden = false;
   placeFloat(card, anchor, "center");
@@ -1143,22 +1141,6 @@ function renderHotDesks() {
   }
   if (hotLookDirty) { hotLookDirty = false; layoutStations(); }
 }
-let hoverHot = null;
-function renderLinks() {
-  const lead = SCENE.stations.lead.foot;
-  let d = "";
-  for (const stKey of WORKER_STATIONS) {
-    if (!stationLane[stKey]) continue;
-    const f = SCENE.stations[stKey].foot;
-    d += "M" + (ox + lead[0] * k) + "," + (oy + (lead[1] + 34) * k) + "H" + (ox + f[0] * k) + "V" + (oy + (f[1] + 34) * k);
-  }
-  let hover = "";
-  if (hoverHot) {
-    const hd = SCENE.hotdesks.find((h) => h.key === hoverHot);
-    if (hd) { const f = hd.foot; hover = '<path class="lk-hover" d="M' + (ox + lead[0] * k) + ',' + (oy + (lead[1] + 34) * k) + 'H' + (ox + f[0] * k) + 'V' + (oy + (f[1] + 34) * k) + '"></path>'; }
-  }
-  $("links").innerHTML = (d ? '<path d="' + d + '" stroke-width="' + Math.max(1, 1.5 * k).toFixed(2) + '"></path>' : "") + hover;
-}
 function layoutStations() {
   const a = PixelSprites.anchor();
   const sc = spriteScale();
@@ -1221,7 +1203,6 @@ function layoutStations() {
       plate.style.top = (oy + (f[1] + 34) * k) + "px";
     }
   }
-  renderLinks();
   if (!$("win").hidden) positionWin();
 }
 function ovRank(l) { return isNeedsYou(l) ? 0 : l.running ? 1 : 2; }
@@ -1341,8 +1322,6 @@ async function initSprites() {
     hit.setAttribute("aria-hidden", "true");
     hit.style.display = "none";
     hit.addEventListener("click", (ev) => { const id = hotSeat[hd.key]; if (id) winHooks.open(id, $("plate-" + hd.key), ev.detail === 0); });
-    hit.addEventListener("mouseenter", () => { hoverHot = hd.key; renderLinks(); });
-    hit.addEventListener("mouseleave", () => { if (hoverHot === hd.key) { hoverHot = null; renderLinks(); } });
     hotHits[hd.key] = hit;
     $("sprites").appendChild(hit);
     const plate = document.createElement("button");
@@ -1354,8 +1333,6 @@ async function initSprites() {
     plate.setAttribute("aria-expanded", "false");
     plate.innerHTML = '<b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span>';
     plate.addEventListener("click", (ev) => { const id = hotSeat[hd.key]; if (id) winHooks.open(id, plate, ev.detail === 0); });
-    plate.addEventListener("mouseenter", () => { hoverHot = hd.key; renderLinks(); });
-    plate.addEventListener("mouseleave", () => { if (hoverHot === hd.key) { hoverHot = null; renderLinks(); } });
     plate.querySelector(".p-badge").addEventListener("click", (ev) => {
       ev.stopPropagation();
       const id = hotSeat[hd.key];

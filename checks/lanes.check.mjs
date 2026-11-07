@@ -139,11 +139,11 @@ try {
   check('finished step flashes between polls', flashed === '1', String(flashed));
   let gone = false; for (let i = 0; i < 16 && !gone; i++) { await wait(500); gone = (await ev('document.querySelectorAll(".steprow.flash").length')) === 0; }
   check('flash clears on the next render', gone);
-  await ev('localStorage.setItem("ca-motion","off")');
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await send('Page.navigate', { url: base + '/?demo=1&advance=1#/lane/demo-repo--office-layout' }); await wait(1000);
   let sawFlash = false; for (let i = 0; i < 24; i++) { await wait(500); if ((await ev('document.querySelectorAll(".steprow.flash").length')) > 0) { sawFlash = true; break; } }
   check('reduced motion skips the flash', !sawFlash);
-  await ev('localStorage.removeItem("ca-motion")');
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   // desktop action bar: sticky at the scrollport bottom, opaque, 80 px of pad above it
   await size(1586, 992); await send('Page.navigate', { url: base + '/?demo=1#/lane/demo-repo--office-layout' }); await wait(1500);
   const bar = JSON.parse(await ev('(function(){const b=document.getElementById("bar"),p=document.querySelector(".pad.has-bar"),v=document.getElementById("view");if(!b)return "{}";const r=b.getBoundingClientRect();const cs=getComputedStyle(b);return JSON.stringify({pos:cs.position,bg:cs.backgroundColor,top:Math.round(r.top),bottom:Math.round(r.bottom),ih:window.innerHeight,pad:p?getComputedStyle(p).paddingBottom:"",vpad:getComputedStyle(v).paddingBottom});})()') || '{}');
