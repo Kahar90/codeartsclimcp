@@ -25,7 +25,8 @@
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
 //        ca setup <harness> [repo] [--user]   write MCP + rules config for claude|kiro|cursor|codex|vscode|opencode
 //        ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]   guided first-run setup
-//        ca update [--dry-run]   reinstall the latest version and refresh every harness config
+//        ca update [--check] [--json] [--dry-run]   reinstall the latest version and refresh every
+//                                  harness config; --check only reports whether a newer one exists
 //        ca uninstall [--harness h] [--keys] [--dry-run]   remove exactly what setup added (and the keys with --keys)
 //        ca auth [--wait [--timeout S]] [--status] [--stdin] [--no-open] [--json]   keys via a local browser form, never through chat
 //        ca workflow                       print the lead workflow (docs/workflow.md)

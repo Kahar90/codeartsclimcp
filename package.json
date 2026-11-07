@@ -12,6 +12,7 @@
     "docs",
     "bin",
     "scripts",
+    "CHANGELOG.md",
     "!docs/images"
   ],
   "engines": {

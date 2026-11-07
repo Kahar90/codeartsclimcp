@@ -14,6 +14,8 @@ summaries, not transcripts.
   they agree): otherwise the lane's first step commits them together with its change, and the
   reviewer reports them as rewritten. Never commit `.env` files or secrets.
 - Know the repo's check commands (tests, typecheck, lint); if there are none, plan a step that adds one.
+- `ca_update_check {}` reports whether a newer codearts-lanes exists; if so, tell the user once and
+  offer `ca_update` (it reinstalls, then they restart the agent and any open dashboard).
 
 ## 2. Plan
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.
