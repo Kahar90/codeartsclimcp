@@ -57,6 +57,21 @@ body.narrow #winTail { display: none; }
 #winX { margin-left: auto; flex: none; width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); font: 600 15px var(--font); cursor: pointer; padding: 0; }
 #winBody { padding: 0 18px 14px; display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; }
 #winMeta { color: var(--muted); font-size: 14px; }
+#winTokens { display: flex; flex-direction: column; gap: 5px; }
+.tk-top { display: flex; align-items: baseline; gap: 8px; }
+.tk-name { color: var(--muted); font-size: 13.5px; }
+#tkTotal { font-size: 15px; }
+.tk-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--panel-2); }
+.tk-seg { display: block; height: 100%; }
+.tk-seg.b { background: var(--builder); }
+.tk-seg.r { background: var(--reviewer); }
+.tk-seg.o { background: var(--faint); }
+.tk-legend { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 11.5px; color: var(--muted); }
+.tk-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.tk-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.tk-key.b { background: var(--builder); }
+.tk-key.r { background: var(--reviewer); }
+.tk-key.o { background: var(--faint); }
 #winCont { color: var(--muted); font-size: 13.5px; }
 #winGoal { color: var(--fg); }
 #winNow { color: var(--fg); opacity: 0.82; padding: 8px 10px; background: var(--panel-2); border-left: 3px solid var(--sel); border-radius: 6px; }
@@ -149,6 +164,11 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
       </div>
       <div id="winBody">
         <div id="winMeta"></div>
+        <div id="winTokens" hidden>
+          <div class="tk-top"><span class="tk-name">Tokens</span><b id="tkTotal"></b></div>
+          <div class="tk-bar" id="tkBar" aria-hidden="true"></div>
+          <div class="tk-legend" id="tkLegend"></div>
+        </div>
         <div id="winCont" hidden></div>
         <div id="winGoal" hidden></div>
         <div id="winNow" hidden></div>
@@ -772,12 +792,26 @@ function syncComposer(l) {
   $("winInput").disabled = !run;
   $("winSend").disabled = !run || sendInFlight;
 }
+function renderTokensRow(tokens, by) {
+  const total = CAUI.tokenTotal(tokens);
+  const row = $("winTokens");
+  if (!total) { row.hidden = true; return; }
+  row.hidden = false;
+  row.title = CAUI.tokenDetail(tokens);
+  $("tkTotal").textContent = CAUI.fmtTokens(total);
+  const parts = CAUI.tokenSplit(by);
+  const sum = parts.reduce((a, p) => a + p.total, 0) || 1;
+  const cls = (r) => (r === "build" ? "b" : r === "review" ? "r" : "o");
+  $("tkBar").innerHTML = parts.map((p) => '<i class="tk-seg ' + cls(p.role) + '" style="width:' + (p.total / sum) * 100 + '%"></i>').join("");
+  $("tkLegend").innerHTML = parts.filter((p) => p.total > 0).map((p) => '<span><i class="tk-key ' + cls(p.role) + '"></i>' + CAUI.esc(p.label) + " " + CAUI.fmtTokens(p.total) + "</span>").join("");
+}
 function renderWinContent(keepInput) {
   if (winFor === "lead") {
     const p = model.plan;
     $("winTitle").textContent = p.lead || "Lead";
     $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
     $("winMeta").textContent = "Orchestrator";
+    renderTokensRow(p.tokens, p.tokensBy);
     $("winCont").hidden = true;
     $("winGoal").hidden = !p.goal;
     $("winGoal").textContent = p.goal || "";
@@ -796,6 +830,7 @@ function renderWinContent(keepInput) {
   $("winBadge").innerHTML = CAUI.badge(CAUI.status(l.health));
   const mm = l.models && (l.models.build || Object.values(l.models)[0]);
   $("winMeta").textContent = [mm ? CAUI.shortModel(mm) : "", pr.total ? pr.done + " / " + pr.total + " steps" : ""].filter(Boolean).join(" \u00b7 ");
+  renderTokensRow(l.tokens, l.tokensBy);
   const c0 = (l.continues || [])[0];
   $("winCont").hidden = !c0;
   if (c0) $("winCont").textContent = "Run " + (l.runs || l.continues.length + 1) + " \u00b7 continues " + (c0.task || c0.id) + " (paused at " + ((c0.progress && c0.progress.done) || 0) + "/" + ((c0.progress && c0.progress.total) || 0) + ")";
