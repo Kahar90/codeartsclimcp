@@ -64,7 +64,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
-import { laneActions, laneBucket } from './controls.mjs';
+import { laneActions, laneBucket, laneKind } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -847,6 +847,15 @@ function bucketFor(l) {
   return r;
 }
 function bucketOf(l) { return bucketFor(l).bucket; }
+// Lane kind for the Office characters; the brief is read once per change (mtime), not on every poll.
+const kindCache = new Map();
+function kindOf(l) {
+  const bf = path.join(l.repo || '', 'tasks', `${l.task}.md`); let mt = 0; try { mt = fs.statSync(bf).mtimeMs; } catch {}
+  const key = `${mt}|${(l.s.files || []).length}`; const c = kindCache.get(l.id);
+  if (c && c.key === key) return c.kind;
+  let brief = ''; try { brief = fs.readFileSync(bf, 'utf8'); } catch {}
+  const kind = laneKind({ task: l.task, brief, files: l.s.files || [] }); kindCache.set(l.id, { key, kind }); return kind;
+}
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
   return { lane: l.id, bucket: bucketOf(l), health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
@@ -1326,7 +1335,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
-    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
+    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1387,6 +1396,7 @@ function planView(r) {
       progress: { done: 0, total: briefSteps(bf).length, current: null } };
     // "dropped": true marks a planned lane the lead decided not to run; it never counts as open work.
     const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
+    if (pl.kind && ['code', 'art', 'review', 'docs'].includes(String(pl.kind).toLowerCase())) v.kind = String(pl.kind).toLowerCase(); // plan override
     return { ...v, ...d, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
   });
   const byTask = new Map(planned.map((x) => [x.task, x]));
