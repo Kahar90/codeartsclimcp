@@ -836,7 +836,7 @@ function crSection(b, ls) {
   if (b.key === 'attention') {
     const old = crOldLanes(ls), fresh = ls.filter((l) => !crIsOld(l));
     body = fresh.map(crRow).join('');
-    if (old.length) body += `<div class="cr-old"><div class="cr-old-row"><button type="button" class="cr-old-h" data-crold="1" aria-expanded="${crOldOpen}"><span class="tri">&#9654;</span>Older than 2 days<span class="cnt">${old.length}</span></button><button type="button" class="btn tiny" data-ack-stale="1" title="Mark every lane in this group handled: they move to Ended with your note">Mark all handled</button></div>${crOldOpen ? old.map(crRow).join('') : ''}</div>`;
+    if (old.length) body += `<div class="cr-old"><div class="cr-old-row"><button type="button" class="cr-old-h" data-crold="1" aria-expanded="${crOldOpen}"><span class="tri">&#9654;</span>Older than 2 days<span class="cnt">${old.length}</span></button><button type="button" class="btn tiny" data-ack-stale="1" title="Mark every lane in this group handled: they move to Ended with your note">Mark all handled</button></div><div class="cr-old-body"${crOldOpen ? '' : ' hidden'}>${old.map(crRow).join('')}</div></div>`;
   }
   if (!ls.length) body = '<div class="small" style="padding:10px 14px">none</div>';
   return `<section class="cr-sec" data-bucket="${b.key}"><button type="button" class="cr-sec-h" data-crsec="${b.key}" aria-expanded="${open}"><span class="tri">&#9654;</span>${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></button>${open ? body : ''}</section>`;
