@@ -823,6 +823,7 @@ function assignHot() {
 function setStation(key, opts) {
   const plate = $("plate-" + key);
   const sp = sprites[key] || hotSprites[key];
+  if (!plate) { if (sp) sp.el.style.display = opts ? "" : "none"; return; }
   const badge = plate.querySelector(".p-badge");
   if (!opts) {
     plate.style.display = "none";
