@@ -47,7 +47,8 @@ Make a change, run the check, read its output. Do not reason for a long time wit
    set. Cache the result by file mtime. planView adds `lead: { tokensByModel }` and merges it into tokensByModel and
    tokens (total includes cacheWrite) with each entry marked `who: 'lead' | 'worker'`. New CLI `ca lead-tokens
    [--plan id] [--session file]` sets leadSession on the plan (default session: newest .jsonl in
-   ~/.claude/projects/<cwd with : \ / replaced by ->/) and prints the per-model totals. UI: a "Tokens by model" table
+   ~/.claude/projects/<cwd with every char that is not a letter, digit or - replaced by ->/, for example
+   D--Coding-codearts-testing) and prints the per-model totals. UI: a "Tokens by model" table
    on the plan home and the Control room (model short name, lead or worker tag, total, in / out / cache) sorted by
    total, plus the same per lane in lane detail; the Office top bar Tokens pill title lists the per-model lines.
    Add asserts to checks/overview.check.mjs with a small fake transcript (duplicate message ids counted once). Commit.
