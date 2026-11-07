@@ -242,6 +242,7 @@ async function runLane(repoArg, task, opts = {}) {
   if (!resumed) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
   fs.rmSync(path.join(dir, 'KICK'), { force: true }); // a stale kick must not fire at once on resume
+  fs.rmSync(path.join(dir, 'STOP'), { force: true }); // nor the STOP that ended the previous run (resume after ca stop)
   fs.mkdirSync(REG, { recursive: true });
   fs.writeFileSync(path.join(REG, `${id}.json`), JSON.stringify({ id, dir, repo, task }, null, 2));
 
