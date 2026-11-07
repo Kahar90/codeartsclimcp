@@ -23,8 +23,10 @@
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
-//        ca setup <harness> [repo]   write MCP + rules config for claude|kiro|cursor|codex|vscode|opencode
+//        ca setup <harness> [repo] [--user]   write MCP + rules config for claude|kiro|cursor|codex|vscode|opencode
 //        ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]   guided first-run setup
+//        ca auth [--wait [--timeout S]] [--status] [--stdin] [--no-open] [--json]   keys via a local browser form, never through chat
+//        ca workflow                       print the lead workflow (docs/workflow.md)
 //        ca mcp                            run the MCP server (runner/mcp.mjs), if installed
 //        ca tail <lane> [-f] [-n N]        readable transcript
 //        ca steer <lane> <message>         queue a message into the running session
@@ -51,13 +53,19 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
+import authCmd, { readCreds } from './auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
 const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
 // CodeArts settings.json (security.trustedFolders). CA_SETTINGS overrides the location for tests.
 const SETTINGS = process.env.CA_SETTINGS || path.join(CA_HOME, 'cli-data', 'settings.json');
-const EXE = process.env.CODEARTS_EXE || path.join(CA_HOME, 'installers', 'bin', 'codearts.exe');
+const EXE = process.env.CODEARTS_EXE || path.join(CA_HOME, 'installers', 'bin', process.platform === 'win32' ? 'codearts.exe' : 'codearts');
+// Official CodeArts Agent CLI installer (also used by `ca onboard` to install it).
+const INSTALL_BASE = 'https://apsoutheast1-cloudide-marketplace.obs.ap-southeast-1.myhuaweicloud.com/codearts/cli_tui/install_script';
+const INSTALL_HINT = process.platform === 'win32'
+  ? `PowerShell: irm ${INSTALL_BASE}/install.ps1 | iex   (or: ca onboard --yes)`
+  : `curl -fsSL ${INSTALL_BASE}/install.sh | bash   (or: ca onboard --yes)`;
 const REG = process.env.CA_REGISTRY || path.join(CA_HOME, 'lanes');
 const num = (k, d) => (process.env[k] ? Number(process.env[k]) : d);
 const HAS_MAAS = () => !!userEnv('MAAS_API_KEY');
@@ -92,6 +100,8 @@ const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding
 const envCache = {};
 function userEnv(name) {
   if (process.env[name]) return process.env[name];
+  const saved = readCreds()[name]; // `ca auth` keys (user-only file)
+  if (saved) return saved;
   if (name in envCache) return envCache[name];
   if (process.platform !== 'win32') return '';
   try { return (envCache[name] = execFileSync('powershell', ['-NoProfile', '-Command', `[Environment]::GetEnvironmentVariable('${name}','User')`], { encoding: 'utf8' }).trim()); } catch { return (envCache[name] = ''); }
@@ -783,6 +793,8 @@ async function cmdSetup(args) {
   if (typeof mod.default !== 'function') die('setup.mjs has no default export', 2);
   await mod.default(args);
 }
+// `ca auth ...`: get the keys from the human through a local form (runner/auth.mjs).
+async function cmdAuth(args) { await authCmd(args); }
 // `ca onboard ...`: guided first-run setup, implemented in runner/onboard.mjs.
 async function cmdOnboard(args) {
   const f = path.join(HERE, 'onboard.mjs');
@@ -873,7 +885,7 @@ async function doctorData(repoArg) {
   const nodeMajor = Number(process.versions.node.split('.')[0]);
   add('node', nodeMajor >= 20 ? 'ok' : 'fail', `v${process.versions.node}`, nodeMajor >= 20 ? '' : 'install Node 20 or newer');
 
-  if (!fs.existsSync(EXE)) add('codearts', 'fail', `not found at ${EXE}`, 'install the CodeArts CLI');
+  if (!fs.existsSync(EXE)) add('codearts', 'fail', `not found at ${EXE}`, `install the CodeArts CLI: ${INSTALL_HINT}`);
   else {
     const r = spawnSync(EXE, ['--version'], { encoding: 'utf8', timeout: 20000, env: caEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const v = oneLine(((r.stdout || '') + ' ' + (r.stderr || '')).trim(), 120);
@@ -883,10 +895,10 @@ async function doctorData(repoArg) {
 
   const missCred = [!userEnv('CODEARTS_CLI_AK') && 'CODEARTS_CLI_AK', !userEnv('CODEARTS_CLI_SK') && 'CODEARTS_CLI_SK'].filter(Boolean);
   add('credentials', missCred.length ? 'fail' : 'ok', missCred.length ? `missing ${missCred.join(', ')}` : 'set',
-    missCred.length ? 'set CODEARTS_CLI_AK and CODEARTS_CLI_SK in the (Windows user) environment; values are never printed' : '');
+    missCred.length ? 'run: ca auth (local browser form; values are never printed)' : '');
 
   add('maas key', userEnv('MAAS_API_KEY') ? 'ok' : 'warn', userEnv('MAAS_API_KEY') ? 'set' : 'not set, falls back to CodeArts quota models',
-    userEnv('MAAS_API_KEY') ? '' : 'set MAAS_API_KEY to use the MaaS models');
+    userEnv('MAAS_API_KEY') ? '' : 'ca auth --force adds MAAS_API_KEY for the MaaS models');
 
   const g = spawnSync('git', ['--version'], { encoding: 'utf8' });
   add('git', g.status === 0 ? 'ok' : 'fail', oneLine(((g.stdout || '') + (g.stderr || '')).trim(), 120) || 'git not found', g.status === 0 ? '' : 'install git');
@@ -1154,7 +1166,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();

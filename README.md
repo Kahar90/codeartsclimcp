@@ -1,133 +1,78 @@
 # CodeArts lanes
 
-Coding agents: start with [AGENTS.md](AGENTS.md) for setup on any harness and model.
+**Hand coding work to the Huawei CodeArts agent from the coding agent you already use.**
 
-Delegate coding work to the Huawei CodeArts agent from the tools you already use. Your
-lead agent (Claude Code, Kiro, Cursor, Codex, VS Code, or you in a shell) plans and writes a
-short brief; a CodeArts **lane** writes the code in your git repo, commits each step, runs your
-checks, fixes what fails and gets a read-only review. You read one summary and decide.
+Your agent (Claude Code, Kiro, Cursor, Codex, opencode, VS Code) plans the work. A CodeArts
+**lane** writes the code in your repo, commits each step, runs your tests, fixes what fails
+and gets a review. You read one summary and decide.
 
-- **Reliable:** a watchdog tells running from stuck (STALLED, DEAD), resumes stalled sessions,
-  backs off on model-service errors, restarts a crashed server, and never answers permission
-  prompts or questions by hanging.
-- **Honest:** your `CHECK:` commands run by the runner itself when the agent says it is done;
-  failures go back to the agent (up to 3 rounds); uncommitted work is never reported as done.
-- **Informative:** `ca status`, `ca wait` with exit codes, `--json` everywhere, a live dashboard
-  and an animated Office view (who is working on what, step by step).
-- **Works with any harness:** one MCP server (`ca mcp`) plus rules files, set up with one command.
+![The Office view: the lead, builder and reviewer at work, with a live lane window](docs/images/office.png)
 
-## Quickstart (3 commands)
+## Set it up in one prompt
 
-```sh
-npm install -g github:Kahar90/codeartsclimcp   # puts `ca` on PATH (Node 20+, no dependencies)
-cd your-repo
-ca onboard --yes                                # checks, fixes, detects your harness, configures it
+Open your coding agent in your project and send this:
+
+```text
+Set up CodeArts lanes in this repo by following
+https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md
 ```
 
-`ca onboard` checks Node, the CodeArts CLI, credentials, git and folder trust, fixes what it
-safely can (trusted folder, `git init`), detects your harness from `.kiro/`, `.cursor/`,
-`.claude/`, `opencode.json`, `AGENTS.md` or `.vscode/`, writes its MCP config and rules, and prints the first
-prompt to type. Without `--yes` it asks before each fix; in a terminal it can also take your
-AK/SK with hidden input. Add `--smoke` to run a 25 s probe lane. `--dry-run` shows the plan.
+That's it. Your agent installs everything, connects itself and runs a short test lane.
 
-Prerequisites it will point you to if missing:
-- CodeArts Agent CLI (`~/.codeartsdoer/installers/bin/codearts.exe`).
-- `CODEARTS_CLI_AK` / `CODEARTS_CLI_SK` (from
-  https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth) in your user env.
-- Optional `MAAS_API_KEY` (Huawei Cloud ModelArts MaaS) for the faster builder models; without
-  it lanes use your CodeArts quota models.
+**Your only step:** a browser tab opens and asks for your Huawei Cloud keys. Create an AK/SK at
+[CodeArts CLI auth settings](https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth),
+paste them in and click Save. The keys stay on your computer and never go through the chat.
 
-## Use it from your harness
+<img src="docs/images/keys-form.png" alt="The local keys form" width="420">
 
-| Harness | Setup | Start | Verified |
-|---|---|---|---|
-| Kiro | `ca setup kiro` writes `.kiro/settings/mcp.json` (read-only tools in `autoApprove`) + `.kiro/steering/codearts-lanes.md` (manual) | In chat: `#codearts-lanes` and your goal | format checked against kiro.dev docs |
-| Cursor | `ca setup cursor` writes `.cursor/mcp.json` + `.cursor/rules/codearts-lanes.mdc` | In chat: `@codearts-lanes` and your goal (or let the agent pick the rule) | format checked against cursor.com docs |
-| Claude Code | `ca setup claude` writes `.mcp.json` (or `claude mcp add -s user codearts -- node <ca.mjs> mcp`) | `/codearts-build <goal>` (skill) or the `codearts_build` MCP prompt | real client run |
-| Codex | `ca setup codex --write` appends `[mcp_servers.codearts]` (read-only tools pre-approved) to `~/.codex/config.toml`, adds an AGENTS.md section | Ask it to follow the CodeArts lanes section | real `codex exec` run |
-| opencode | `ca setup opencode` writes `opencode.json` (`mcp.codearts`) + an AGENTS.md section | Ask it to follow the CodeArts lanes section | real `opencode run` |
-| VS Code | `ca setup vscode` writes `.vscode/mcp.json` (VS Code also reads the root `.mcp.json` from `ca setup claude`) | Agent mode chat, codearts tools | format checked against code.visualstudio.com docs |
-| Shell / CI | nothing | `ca init`, `ca lane --detach`, `ca wait` (below) | contract checks |
+You need a Huawei Cloud account with CodeArts access. Everything else (Node check, the
+CodeArts CLI, git, config) the agent handles.
 
-Every setup merges into existing config (other servers and keys are kept), is safe to rerun,
-and supports `--dry-run`. Read-only tools (`ca_status`, `ca_summary`, `ca_tail`, `ca_wait`,
-`ca_doctor`) are auto-approved in Kiro; starting, steering and stopping lanes ask first.
+## Use it
 
-MCP tools: `ca_doctor`, `ca_init`, `ca_lane_start`, `ca_status`, `ca_wait`, `ca_summary`,
-`ca_tail`, `ca_steer`, `ca_stop`, `ca_plan`, `ca_note`, plus the prompt `codearts_build` (the
-lead workflow in `docs/workflow.md`).
+Restart your coding agent once after setup, then ask for what you want built:
 
-## Your first lane in 5 minutes (shell)
-
-```sh
-ca init . add-health-endpoint --goal "Add GET /health returning {ok:true} with a test"
-# edit tasks/add-health-endpoint.md: at most 8 numbered steps, and your check commands:
-#   CHECK: npm test
-ca lane . add-health-endpoint --detach     # returns at once; log in tasks/add-health-endpoint.lane.log
-ca wait add-health-endpoint                 # progress lines, then CA_RESULT {...}; exit code = result
-ca summary add-health-endpoint              # commits, gates, review, VERDICT
-```
-
-Watch live at http://127.0.0.1:4777 (Lanes view) or http://127.0.0.1:4777/office (Office view),
-or `ca attach <lane>` for the CodeArts TUI on the live session (typing there steers it).
-Change course mid-run with `ca steer <lane> "also handle HEAD requests"`; stop with `ca stop <lane>`.
-
-## Commands
-
-| Command | What it does |
+| Your agent | Type |
 |---|---|
-| `ca onboard [--harness h] [--repo d] [--yes] [--smoke] [--dry-run] [--json]` | guided first-run setup |
-| `ca doctor [--json] [repo]` | preflight: node, codearts, credentials, MaaS key, git, trust, shell, dashboard |
-| `ca setup <harness> [repo] [--dry-run] [--write]` | MCP + rules config for claude, kiro, cursor, codex, opencode, vscode |
-| `ca init <repo> <task> [--goal ..] [--force]` | scaffold `tasks/<task>.md` from the brief template |
-| `ca lane <repo> <task> [--detach]` | run a lane (foreground, or detached with a log file) |
-| `ca wait <lane...> [--timeout S] [--json] [--quiet]` | block until lanes finish; exit code = worst result |
-| `ca status [--json] [--all]` | one row per lane: health, phase, step, idle, verdict, now |
-| `ca summary <lane> [--json]` | the lane summary (commits, gates, review, VERDICT) |
-| `ca tail <lane> [-f] [-n N]` | readable transcript |
-| `ca steer <lane> <message>` | queue a message into the running session |
-| `ca attach <lane>` | CodeArts TUI on the live session |
-| `ca stop <lane>` | abort the session and end the lane |
-| `ca dash [port]` | dashboard (starts on demand) |
-| `ca plan [plan.json]`, `ca note [--now] <text>` | show the lead plan and decisions on the dashboard |
-| `ca plan list`, `ca plan close [id] [--reason t]`, `ca plan rm <id>` | plan state from real lanes (Running, Waiting with idle time, Done, Closed); close marks never-started lanes Dropped; rm unregisters |
-| `ca mcp` | MCP stdio server |
-| `ca gc` | forget lanes finished more than 3 days ago |
+| Claude Code | `/codearts-build add a /health endpoint with a test` |
+| Kiro | `#codearts-lanes add a /health endpoint with a test` |
+| Cursor | `@codearts-lanes add a /health endpoint with a test` |
+| Codex, opencode, VS Code | `Use CodeArts lanes to add a /health endpoint with a test` |
 
-Exit codes: `0` done (review ready or skipped), `1` failed / stopped / killed, `2` usage or
-unknown lane, `3` missing credentials, `4` needs review, `124` wait timeout. Lanes and `ca wait`
-also print a machine-readable line: `CA_RESULT {"lane":..,"result":..,"verdict":..,"exit":..,"summaryPath":..}`.
+Your agent splits the goal into small steps, starts one or more lanes, waits, checks the
+result and reports back with what was built, the commits and the review verdict.
 
-## Lane health
+## Watch it work
 
-| Health | Meaning | What to do |
-|---|---|---|
-| running / running tool | working, events in the last minute | nothing |
-| quiet | no events for 60 s (normal model gaps are 5 to 15 s) | wait |
-| STALLED | silent past STALL_S (240 s) or one tool over 900 s | nothing: the watchdog aborts and resumes |
-| DEAD | supervisor process gone | `ca stop <lane>` cleans up, then rerun |
-| done / needs review / failed / stopped | finished | `ca summary <lane>` |
+Open **http://127.0.0.1:4777** while lanes run. The Office view (above) shows who is working on
+what, step by step; the Lanes view has the plan, every lane's progress, the transcript and a
+box to steer a lane mid-run.
 
-## Troubleshooting
+![The Lanes view: plan, waves, current step and decisions](docs/images/lanes.png)
 
-Run `ca doctor`; every failing row has a fix line. Common ones:
-- **credentials missing** (exit 3): set `CODEARTS_CLI_AK` / `CODEARTS_CLI_SK` in your user env
-  (`ca onboard` can do it), then open a new terminal.
-- **Folder not trusted**: `ca onboard --yes` adds the repo to CodeArts trusted folders.
-- **First bash call hangs**: SHELL points to Git's MSYS `usr/bin/bash.exe`; the runner forces
-  `Git/bin/bash.exe`, `ca doctor` shows which one it uses.
-- **Model service timeouts**: lanes back off 2, 4, 6 minutes and resume; see `interruptions` in
-  the summary.
+## Why it is safe to leave running
 
-Env knobs: `BUILD_MODEL`, `REVIEW_MODEL`, `STALL_S`, `TOOL_STALL_S`, `THINK_S`, `MAX_RETRIES`, `MAX_FIXES`,
-`CHECK_TIMEOUT`, `LANE_TIMEOUT`, `NO_REVIEW=1`, `CA_DASH=0`, `CA_DASH_PORT`, `CA_REGISTRY`.
+- **Checked, not trusted:** your test commands are run by the runner itself when the agent
+  says it is done. Failures go back to the agent (up to 3 rounds), and uncommitted work is
+  never reported as done.
+- **Never silently stuck:** a watchdog tells running from stuck, resumes stalled sessions and
+  backs off when the model service has problems.
+- **Reviewed:** a separate read-only reviewer reads every lane's work before you see it.
+- **You stay in control:** starting, steering and stopping lanes ask for your approval;
+  everything is a normal git commit you can inspect or revert.
 
 ## Privacy
 
-Your code and briefs go to Huawei Cloud models. Credentials stay in your environment and are
-never written to the repo or printed. Lane state lives in `tasks/<task>.lane/` (gitignored).
+Your code and task briefs are sent to Huawei Cloud models. Your keys stay on your computer (in
+a file only your user can read) and are never written to the repo or shown to the agent.
 
-## Development
+## More
 
-`npm run check` runs every contract check in `checks/` (fake lanes, no paid model calls;
-the Office checks drive headless Chrome).
+- [Manual setup](docs/manual-setup.md): run the setup commands yourself (or for CI).
+- [Reference](docs/reference.md): every command, exit codes, lane health, models,
+  troubleshooting.
+- [Lead workflow](docs/workflow.md): how the agent plans, briefs and verifies lanes.
+- [AGENTS.md](AGENTS.md) and [INSTALL.md](INSTALL.md): instructions written for coding agents.
+
+Contributing: `npm run check` runs every contract check in `checks/` (fake lanes, no paid model
+calls; the Office checks need Chrome). Node ESM, no dependencies.

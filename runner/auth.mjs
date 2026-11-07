@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+// runner/auth.mjs: get the Huawei Cloud keys from the human without them ever passing
+// through the agent's chat. Called by `ca auth ...`.
+//
+//   ca auth [--no-open] [--json]   start a one-shot local form (127.0.0.1, random port, random
+//                                  token in the URL), open it in the browser, print the URL, return
+//   ca auth --wait [--timeout S]   block until the required keys are saved (exit 0) or the
+//                                  timeout passes (exit 124; run `ca auth` again)
+//   ca auth --status [--json]      which keys are set (never their values)
+//   ca auth --stdin                read KEY=VALUE lines (or a JSON object) from stdin and save them
+//
+// Keys are stored in a user-only file (CA_CREDENTIALS, default
+// ~/.config/codearts-lanes/credentials.json, mode 0600) that the runner reads after the process
+// environment, so a new terminal is never needed. Values are never printed or logged.
+import { spawn, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+export const CRED_FILE = process.env.CA_CREDENTIALS || path.join(os.homedir(), '.config', 'codearts-lanes', 'credentials.json');
+export const KEYS = ['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK', 'MAAS_API_KEY'];
+const REQUIRED = ['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK'];
+const PORTAL = 'https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth';
+
+export function readCreds() {
+  try {
+    const v = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8').replace(/^﻿/, ''));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
+}
+
+function saveCreds(values) {
+  const cur = readCreds();
+  const saved = [];
+  for (const k of KEYS) {
+    const v = typeof values[k] === 'string' ? values[k].trim() : '';
+    if (v) { cur[k] = v; saved.push(k); }
+  }
+  fs.mkdirSync(path.dirname(CRED_FILE), { recursive: true });
+  fs.writeFileSync(CRED_FILE, JSON.stringify(cur, null, 2) + '\n', { mode: 0o600 });
+  try { fs.chmodSync(CRED_FILE, 0o600); } catch {}
+  return saved;
+}
+
+// Set = in the process env, the credentials file, or (Windows) the user environment.
+// CA_CREDENTIALS_ONLY=1 looks at the credentials file alone (checks, screenshots).
+function isSet(k) {
+  if (process.env.CA_CREDENTIALS_ONLY === '1') return !!readCreds()[k];
+  if (process.env[k] || readCreds()[k]) return true;
+  if (process.platform !== 'win32') return false;
+  const r = spawnSync('powershell', ['-NoProfile', '-Command', `[bool][Environment]::GetEnvironmentVariable('${k}','User')`], { encoding: 'utf8', windowsHide: true });
+  return /true/i.test(r.stdout || '');
+}
+const status = () => Object.fromEntries(KEYS.map((k) => [k, isSet(k)]));
+const ready = (s) => REQUIRED.every((k) => s[k]);
+
+function openBrowser(url) {
+  try {
+    if (process.platform === 'win32') spawn('cmd.exe', ['/c', 'start', '""', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+    return true;
+  } catch { return false; }
+}
+
+const PAGE = (have) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CodeArts lanes keys</title><style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1d2330;--muted:#5d6678;--line:#dfe3ea;--accent:#c7000b;--ok:#1a7f37}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--fg:#e8ebf0;--muted:#9aa3b2;--line:#2e3440;--accent:#ff4d57;--ok:#4ac26b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;display:grid;place-items:center;min-height:100vh;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;max-width:460px;width:100%}
+h1{font-size:20px;margin:0 0 4px}p{color:var(--muted);margin:0 0 18px}label{display:block;font-weight:600;margin:14px 0 6px}
+small{color:var(--muted);font-weight:400}input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit}
+input:focus{outline:2px solid var(--accent);border-color:transparent}a{color:var(--accent)}
+button{margin-top:22px;width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:600 15px system-ui;cursor:pointer}
+.done{color:var(--ok);font-weight:600}.err{color:var(--accent)}
+</style></head><body><main class="card" id="c">
+<h1>Connect CodeArts lanes</h1>
+<p>Your coding agent is setting up CodeArts lanes and needs your Huawei Cloud keys. They are saved on this computer only and never shown to the agent.</p>
+<form id="f">
+<label>Access key (AK) ${have.CODEARTS_CLI_AK ? '<small>already set, leave blank to keep</small>' : ''}</label><input name="CODEARTS_CLI_AK" type="password" autocomplete="off" ${have.CODEARTS_CLI_AK ? '' : 'required'}>
+<label>Secret key (SK) ${have.CODEARTS_CLI_SK ? '<small>already set, leave blank to keep</small>' : ''}</label><input name="CODEARTS_CLI_SK" type="password" autocomplete="off" ${have.CODEARTS_CLI_SK ? '' : 'required'}>
+<p style="margin:8px 0 0"><small>Create them at <a href="${PORTAL}" target="_blank" rel="noopener">CodeArts CLI auth settings</a>.</small></p>
+<label>MaaS API key <small>optional, enables the faster builder models${have.MAAS_API_KEY ? '; already set' : ''}</small></label><input name="MAAS_API_KEY" type="password" autocomplete="off">
+<button>Save keys</button><p id="m" style="margin:12px 0 0"></p></form></main>
+<script>
+document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const m=document.getElementById('m');
+const body=Object.fromEntries(new FormData(e.target));
+try{const r=await fetch(location.pathname+'/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+if(!r.ok)throw new Error(await r.text());
+document.getElementById('c').innerHTML='<h1 class="done">Keys saved</h1><p>You can close this tab and go back to your coding agent. It continues on its own.</p>';}
+catch(err){m.className='err';m.textContent='Could not save: '+err.message;}};
+</script></body></html>`;
+
+// The detached one-shot server. Token from the env (not argv); exits after a successful save
+// or after 15 minutes.
+function serve(portFile) {
+  const token = process.env.CA_AUTH_TOKEN;
+  if (!token) process.exit(2);
+  const base = `/t/${token}`;
+  const srv = http.createServer((req, res) => {
+    const send = (code, body, type = 'text/plain') => { res.writeHead(code, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' }); res.end(body); };
+    if (req.method === 'GET' && req.url === base) return send(200, PAGE(status()), 'text/html');
+    if (req.method === 'POST' && req.url === `${base}/save`) {
+      let raw = '';
+      req.on('data', (d) => { raw += d; if (raw.length > 20000) req.destroy(); });
+      req.on('end', () => {
+        let v; try { v = JSON.parse(raw); } catch { return send(400, 'bad request'); }
+        const merged = { ...status() };
+        for (const k of REQUIRED) if (typeof v[k] === 'string' && v[k].trim()) merged[k] = true;
+        if (!ready(merged)) return send(400, 'AK and SK are both required');
+        saveCreds(v);
+        send(200, 'ok');
+        setTimeout(() => process.exit(0), 300);
+      });
+      return;
+    }
+    send(404, 'not found');
+  });
+  srv.listen(0, '127.0.0.1', () => fs.writeFileSync(portFile, String(srv.address().port)));
+  setTimeout(() => process.exit(0), 15 * 60e3).unref();
+}
+
+export default async function auth(args) {
+  const flags = new Set(args.filter((a) => a.startsWith('--')));
+  const asJson = flags.has('--json');
+  const out = (obj, line) => console.log(asJson ? JSON.stringify(obj) : line);
+
+  if (flags.has('--serve')) return serve(args[args.indexOf('--serve') + 1]);
+
+  if (flags.has('--status')) {
+    const s = status();
+    return out({ ready: ready(s), keys: s, file: CRED_FILE }, `${KEYS.map((k) => `${k}: ${s[k] ? 'set' : 'not set'}`).join('\n')}\n${ready(s) ? 'auth: ready' : 'auth: missing keys, run: ca auth'}`);
+  }
+
+  if (flags.has('--stdin')) {
+    const text = fs.readFileSync(0, 'utf8');
+    let v = {};
+    try { v = JSON.parse(text); } catch {
+      for (const ln of text.split(/\r?\n/)) { const m = ln.match(/^\s*(?:export\s+)?([A-Z_]+)\s*=\s*["']?(.*?)["']?\s*$/); if (m) v[m[1]] = m[2]; }
+    }
+    const saved = saveCreds(v);
+    const s = status();
+    out({ saved, ready: ready(s) }, `saved: ${saved.join(', ') || 'nothing'}${ready(s) ? '\nauth: ready' : '\nauth: AK and SK still missing'}`);
+    process.exitCode = ready(s) ? 0 : 3;
+    return;
+  }
+
+  if (flags.has('--wait')) {
+    const ti = args.indexOf('--timeout');
+    const timeout = Number(ti >= 0 ? args[ti + 1] : 540) || 540;
+    const t0 = Date.now();
+    while (!ready(status())) {
+      if (Date.now() - t0 > timeout * 1000) {
+        out({ ready: false, timeout: true }, 'auth: still waiting for the keys (timeout). Run `ca auth --wait` again, or `ca auth` for a new form link.');
+        process.exitCode = 124;
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    out({ ready: true }, 'auth: ready (keys saved)');
+    return;
+  }
+
+  // Default: start the form unless the keys are already there.
+  const s = status();
+  if (ready(s) && !flags.has('--force')) {
+    out({ ready: true, keys: s }, 'auth: ready (keys already set; --force opens the form anyway)');
+    return;
+  }
+  const token = crypto.randomBytes(18).toString('base64url');
+  const portFile = path.join(os.tmpdir(), `ca-auth-${process.pid}-${Date.now()}.port`);
+  const child = spawn(process.execPath, [path.join(HERE, 'ca.mjs'), 'auth', '--serve', portFile],
+    { env: { ...process.env, CA_AUTH_TOKEN: token }, detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  let port = '';
+  for (let i = 0; i < 50 && !port; i++) { await new Promise((r) => setTimeout(r, 100)); try { port = fs.readFileSync(portFile, 'utf8').trim(); } catch {} }
+  try { fs.rmSync(portFile, { force: true }); } catch {}
+  if (!port) { out({ ready: false, error: 'could not start the local form' }, 'auth: could not start the local form; use `ca auth --stdin` instead'); process.exitCode = 1; return; }
+  const url = `http://127.0.0.1:${port}/t/${token}`;
+  const opened = !flags.has('--no-open') && openBrowser(url);
+  out({ ready: false, url, opened, next: 'ca auth --wait' },
+    `auth form: ${url}\n${opened ? 'opened in the browser. ' : ''}Ask the human to paste their keys there, then run: ca auth --wait`);
+}

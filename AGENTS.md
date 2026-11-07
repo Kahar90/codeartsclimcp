@@ -12,7 +12,7 @@ and a VERDICT. You plan, wait, read the summary and verify.
 ## 1. Install (once per machine)
 
 Requirements: Node 20+, git, the CodeArts Agent CLI
-(`~/.codeartsdoer/installers/bin/codearts.exe` on Windows). No npm dependencies.
+(`~/.codeartsdoer/installers/bin/codearts.exe` on Windows; `ca onboard --yes` installs it). No npm dependencies.
 
 ```sh
 npm install -g github:Kahar90/codeartsclimcp   # puts `ca` on PATH
@@ -49,7 +49,7 @@ is safe to rerun and accepts `--dry-run`.
 
 | Harness | Command | What it writes |
 |---|---|---|
-| Claude Code | `ca setup claude` | `.mcp.json` (or `claude mcp add -s user codearts -- ca mcp`) |
+| Claude Code | `ca setup claude` (`--user`: skill for every project too) | `.mcp.json`, `.claude/skills/codearts-build/SKILL.md` (the `/codearts-build` skill), `.claude/settings.local.json` (server enabled, read-only tools allowed) |
 | Codex | `ca setup codex --write` | `[mcp_servers.codearts]` in `~/.codex/config.toml` (read-only tools pre-approved) + an AGENTS.md section |
 | Cursor | `ca setup cursor` | `.cursor/mcp.json` + `.cursor/rules/codearts-lanes.mdc` |
 | Kiro | `ca setup kiro` | `.kiro/settings/mcp.json` + `.kiro/steering/codearts-lanes.md` |
