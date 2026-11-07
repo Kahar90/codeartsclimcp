@@ -34,6 +34,7 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #links path { fill: none; stroke: var(--sel); stroke-opacity: 0.75; }
 #sprites { position: absolute; inset: 0; pointer-events: none; }
 #sprites .px-sprite { position: absolute; }
+.desk { position: absolute; background-repeat: no-repeat; image-rendering: pixelated; pointer-events: none; }
 #plates { position: absolute; inset: 0; pointer-events: none; }
 .plate { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 13px; background: var(--panel-2); border: 2px solid var(--border-2); border-radius: 9px; font: 14px/1.3 var(--font); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); color: var(--fg); cursor: pointer; text-align: center; white-space: nowrap; }
 .plate .p-name { font-weight: 700; }
@@ -233,9 +234,17 @@ const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const demoStuck = q.get("demo") === "stuck";
 const mode = q.has("demo") ? "demo" : "live";
 let STAGE_W = 1280, STAGE_H = 720;
+const HOTDESKS = [
+  { key: "hot1", role: "hot1", foot: [470, 250], prop: "hotdesk", plate: "below" },
+  { key: "hot2", role: "hot2", foot: [455, 470], prop: "hotdesk", plate: "below" },
+  { key: "hot3", role: "hot3", foot: [840, 290], prop: "hotdesk", plate: "below" },
+  { key: "hot4", role: "hot4", foot: [480, 625], prop: "hotdesk", plate: "below" },
+  { key: "hot5", role: "hot5", foot: [1010, 615], prop: "hotdesk", plate: "below" },
+];
 let SCENE = {
   stage: [1280, 720],
   stations: { lead: { foot: [292, 356] }, builder: { foot: [626, 354] }, artist: { foot: [759, 601] }, reviewer: { foot: [1036, 350] } },
+  hotdesks: HOTDESKS,
   fixture: {
     events: [
       { atMs: 1300, type: "assignment", from: "lead", to: "builder" },
@@ -256,7 +265,8 @@ async function loadScene() {
     if (!r.ok) return;
     const j = await r.json();
     if (j && Array.isArray(j.stageSize) && j.stageSize.length === 2 && j.stations && ["lead", "builder", "artist", "reviewer"].every((s) => j.stations[s] && Array.isArray(j.stations[s].foot))) {
-      SCENE = { stage: j.stageSize, stations: j.stations, fixture: j.fixture || { events: [] } };
+      const hd = Array.isArray(j.hotdesks) && j.hotdesks.length ? j.hotdesks : HOTDESKS;
+      SCENE = { stage: j.stageSize, stations: j.stations, hotdesks: hd, fixture: j.fixture || { events: [] } };
     }
   } catch (e) {}
 }
@@ -628,12 +638,21 @@ const CLIP_BY_KEY = { run: "work", done: "idle", bad: "blocked", warn: "idle", i
 const stationLane = { builder: null, artist: null, reviewer: null };
 const laneStation = new Map();
 const sprites = {};
+const hotSeat = {};
+const laneHot = new Map();
+const hotSprites = {};
+const desks = {};
+const hotHits = {};
 const ovBtns = new Map();
 const stRows = new Map();
 const winHooks = { open: () => {}, close: () => {} };
 let assignedOnce = false, prevPlanId = null, prevRunning = new Map();
 
 function spriteScale() { return Math.max(0.25, Math.round(k * 2 * 4) / 4); }
+function deskProp(hd) {
+  const props = PixelSprites.manifest && PixelSprites.manifest.props;
+  return (hd && props && props[hd.prop]) || null;
+}
 function laneName(l) { return l.task || l.id; }
 function stationSub(l) {
   const st = CAUI.status(l.health);
@@ -742,6 +761,7 @@ function layoutStations() {
       if (sp.scale !== sc) sp.setScale(sc);
       sp.el.style.left = ox + f[0] * k - a[0] * sc + "px";
       sp.el.style.top = oy + f[1] * k - a[1] * sc + "px";
+      sp.el.style.zIndex = String(Math.round(f[1] * 10) + 5);
     }
     const hit = hits[key];
     if (hit && sp) {
@@ -753,6 +773,33 @@ function layoutStations() {
     const plate = $("plate-" + key);
     plate.style.left = (ox + f[0] * k) + "px";
     plate.style.top = (oy + (f[1] + 34) * k) + "px";
+  }
+  for (const hd of SCENE.hotdesks) {
+    const f = hd.foot;
+    const sp = hotSprites[hd.key];
+    if (sp) {
+      if (sp.scale !== sc) sp.setScale(sc);
+      sp.el.style.left = ox + f[0] * k - a[0] * sc + "px";
+      sp.el.style.top = oy + f[1] * k - a[1] * sc + "px";
+      sp.el.style.zIndex = String(Math.round(f[1] * 10) + 5);
+    }
+    const desk = desks[hd.key];
+    const def = deskProp(hd);
+    if (desk && def) {
+      desk.style.width = def.size[0] * sc + "px";
+      desk.style.height = def.size[1] * sc + "px";
+      desk.style.backgroundSize = def.size[0] * sc + "px " + def.size[1] * sc + "px";
+      desk.style.left = ox + f[0] * k - def.anchor[0] * sc + "px";
+      desk.style.top = oy + f[1] * k - def.anchor[1] * sc + "px";
+      desk.style.zIndex = String(Math.round(f[1] * 10));
+    }
+    const hb = hotHits[hd.key];
+    if (hb && sp) {
+      hb.style.left = sp.el.style.left;
+      hb.style.top = sp.el.style.top;
+      hb.style.width = sp.el.offsetWidth + "px";
+      hb.style.height = sp.el.offsetHeight + "px";
+    }
   }
   renderLinks();
   if (!$("win").hidden) positionWin();
@@ -835,6 +882,21 @@ async function initSprites() {
     });
     hits[key] = hit;
     $("sprites").appendChild(hit);
+  }
+  for (const hd of SCENE.hotdesks) {
+    const sp = PixelSprites.create(hd.role, { scale: spriteScale(), seed: hd.key, clip: "idle" });
+    sp.el.style.display = "none";
+    hotSprites[hd.key] = sp;
+    $("sprites").appendChild(sp.el);
+    const def = deskProp(hd);
+    if (def) {
+      const desk = document.createElement("div");
+      desk.className = "desk";
+      desk.style.display = "none";
+      desk.style.backgroundImage = 'url("/assets/' + def.image + '")';
+      $("sprites").appendChild(desk);
+      desks[hd.key] = desk;
+    }
   }
   layoutStations();
   renderStations();
