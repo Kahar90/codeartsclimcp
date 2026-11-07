@@ -210,9 +210,18 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 /* ---------- onboarding ---------- */
 .cmd { display: flex; align-items: center; gap: 10px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0; cursor: pointer }
 .cmd:hover { border-color: var(--sel) }
-.cmd code { background: none; padding: 0; flex: 1; overflow-wrap: anywhere }
+.cmd code { background: none; padding: 0; flex: 1; min-width: 0; overflow-wrap: anywhere }
 .small { color: var(--muted); font-size: 12.5px }
 .mute { color: var(--muted) }
+.onb-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 9px; border-radius: 999px; border: 1.5px solid currentColor; font-size: 11.5px; font-weight: 650; line-height: 1; white-space: nowrap }
+.onb-chip.ok { color: var(--run) } .onb-chip.warn { color: var(--amber) } .onb-chip.fail { color: var(--bad) }
+.onb-summary { font-size: 13px; font-weight: 650; margin: 0 0 8px }
+.onb-summary.ok { color: var(--run) } .onb-summary.bad { color: var(--bad) }
+.onb-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0 }
+.onb-name { font-weight: 650; flex: 1; min-width: 0; overflow-wrap: anywhere }
+.onb-detail { color: var(--muted); font-size: 12.5px; margin-top: 3px; overflow-wrap: anywhere }
+.onb-fix { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 4px; min-width: 0 }
+.onb-fix code { flex: 1; min-width: 0; font: 11.5px var(--mono); background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 9px; color: var(--sel-ink); white-space: pre-wrap; overflow-wrap: anywhere }
 
 /* ---------- control room ---------- */
 .cr-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap }
@@ -1172,14 +1181,19 @@ async function copyText(t) {
 async function renderOnboard() {
   const d = await fetchDoctor();
   const rows = Array.isArray(d?.checks) ? d.checks : [];
-  const chip = (s) => `<span class="badge ${s === 'ok' ? 'h-done' : s === 'warn' ? 'h-needs-review' : 'h-failed'}">${esc(s)}</span>`;
-  const mark = (s) => `<span class="ic" style="color:${s === 'ok' ? 'var(--ok)' : s === 'warn' ? 'var(--warn)' : 'var(--bad)'}">${s === 'ok' ? '&#10003;' : s === 'warn' ? '!' : '&#10007;'}</span>`;
-  const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0"><span class="row" style="justify-content:flex-start;gap:8px"><b>${esc(c.name)}</b>${chip(c.status)}</span>${c.detail ? `<div class="small">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="small" style="white-space:pre-wrap;margin-top:2px">${esc(c.fix)}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
+  const tone = (s) => s === 'ok' ? 'var(--run)' : s === 'warn' ? 'var(--amber)' : 'var(--bad)';
+  const mark = (s) => `<span class="ic" style="color:${tone(s)}">${s === 'ok' ? '&#10003;' : s === 'warn' ? '!' : '&#10007;'}</span>`;
+  const onbChip = (s) => `<span class="onb-chip ${s === 'ok' ? 'ok' : s === 'warn' ? 'warn' : 'fail'}">${esc(s)}</span>`;
+  const hasCmd = (fix) => /(^|\s)(ca|node|npm|npx|git|powershell|bash)\s|install\.(ps1|sh)/.test(fix || '');
+  const fails = rows.filter((c) => c.status === 'fail').length;
+  const warns = rows.filter((c) => c.status === 'warn').length;
+  const summary = !rows.length ? '' : (fails ? `<div class="onb-summary bad">${fails} to fix${warns ? ` · ${warns} optional` : ''}</div>` : `<div class="onb-summary ok">Ready: everything checks out${warns ? ` · ${warns} optional` : ''}</div>`);
+  const doctorRows = rows.length ? `<ul class="plain">${rows.map((c) => `<li>${mark(c.status)}<span style="min-width:0;flex:1"><span class="onb-row"><span class="onb-name">${esc(c.name)}</span>${onbChip(c.status)}</span>${c.detail ? `<div class="onb-detail">${esc(c.detail)}</div>` : ''}${c.fix ? `<div class="onb-fix"><code>${esc(c.fix)}</code>${hasCmd(c.fix) ? `<button type="button" class="btn tiny onb-copy" data-copy="${esc(c.fix)}">Copy</button>` : ''}</div>` : ''}</span></li>`).join('')}</ul>` : '<div class="small">doctor not reachable yet; it retries automatically</div>';
   const harnesses = [['kiro', 'Kiro'], ['cursor', 'Cursor'], ['claude', 'Claude Code'], ['codex', 'Codex'], ['vscode', 'VS Code'], ['opencode', 'opencode']];
   $('view').innerHTML = `<section id="onboard"><div class="pad">
     <h2 class="title">Set up CodeArts lanes</h2>
     <p class="goal">One-time setup: CodeArts credentials, a git repo, a trusted folder and your harness (Kiro, Cursor, Claude Code, Codex or VS Code). <code>ca onboard</code> checks everything and applies the fixes.</p>
-    <div class="box"><h4>Environment (doctor)</h4>${doctorRows}</div>
+    <div class="box" id="onb-doctor"><h4>Environment (doctor)</h4>${summary}${doctorRows}</div>
     <div class="box"><h4>Fix everything in one go</h4>
       <div class="cmd" id="onboard-cmd" title="click to copy"><code>ca onboard --yes</code><button id="onboard-copy">Copy</button></div>
       <div class="small">Run it in the repo you want to use. Without --yes it asks before each fix.</div></div>
