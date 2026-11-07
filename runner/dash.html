@@ -187,6 +187,13 @@ button.btn:disabled { opacity: .45; cursor: default }
 button.btn.primary { background: var(--sel); border-color: var(--sel); color: #171320 }
 button.btn.danger { color: var(--bad); border-color: var(--bad); background: transparent }
 #steerErr { color: var(--bad); font-size: 12.5px; flex: none; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ctlbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0 }
+.ctlbar .why { color: var(--muted); font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.notebox { display: flex; gap: 8px; align-items: center; flex-basis: 100%; min-width: 0; margin-top: 8px }
+.notebox textarea { flex: 1; min-width: 140px; min-height: 34px; max-height: 96px; resize: vertical; background: var(--panel); border: 1px solid var(--border-2); color: var(--fg); font: 13px var(--font); border-radius: var(--radius-sm); padding: 8px 10px }
+.notebox textarea:focus { outline: none; border-color: var(--sel) }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60; background: var(--panel); border: 1.5px solid var(--sel); color: var(--fg); border-radius: var(--radius-sm); padding: 9px 15px; font-size: 13px; max-width: 80vw; box-shadow: 0 8px 26px rgba(0,0,0,.4) }
+#toast.err { border-color: var(--bad); color: var(--bad) }
 
 /* ---------- onboarding ---------- */
 .cmd { display: flex; align-items: center; gap: 10px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0; cursor: pointer }
@@ -504,8 +511,46 @@ let plans = [], lanes = [], detail = null, route = { kind: '', id: '' }, tab = '
 const tstate = new Map(); // laneId -> {html, pos, rendered, follow, top, atBottom} transcript state
 const drafts = new Map(); // laneId -> steer text typed so far
 const evScroll = new Map(); // "laneId:tab" -> evidence scroll top
-let inFlight = null; // {what, laneId} while a steer/stop/attach POST runs
+let inFlight = null; // {what, laneId} while a steer/stop/attach/control POST runs
+const ctlNotes = new Map(); // laneId -> { action, text } while an inline note box is open
 const tget = (id) => { let s = tstate.get(id); if (!s) { s = { html: '', pos: 0, rendered: 0, follow: true, top: 0, atBottom: true }; tstate.set(id, s); } return s; };
+
+function toast(msg, err) {
+  const el = document.createElement('div');
+  el.id = 'toast'; el.className = err ? 'err' : ''; el.setAttribute('role', 'status'); el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+async function sendControl(laneId, action, extra) {
+  inFlight = { what: action, laneId };
+  let r; try { r = await CAUI.control(laneId, action, extra); } catch { r = { error: 'request failed' }; }
+  inFlight = null;
+  if (!r.error) ctlNotes.delete(laneId);
+  toast(r.error ? r.error : (r.message || `${action} sent`), !!r.error);
+  refresh(true);
+}
+function rerenderLane(laneId) {
+  if (route.kind === 'lane' && detail && detail.id === laneId) patchLane(detail);
+  else if (route.kind === 'plan' && curPlan) renderPlan(curPlan);
+}
+function runControl(action, laneId) {
+  const A = CAUI.ACTIONS[action]; if (!A || !laneId) return;
+  if (A.danger && !confirm(A.danger)) return;
+  if (A.note) { ctlNotes.set(laneId, { action, text: ctlNotes.get(laneId)?.text || '' }); rerenderLane(laneId); return; }
+  sendControl(laneId, action, {});
+}
+const CTL_ORDER = ['skip-wait', 'kick', 'fresh', 'restart-server', 'resume', 'attach', 'stop'];
+// Control buttons for a lane. suggestOnly is used by the plan-home cards: just the suggested action.
+function ctlBar(l, suggestOnly) {
+  const acts = (Array.isArray(l.actions) ? l.actions : []).filter((a) => a !== 'steer' && CAUI.ACTIONS[a]);
+  const sug = l.suggest && acts.includes(l.suggest) ? l.suggest : '';
+  const btns = (a, primary) => { const A = CAUI.ACTIONS[a]; return `<button type="button" class="btn ctl${primary ? ' primary sugbtn' : ''}${A.danger ? ' danger' : ''}" data-action="${esc(a)}" data-lane="${esc(l.id)}" title="${esc(A.title)}">${esc(A.label)}</button>`; };
+  const head = sug ? btns(sug, true) + (l.why ? `<span class="why" title="${esc(l.why)}">${esc(l.why)}</span>` : '') : '';
+  const rest = suggestOnly ? '' : CTL_ORDER.filter((a) => acts.includes(a) && a !== sug).map((a) => btns(a, false)).join('');
+  const open = ctlNotes.get(l.id);
+  const note = open ? `<div class="notebox"><textarea data-note-text="${esc(l.id)}" placeholder="Note for the worker, optional">${esc(open.text || '')}</textarea><button type="button" class="btn primary" data-note-send="${esc(l.id)}">Send</button><button type="button" class="btn" data-note-cancel="${esc(l.id)}">Cancel</button></div>` : '';
+  return `<div class="ctlbar">${head}${rest}</div>${note}`;
+}
 
 function prog(p, res) {
   const t = p?.total || 0, d = p?.done || 0; const pct = t ? Math.round((100 * d) / t) : 0;
@@ -709,8 +754,7 @@ function renderLane(d, keep) {
       <input id="msg" placeholder="Steer the builder: queued into its session within 2 s" autocomplete="off">
       <button id="send" class="btn primary">Steer</button>
       <span id="steerErr" role="alert"></span>
-      <button id="attach" class="btn" title="Open the CodeArts TUI on this session in a new window">Open TUI</button>
-      <button id="stop" class="btn danger">Stop</button>
+      ${ctlBar(d)}
     </div>`;
   for (const r of $('view').querySelectorAll('[data-step]')) r.onclick = () => { const k = r.dataset.step; if (stepOpen.has(k)) { stepOpen.delete(k); r.classList.remove('x'); } else { stepOpen.add(k); r.classList.add('x'); } };
   for (const b of $('view').querySelectorAll('[data-ctx]')) b.onclick = () => {
@@ -750,15 +794,17 @@ function renderLane(d, keep) {
   msgEl.value = drafts.get(d.id) || '';
   msgEl.oninput = () => drafts.set(d.id, msgEl.value);
   msgEl.onkeydown = (e) => { if (e.key === 'Enter') $('send').click(); };
-  const busy = !!inFlight && inFlight.laneId === d.id;
-  $('send').disabled = busy;
-  $('stop').disabled = busy || !d.running;
-  $('attach').disabled = busy || !d.running;
-  const restoreButtons = () => { const dd = detail && detail.id === d.id ? detail : d; $('send').disabled = false; $('stop').disabled = !dd.running; $('attach').disabled = !dd.running; };
+  const syncCtlBusy = () => {
+    const b = !!inFlight && inFlight.laneId === d.id;
+    const s = $('send'); if (s) s.disabled = b;
+    for (const el of $('view').querySelectorAll('.ctlbar [data-action]')) el.disabled = b;
+    for (const el of document.querySelectorAll('[data-note-send]')) el.disabled = b;
+  };
+  syncCtlBusy();
   $('send').onclick = async () => {
     const text = msgEl.value.trim(); if (!text) return;
     const id = d.id;
-    inFlight = { what: 'steer', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
+    inFlight = { what: 'steer', laneId: id }; syncCtlBusy();
     errEl.textContent = '';
     let r; try { r = await post('steer', { text }); } catch { r = { error: 'request failed' }; }
     inFlight = null;
@@ -766,30 +812,7 @@ function renderLane(d, keep) {
       const m = $('msg'), e = $('steerErr');
       if (r.ok) { if (m && m.value.trim() === text) { m.value = ''; drafts.delete(id); } }
       else if (e) e.textContent = r.error || 'steer failed';
-      restoreButtons();
-    }
-  };
-  $('stop').onclick = async () => {
-    if (!confirm(`Stop lane ${d.task}?`)) return;
-    const id = d.id;
-    inFlight = { what: 'stop', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
-    errEl.textContent = '';
-    let r; try { r = await post('stop'); } catch { r = { error: 'request failed' }; }
-    inFlight = null;
-    if (route.kind === 'lane' && route.id === id) {
-      if (!r.ok) { const e = $('steerErr'); if (e) e.textContent = r.error || 'stop failed'; restoreButtons(); }
-      else refresh(true);
-    }
-  };
-  $('attach').onclick = async () => {
-    const id = d.id;
-    inFlight = { what: 'attach', laneId: id }; $('send').disabled = $('stop').disabled = $('attach').disabled = true;
-    errEl.textContent = '';
-    let r; try { r = await post('attach'); } catch { r = { error: 'request failed' }; }
-    inFlight = null;
-    if (route.kind === 'lane' && route.id === id) {
-      if (!r.ok) { const e = $('steerErr'); if (e) e.textContent = r.error || 'could not open the TUI'; }
-      restoreButtons();
+      syncCtlBusy();
     }
   };
   if (keep) $('view').scrollTop = vtop;
@@ -905,6 +928,27 @@ async function refresh(full) {
     catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }   else if (!plans.length && !lanes.length) await renderOnboard();
 }
+// Control buttons and inline note boxes are wired once by delegation so re-renders never double-bind them.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (btn) { e.preventDefault(); runControl(btn.dataset.action, btn.dataset.lane); return; }
+  const send = e.target.closest('[data-note-send]');
+  if (send) {
+    const id = send.dataset.noteSend, cur = ctlNotes.get(id); if (!cur) return;
+    const ta = [...document.querySelectorAll('[data-note-text]')].find((x) => x.dataset.noteText === id);
+    const text = (ta?.value || '').trim();
+    sendControl(id, cur.action, cur.action === 'resume' ? { note: text } : { text });
+    return;
+  }
+  const cancel = e.target.closest('[data-note-cancel]');
+  if (cancel) { ctlNotes.delete(cancel.dataset.noteCancel); rerenderLane(cancel.dataset.noteCancel); }
+});
+document.addEventListener('input', (e) => {
+  const ta = e.target.closest('[data-note-text]');
+  if (!ta) return;
+  const n = ctlNotes.get(ta.dataset.noteText);
+  if (n) n.text = ta.value;
+});
 window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; refresh(true); };
 syncRail();
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
