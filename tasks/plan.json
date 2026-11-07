@@ -3,7 +3,7 @@
   "goal": "Token counts per agent, per lane and per task (plan), and quick controls in the dashboard and Office view to retry, restart, resume or steer a stuck lane without opening the harness.",
   "lead": "Claude Opus 5.5",
   "status": "done",
-  "now": "Done: tokens by agent and model (lead included), lane controls, Control room, Mark handled, hot desks; deployed.",
+  "now": "Closed: all waves merged and deployed",
   "waves": [
     {
       "name": "Wave 1 · Backend and UIs",
@@ -142,6 +142,10 @@
     {
       "at": "2026-11-07T11:13:12.767Z",
       "text": "All waves merged, 14 check suites green, deployed to the live skill. Lead fixed after review: plates covered by depth-sorted sprites, Needs you pill shown at 0 and blind to lanes without a bucket. Flash is now the default builder everywhere (user decision)."
+    },
+    {
+      "at": "2026-11-07T11:13:15.689Z",
+      "text": "Plan closed: all waves merged and deployed."
     }
   ],
   "risks": [
