@@ -54,6 +54,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
+import { laneActions, laneBucket } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1028,11 +1029,26 @@ function stepProgress(s, steps = s.stepList || []) {
   const list = steps.map((st) => ({ ...st, state: done.has(st.n) ? 'done' : st.n === cur ? 'current' : s.result ? 'open' : 'pending', commit: done.get(st.n) || '' }));
   return { list, done: list.filter((x) => x.state === 'done').length, total: list.length, current: list.find((x) => x.state === 'current') || null };
 }
+// The project a lane belongs to: a worktree reports the main repo (its .git common dir's parent).
+const projectCache = new Map();
+function projectOf(repo) {
+  if (projectCache.has(repo)) return projectCache.get(repo);
+  let main = repo;
+  const out = git(repo, 'rev-parse', '--git-common-dir');
+  if (out && path.basename(path.resolve(repo, out)).toLowerCase() === '.git') main = path.dirname(path.resolve(repo, out));
+  const v = { key: main, name: path.basename(main) };
+  projectCache.set(repo, v);
+  return v;
+}
 function laneView(l) {
   const s = l.s; const pg = stepProgress(s);
+  const isAlive = alive(s.pid); const h = health(s);
+  const { actions, suggest, why } = laneActions({ s, alive: isAlive, health: h, canResume: fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`)) });
+  const { bucket, reason: bucketWhy } = laneBucket({ s, alive: isAlive, health: h });
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
-    reason: s.reason || '', running: !s.result && alive(s.pid), result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
-    startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0 };
+    reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
+    startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
+    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1149,6 +1165,13 @@ function cmdDash(args) {
         return json({ version: Math.max(0, ...files.map((f) => { try { return Math.round(fs.statSync(f).mtimeMs); } catch { return 0; } })) });
       }
       if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
+      if (u.pathname === '/api/overview') {
+        // The office view in one call: attention buckets and lanes not finished over 3 days ago.
+        const ls = lanes().filter((l) => !l.s.result || now() - (l.s.finishedAt || 0) < 3 * 24 * 3600e3).map(laneView);
+        const counts = { attention: 0, running: 0, done: 0, ended: 0 };
+        for (const v of ls) counts[v.bucket] = (counts[v.bucket] || 0) + 1;
+        return json({ counts, lanes: ls });
+      }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach)$/);
