@@ -535,9 +535,21 @@ async function runLane(repoArg, task, opts = {}) {
 
   // Wait for one turn: idle, error, stall (watchdog), server death, stop or timeout.
   async function waitTurn(sid) {
-    const s = sx(sid); let lastPoll = 0, lastCommitCheck = 0;
+    const s = sx(sid); let lastPoll = 0, lastCommitCheck = 0; let prevTick = now();
     for (;;) {
       await sleep(2000);
+      const tickMs = now();
+      // A gap far longer than the tick is the machine sleeping, not the model stalling: the silence
+      // was the sleep. Reset every watchdog timer and reconnect SSE, so nothing aborts on wake.
+      if (detectSleep(prevTick, tickMs, 2000)) {
+        L(`  ! woke from sleep after ${dur(tickMs - prevTick)}`);
+        s.lastAct = tickMs; S.lastEventAt = tickMs;
+        S.turnStartAt = tickMs; S.lastToolAt = tickMs; S.lastTextAt = tickMs;
+        for (const t of s.tools.values()) t.since = tickMs;
+        if (server.alive) { try { await server.api('GET', '/global/health', null, 3000); } catch {} try { server.ac?.abort(); } catch {} }
+        save(true);
+      }
+      prevTick = tickMs;
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
       const k = takeKick();
       if (k) {
