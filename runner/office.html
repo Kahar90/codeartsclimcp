@@ -1593,8 +1593,10 @@ window.__office = {
       const id = hotSeat[hd.key];
       const l = id && model ? model.lanes.find((x) => x.id === id) : null;
       if (!l) return null;
+      const plateEl = $("plate-" + hd.key);
+      if (!plateEl) return null;
       const f = hd.foot;
-      const plate = $("plate-" + hd.key).getBoundingClientRect();
+      const plate = plateEl.getBoundingClientRect();
       const sp = hotSprites[hd.key];
       const st = CAUI.status(l.health);
       const desk = desks[hd.key];
