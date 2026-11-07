@@ -63,6 +63,16 @@ function upsertBlock(text, body) {
 // Read-only lanes tools that are safe to auto-approve: they never start or change a lane.
 const AUTO_APPROVE = ['ca_doctor', 'ca_status', 'ca_summary', 'ca_tail', 'ca_wait'];
 
+// The user-level config dir for a harness: home-based with --user, repo-based otherwise.
+const home = () => os.homedir();
+
+// VS Code stores its user profile in a different place per OS.
+function vscodeUserDir() {
+  if (process.platform === 'win32') return path.join(process.env.APPDATA || path.join(home(), 'AppData', 'Roaming'), 'Code', 'User');
+  if (process.platform === 'darwin') return path.join(home(), 'Library', 'Application Support', 'Code', 'User');
+  return path.join(home(), '.config', 'Code', 'User');
+}
+
 function addJSON(plan, errors, file, mapKey, serverKey, value) {
   try { plan.push({ path: file, content: mergeJSON(file, mapKey, serverKey, value) }); }
   catch (e) {
@@ -110,22 +120,28 @@ function buildPlan(harness, repo, flags) {
   const notes = [];
 
   if (harness === 'kiro') {
-    addJSON(plan, errors, path.join(repo, '.kiro', 'settings', 'mcp.json'), 'mcpServers', 'codearts',
+    const dir = flags.user ? path.join(home(), '.kiro') : path.join(repo, '.kiro');
+    addJSON(plan, errors, path.join(dir, 'settings', 'mcp.json'), 'mcpServers', 'codearts',
       { ...SERVER, disabled: false, autoApprove: AUTO_APPROVE });
-    plan.push({ path: path.join(repo, '.kiro', 'steering', 'codearts-lanes.md'), content: `---\ninclusion: manual\n---\n${WORKFLOW}` });
+    plan.push({ path: path.join(dir, 'steering', 'codearts-lanes.md'), content: `---\ninclusion: manual\n---\n${WORKFLOW}` });
     notes.push('kiro: the steering file is manual. Reference it in chat with #codearts-lanes.');
   }
 
   if (harness === 'cursor') {
-    addJSON(plan, errors, path.join(repo, '.cursor', 'mcp.json'), 'mcpServers', 'codearts', { type: 'stdio', ...SERVER }); // Cursor docs list type as required
-    plan.push({
-      path: path.join(repo, '.cursor', 'rules', 'codearts-lanes.mdc'),
-      content: `---\ndescription: Delegate coding work to CodeArts lanes (plan, brief, start, wait, verify)\nalwaysApply: false\n---\n${WORKFLOW}`,
-    });
+    const dir = flags.user ? path.join(home(), '.cursor') : path.join(repo, '.cursor');
+    addJSON(plan, errors, path.join(dir, 'mcp.json'), 'mcpServers', 'codearts', { type: 'stdio', ...SERVER }); // Cursor docs list type as required
+    // User scope has no repo to hold a rule file; the MCP server instructions carry the workflow.
+    if (!flags.user) {
+      plan.push({
+        path: path.join(dir, 'rules', 'codearts-lanes.mdc'),
+        content: `---\ndescription: Delegate coding work to CodeArts lanes (plan, brief, start, wait, verify)\nalwaysApply: false\n---\n${WORKFLOW}`,
+      });
+    }
   }
 
   if (harness === 'vscode') {
-    addJSON(plan, errors, path.join(repo, '.vscode', 'mcp.json'), 'servers', 'codearts', { type: 'stdio', ...SERVER });
+    const dir = flags.user ? vscodeUserDir() : path.join(repo, '.vscode');
+    addJSON(plan, errors, path.join(dir, 'mcp.json'), 'servers', 'codearts', { type: 'stdio', ...SERVER });
   }
 
   if (harness === 'claude') {
@@ -162,10 +178,14 @@ function buildPlan(harness, repo, flags) {
   }
 
   if (harness === 'opencode') {
-    // opencode: project opencode.json "mcp" map (command is one array), rules from AGENTS.md.
-    addJSON(plan, errors, path.join(repo, 'opencode.json'), 'mcp', 'codearts', { type: 'local', command: [SERVER.command, ...SERVER.args], enabled: true });
-    plan.push({ path: path.join(repo, 'AGENTS.md'), content: upsertBlock(readText(path.join(repo, 'AGENTS.md')), WORKFLOW) });
-    notes.push('opencode: the codearts tools load in this repo; AGENTS.md carries the workflow.');
+    // opencode: "mcp" map (command is one array), rules from AGENTS.md (project) or ~/.config/opencode.
+    const dir = flags.user ? path.join(home(), '.config', 'opencode') : repo;
+    addJSON(plan, errors, path.join(dir, 'opencode.json'), 'mcp', 'codearts', { type: 'local', command: [SERVER.command, ...SERVER.args], enabled: true });
+    const agents = path.join(dir, 'AGENTS.md');
+    plan.push({ path: agents, content: upsertBlock(readText(agents), WORKFLOW) });
+    notes.push(flags.user
+      ? 'opencode: the codearts tools load in every project; ~/.config/opencode/AGENTS.md carries the workflow.'
+      : 'opencode: the codearts tools load in this repo; AGENTS.md carries the workflow.');
   }
 
   return { plan, errors, notes };
