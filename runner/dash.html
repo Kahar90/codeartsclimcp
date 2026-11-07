@@ -1309,6 +1309,14 @@ window.__lanes = { state: () => {
       banner: staleOn,
     },
   };
+}, // First-run panel snapshot for the check harness: the doctor rows, the setup prompt and the
+// manual command for the picked harness.
+onboard: () => {
+  const panel = document.getElementById('onboard');
+  const rows = [...document.querySelectorAll('#onb-doctor .onb-row')].map((r) => ({ name: r.querySelector('.onb-name')?.textContent || '', status: (r.querySelector('.onb-chip')?.textContent || '').trim() }));
+  const fails = rows.filter((r) => r.status === 'fail').length;
+  const warns = rows.filter((r) => r.status === 'warn').length;
+  return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
 }, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; } };
 
 // ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
