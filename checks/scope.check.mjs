@@ -18,7 +18,7 @@ const claudeDir = path.join(home, '.claude');
 const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSON.stringify({ security: { trustedFolders: [] } }));
 const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg);
 const env = {
-  ...process.env, HOME: home, USERPROFILE: home, APPDATA: appdata, XDG_CONFIG_HOME: '',
+  ...process.env, HOME: home, USERPROFILE: home, APPDATA: appdata, LOCALAPPDATA: path.join(tmp, 'localappdata'), XDG_CONFIG_HOME: '',
   CODEX_HOME: codexHome, CLAUDE_CONFIG_DIR: claudeDir, CA_CLAUDE_CLI: 'none',
   CA_SETTINGS: settings, CA_REGISTRY: reg, CA_DASH: '0',
 };
