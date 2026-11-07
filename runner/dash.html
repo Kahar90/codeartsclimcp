@@ -63,7 +63,7 @@ a { text-decoration: none }
 .wave-head .cnt { color: var(--faint); font-size: 12.5px; margin-left: auto; white-space: nowrap }
 .chev { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; background: none; border: 1px solid var(--border-2); border-radius: 7px; color: var(--muted); cursor: pointer; font-size: 10px; padding: 0 }
 .chev:hover { border-color: var(--sel); color: var(--fg) }
-.chev .tri { display: inline-block; transition: transform .15s }
+.chev .tri { display: inline-block; transition: transform var(--dur-2) var(--ease-out) }
 .chev[aria-expanded="false"] .tri { transform: rotate(-90deg) }
 .wave-body { padding: 0 16px 16px; display: grid; gap: 12px }
 
@@ -75,7 +75,7 @@ a { text-decoration: none }
 .cont-line { color: var(--muted); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere }
 .lane-steps { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12.5px; color: var(--muted) }
 .prog { height: 6px; flex: 1; background: var(--raise); border-radius: 3px; overflow: hidden; min-width: 60px }
-.prog > i { display: block; height: 100%; background: var(--run) }
+.prog > i { display: block; height: 100%; background: var(--run); transition: width var(--dur-3) var(--ease-out) }
 .prog.bad > i { background: var(--bad) }
 .curband { margin-top: 12px; border: 1px solid var(--border); background: var(--code-bg); border-radius: var(--radius-sm); padding: 10px 12px }
 .curband .lbl { display: inline-block; font-size: 10.5px; letter-spacing: .1em; font-weight: 700; color: var(--sel-ink); background: var(--sel-bg); border-radius: 4px; padding: 2px 7px; text-transform: uppercase }
@@ -88,7 +88,7 @@ a { text-decoration: none }
 .qchip:hover { border-color: var(--sel) }
 .stepsdisc > button { display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; color: var(--sel-ink); font: 600 12.5px var(--font); cursor: pointer; padding: 4px 2px }
 .stepsdisc > button:hover { text-decoration: underline }
-.stepsdisc .tri { display: inline-block; transition: transform .15s; font-size: 10px }
+.stepsdisc .tri { display: inline-block; transition: transform var(--dur-2) var(--ease-out); font-size: 10px }
 .stepsdisc > button[aria-expanded="false"] .tri { transform: rotate(-90deg) }
 .steplist { list-style: none; margin: 8px 0 0; padding: 10px 12px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm) }
 .steplist li { display: flex; gap: 9px; padding: 4px 0; font-size: 12.5px; align-items: flex-start }
@@ -143,13 +143,15 @@ ul.plain li:first-child { border-top: 0 }
 .mt-split { color: var(--faint); font-size: 11.5px; overflow-wrap: anywhere; min-width: 0 }
 .mt-none { color: var(--amber); font-size: 11.5px; white-space: nowrap }
 .wt { font: 12px var(--mono); color: var(--faint); margin-top: 10px; overflow-wrap: anywhere; user-select: all }
-.pipe { display: flex; margin-top: 16px; flex-wrap: wrap }
-.seg { padding: 6px 16px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font-size: 12.5px; font-weight: 600; margin-right: -1px; white-space: nowrap }
-.seg:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm) }
-.seg:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-right: 0 }
+.pipe { display: flex; align-items: center; margin-top: 16px; flex-wrap: wrap }
+.seg { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; color: var(--muted); font-size: 12.5px; font-weight: 600; white-space: nowrap }
+.seg:not(:last-child)::after { content: ""; width: 16px; height: 2px; margin: 0 4px; border-radius: 2px; background: var(--border); display: inline-block }
+.seg .sg-ic { flex: none; font-size: 12px }
+.seg .sg-future { color: var(--faint) }
+.seg .sg-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--sel); animation: ca-pulse 1.8s var(--ease-out) infinite }
 .seg.done { color: var(--run) }
 .seg.fail { color: var(--bad) }
-.seg.live { background: var(--sel); border-color: var(--sel); color: #171320; font-weight: 700 }
+.seg.live { color: var(--sel-ink) }
 .nowband { display: flex; gap: 12px; align-items: flex-start; border: 1.5px solid var(--sel); background: var(--panel); border-radius: var(--radius); padding: 12px 16px; margin-top: 16px }
 .nowband .lb { color: var(--sel-ink); font-weight: 700; white-space: nowrap }
 .nowband .bd { min-width: 0 }
@@ -168,10 +170,12 @@ ul.plain li:first-child { border-top: 0 }
 
 .ctxrow { border-top: 1px solid var(--border); padding: 10px 2px }
 .ctxrow > button { display: flex; width: 100%; align-items: center; gap: 10px; background: none; border: 0; color: var(--fg); font: 600 13px var(--font); cursor: pointer; padding: 0; text-align: left }
-.ctxrow .ci { color: var(--sel-ink); flex: none; width: 16px; text-align: center; font-size: 10px; transition: transform .15s }
+.ctxrow .ci { color: var(--sel-ink); flex: none; width: 16px; text-align: center; font-size: 10px; transition: transform var(--dur-2) var(--ease-out) }
 .ctxrow .sum { color: var(--muted); font-weight: 400; margin-left: auto; font-size: 12.5px; text-align: right; overflow-wrap: anywhere }
 .ctxrow > button[aria-expanded="false"] .ci { transform: rotate(-90deg) }
-.ctxbody { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.ctxbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-2) var(--ease-out) }
+.ctxrow.open .ctxbody { grid-template-rows: 1fr }
+.ctx-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 4px; min-width: 0; margin-top: 8px }
 .ctxbody .small { color: var(--muted); font-size: 12.5px }
 
 /* ---------- evidence ---------- */
@@ -242,12 +246,14 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .cr-head h1 { font: 700 28px/1.2 var(--font-display); margin: 0 }
 .cr-sub { color: var(--muted); font-size: 13.5px }
 .crtiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px }
-.crtile { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 2px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; color: var(--muted); font: inherit; text-align: left }
-.crtile:hover { border-color: var(--border-2) }
-.crtile.on { border-color: var(--sel); background: var(--sel-bg) }
-.crtile .buk-ico { width: 20px; height: 20px; flex: none }
-.crtile .crn { font: 700 22px/1 var(--font-display); margin-left: auto }
-.crtile .crw { font-size: 12.5px; font-weight: 650 }
+.crtile { display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 11px 13px; cursor: pointer; color: var(--fg); font: inherit; text-align: left }
+.crtile .cr-ic { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: none; border-radius: 10px; background: color-mix(in srgb, currentColor 14%, transparent) }
+.crtile .cr-ic .buk-ico { width: 20px; height: 20px }
+.crtile .cr-col { display: flex; flex-direction: column; min-width: 0 }
+.crtile .crn { font: 700 26px/1.05 var(--font-display); font-variant-numeric: tabular-nums }
+.crtile .crw { font-size: 13px; font-weight: 600; color: var(--muted) }
+.crtile:hover { transform: translateY(-1px); border-color: currentColor }
+.crtile.on { border-color: currentColor; background: color-mix(in srgb, currentColor 12%, var(--panel)) }
 .crtile.s-bad { color: var(--bad) } .crtile.s-run, .crtile.s-done { color: var(--run) } .crtile.s-idle { color: var(--muted) }
 .cr-list { margin-top: 18px; display: grid; gap: 12px }
 .cr-sec { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); overflow: hidden }
@@ -255,27 +261,35 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .cr-sec-h:hover { background: var(--panel-2) }
 .cr-sec-h .buk-ico { width: 16px; height: 16px; flex: none }
 .cr-sec-h .cnt { margin-left: auto; color: var(--faint); font-size: 12.5px; font-weight: 400 }
-.cr-sec-h .tri, .cr-seen-h .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+.cr-sec-h .tri, .cr-seen-h .tri { color: var(--faint); font-size: 10px; transition: transform var(--dur-2) var(--ease-out) }
 .cr-sec-h[aria-expanded="true"] .tri, .cr-seen-h[aria-expanded="true"] .tri { transform: rotate(90deg) }
-.cr-row { padding: 12px 14px; border-top: 1px solid var(--border); min-width: 0 }
+.cr-sec-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-2) var(--ease-out) }
+.cr-sec.open .cr-sec-body { grid-template-rows: 1fr }
+.cr-sec-inner { min-height: 0; overflow: hidden }
+.cr-row { padding: 12px 14px; border-top: 1px solid var(--border); min-width: 0; transition: background-color var(--dur-1) var(--ease-out) }
 .cr-row:first-child { border-top: 0 }
+.cr-row:hover { background: var(--panel-2) }
 .cr-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
 .cr-task { font: 700 15px/1.2 var(--font-display); color: var(--sel-ink); overflow-wrap: anywhere }
 .cr-task:hover { text-decoration: underline }
 .cr-time { color: var(--muted); font-size: 12.5px }
-.cr-open { margin-left: auto; font-size: 12.5px; white-space: nowrap }
+.cr-open { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm); color: var(--muted); transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out) }
+.cr-open:hover { background: var(--raise); color: var(--sel-ink) }
 .cr-why { color: var(--muted); font-size: 12.5px; margin-top: 4px; overflow-wrap: anywhere }
 .cr-row-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; min-width: 0 }
 .cr-row-foot .prog { width: 150px; max-width: 40vw; flex: none }
-.cr-meta { color: var(--faint); font: 12px var(--mono) }
+.cr-meta { color: var(--muted); font: 12px var(--font); font-variant-numeric: tabular-nums }
 .cr-row-foot .ctlbar { flex: none }
 .cr-seen-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px; background: var(--panel-2); border: 0; border-top: 1px solid var(--border); color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left }
 .cr-seen-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
 .cr-old-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 14px; background: var(--panel-2); border-top: 1px solid var(--border) }
 .cr-old-h { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; background: none; border: 0; color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left; padding: 3px 0 }
 .cr-old-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
-.cr-old-h .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+.cr-old-h .tri { color: var(--faint); font-size: 10px; transition: transform var(--dur-2) var(--ease-out) }
 .cr-old-h[aria-expanded="true"] .tri { transform: rotate(90deg) }
+.cr-old-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-2) var(--ease-out) }
+.cr-old.open .cr-old-body { grid-template-rows: 1fr }
+.cr-old-inner { min-height: 0; overflow: hidden }
 .ca-badge.buk { gap: 5px }
 .ca-badge.buk .buk-ico { width: 13px; height: 13px }
 button.btn.tiny { padding: 5px 10px; font-size: 12px }
@@ -293,7 +307,8 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .cr-proj-nm { font-weight: 700 }
 .cr-proj-cnt { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto }
 .cr-proj-cnt .ca-badge { height: 20px; font-size: 11.5px }
-.crumb { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 6px }
+.crumb { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; align-items: center }
+.crumb-sep { color: var(--faint) }
 .lane-bucket { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px }
 .lane-bucket .cr-why-big { color: var(--muted); font-size: 14px; overflow-wrap: anywhere }
 @media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
@@ -308,11 +323,42 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .ca-stale { display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255, 156, 156, 0.14); border-bottom: 1px solid var(--bad); color: var(--bad); font: 650 13px var(--font); padding: 8px 14px }
 @media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l { display: none } }
 
+/* ---------- button feel ---------- */
+button.btn, .chip, .crtile, .ca-tab, .rail-card, .rail-fin, .etab, .cr-gbtn, .cr-chip, .ca-notify, .qchip {
+  transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+button.btn:hover, .chip:hover, .crtile:hover, .ca-tab:hover, .rail-card:hover, .rail-fin:hover, .etab:hover, .cr-gbtn:hover, .cr-chip:hover, .ca-notify:hover, .qchip:hover {
+  background: var(--raise);
+}
+button.btn:active, .chip:active, .crtile:active, .ca-tab:active, .rail-card:active, .rail-fin:active, .etab:active, .cr-gbtn:active, .cr-chip:active, .ca-notify:active, .qchip:active {
+  transform: translateY(1px) scale(0.98);
+}
+button.btn:disabled, .crtile:disabled, .etab:disabled, .cr-gbtn:disabled, .cr-chip:disabled, .ca-notify:disabled, .qchip:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+.ca-tab[aria-current="page"]:hover { background: #7a4fae; border-color: #9b6dd0; color: #fff; }
+.rail-card.sel:hover { background: var(--sel-bg); border-color: var(--sel); }
+.rail-fin.sel:hover { background: var(--sel-bg); border-color: var(--sel); }
+.crtile.on:hover { background: var(--sel-bg); border-color: var(--sel); }
+.cr-gbtn.on:hover { background: var(--sel); color: #171320; }
+.cr-chip.on:hover { background: var(--sel-bg); border-color: var(--sel); color: var(--sel-ink); }
+.ca-notify.on:hover { background: var(--sel-bg); border-color: var(--sel); color: var(--sel-ink); }
+.etab[aria-selected="true"]:hover { background: var(--panel); }
+@media (max-width: 640px) {
+  button.btn, button.btn.tiny, .crtile { min-height: 32px; }
+}
+
 /* ---------- motion ---------- */
 @keyframes rowflash { 0% { background: var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel) } 100% { background: transparent; box-shadow: none } }
 .flash { animation: rowflash 1.6s ease-out 1 }
+.ca-rise { animation: ca-rise var(--dur-2) var(--ease-out) }
 @media (prefers-reduced-motion: reduce) { .flash { animation: none } }
 [hidden] { display: none !important }
+
+/* ---------- first-load skeleton ---------- */
+.skeleton { display: grid; gap: 12px; max-width: 720px }
+.skel-row { height: 66px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--border); animation: ca-pulse 1.4s var(--ease-out) infinite }
+@media (prefers-reduced-motion: reduce) { .skel-row { animation: none; opacity: 0.7 } }
 
 /* ---------- narrow ---------- */
 @media (max-width: 1024px) { .grid21 { grid-template-columns: 1fr } }
@@ -327,7 +373,7 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
   #rail { overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); padding: 0 }
   #rail summary { display: flex; align-items: center; gap: 8px; padding: 12px 16px; cursor: pointer; color: var(--fg); font: 650 14px var(--font); list-style: none }
   #rail summary::-webkit-details-marker { display: none }
-  #rail summary .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+  #rail summary .tri { color: var(--faint); font-size: 10px; transition: transform var(--dur-2) var(--ease-out) }
   #rail[open] summary .tri { transform: rotate(90deg) }
   #rail:not([open]) #railBody { display: none }
   #railBody { padding: 0 12px 12px }
@@ -360,7 +406,7 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
     <summary><span class="tri">&#9654;</span>Plans and lanes</summary>
     <div id="railBody"></div>
   </details>
-  <main id="view"><div class="empty">Loading</div></main>
+  <main id="view"><div class="pad"><div class="skeleton" aria-hidden="true"><div class="skel-row"></div><div class="skel-row"></div><div class="skel-row"></div></div></div></main>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -678,6 +724,7 @@ if (DEMO) {
 }
 
 let plans = [], lanes = [], detail = null, route = { kind: '', id: '' }, tab = 'log';
+let entryRise = false; // set on a hash route change: the next render fades the main column in once
 const tstate = new Map(); // laneId -> {html, pos, rendered, follow, top, atBottom} transcript state
 const drafts = new Map(); // laneId -> steer text typed so far
 const evScroll = new Map(); // "laneId:tab" -> evidence scroll top
@@ -686,10 +733,7 @@ const ctlNotes = new Map(); // laneId -> { action, text } while an inline note b
 const tget = (id) => { let s = tstate.get(id); if (!s) { s = { html: '', pos: 0, rendered: 0, follow: true, top: 0, atBottom: true }; tstate.set(id, s); } return s; };
 
 function toast(msg, err) {
-  const el = document.createElement('div');
-  el.id = 'toast'; el.className = err ? 'err' : ''; el.setAttribute('role', 'status'); el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
+  CAUI.toast(msg, { tone: err ? 'bad' : 'info' });
 }
 async function sendControl(laneId, action, extra) {
   if (inFlight && inFlight.laneId === laneId) return; // one control per lane at a time: a double click never sends twice
@@ -708,7 +752,7 @@ function rerenderLane(laneId) {
 function runControl(action, laneId) {
   const A = CAUI.ACTIONS[action]; if (!A || !laneId) return;
   if (A.danger && !confirm(A.danger)) return;
-  if (A.note) { ctlNotes.set(laneId, { action, text: ctlNotes.get(laneId)?.text || '' }); rerenderLane(laneId); return; }
+  if (A.note) { ctlNotes.set(laneId, { action, text: ctlNotes.get(laneId)?.text || '' }); rerenderLane(laneId); toast(`${A.label}: add an optional note, then Send`); return; }
   sendControl(laneId, action, {});
 }
 const CTL_ORDER = ['skip-wait', 'kick', 'fresh', 'restart-server', 'resume', 'attach', 'stop'];
@@ -768,6 +812,7 @@ const crOpen = new Set(String(lsGet('ca-cr-open', 'attention,running')).split(',
 let crSeenOpen = lsGet('ca-cr-seen', '') === '1'; // the "Seen earlier" block inside Done
 let crOldOpen = lsGet('ca-cr-old', '') === '1'; // the "Older than 2 days" block inside Needs you
 const CR_OLD_MS = 48 * 3600e3; // a finished Needs-you lane older than this sits in the collapsed old group
+let crPrevIds = new Set(); // lane ids rendered by the previous Control room pass, for one-time row entry animation
 const crIsOld = (l) => !!l.result && !!l.finishedAt && (Date.now() - new Date(l.finishedAt).getTime() > CR_OLD_MS);
 const crOldLanes = (list) => list.filter(crIsOld);
 function crCounts() {
@@ -778,7 +823,7 @@ function crCounts() {
 function crMeta(key) { return CR_BUCKETS.find((x) => x.key === key) || CR_BUCKETS[3]; }
 function crTile(b, n) {
   const on = crFilter === b.key;
-  return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}">${crIcon(b.key)}<span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></button>`;
+  return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}"><span class="cr-ic">${crIcon(b.key)}</span><span class="cr-col"><span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></span></button>`;
 }
 function crBadge(key) { const m = crMeta(key); return `<span class="ca-badge s-${m.tone} buk">${crIcon(key)}${esc(m.word)}</span>`; }
 function crDot(key) { const m = crMeta(key); return `<span class="ca-dot s-${m.tone}" title="${esc(m.word)}"></span>`; }
@@ -807,7 +852,7 @@ function crRow(l) {
         : '';
   const href = `#/lane/${esc(l.id)}`;
   return `<div class="cr-row" data-lane="${esc(l.id)}">
-    <div class="cr-row-top">${crBadge(b)}${proj ? `<span class="chip">${esc(proj)}</span>` : ''}<a class="cr-task" href="${href}">${esc(l.task)}</a><span class="cr-time">${crTime(l)}</span><span class="cr-open"><a href="${href}">Open</a></span></div>
+    <div class="cr-row-top">${crBadge(b)}${proj ? `<span class="chip">${esc(proj)}</span>` : ''}<a class="cr-task" href="${href}">${esc(l.task)}</a><span class="cr-time">${crTime(l)}</span><a class="cr-open" href="${href}" aria-label="Open ${esc(l.task)}" title="Open ${esc(l.task)}"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4l5 5-5 5"/></svg></a></div>
     ${why ? `<div class="cr-why">${esc(why)}</div>` : ''}
     <div class="cr-row-foot">${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${p.total || 0} steps</span><span class="cr-meta">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</span>${sug}${seenBtn}</div>
   </div>`;
@@ -836,10 +881,10 @@ function crSection(b, ls) {
   if (b.key === 'attention') {
     const old = crOldLanes(ls), fresh = ls.filter((l) => !crIsOld(l));
     body = fresh.map(crRow).join('');
-    if (old.length) body += `<div class="cr-old"><div class="cr-old-row"><button type="button" class="cr-old-h" data-crold="1" aria-expanded="${crOldOpen}"><span class="tri">&#9654;</span>Older than 2 days<span class="cnt">${old.length}</span></button><button type="button" class="btn tiny" data-ack-stale="1" title="Mark every lane in this group handled: they move to Ended with your note">Mark all handled</button></div><div class="cr-old-body"${crOldOpen ? '' : ' hidden'}>${old.map(crRow).join('')}</div></div>`;
+    if (old.length) body += `<div class="cr-old${crOldOpen ? ' open' : ''}"><div class="cr-old-row"><button type="button" class="cr-old-h" data-crold="1" aria-expanded="${crOldOpen}"><span class="tri">&#9654;</span>Older than 2 days<span class="cnt">${old.length}</span></button><button type="button" class="btn tiny" data-ack-stale="1" title="Mark every lane in this group handled: they move to Ended with your note">Mark all handled</button></div><div class="cr-old-body"><div class="cr-old-inner">${old.map(crRow).join('')}</div></div></div>`;
   }
   if (!ls.length) body = '<div class="small" style="padding:10px 14px">none</div>';
-  return `<section class="cr-sec" data-bucket="${b.key}"><button type="button" class="cr-sec-h" data-crsec="${b.key}" aria-expanded="${open}"><span class="tri">&#9654;</span>${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></button>${open ? body : ''}</section>`;
+  return `<section class="cr-sec${open ? ' open' : ''}" data-bucket="${b.key}"><button type="button" class="cr-sec-h" data-crsec="${b.key}" aria-expanded="${open}"><span class="tri">&#9654;</span>${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></button><div class="cr-sec-body"><div class="cr-sec-inner">${body}</div></div></section>`;
 }
 const CR_RANK = { attention: 0, running: 1, done: 2, ended: 3 };
 function crProjectBlock(key, name, ls) {
@@ -852,6 +897,7 @@ function crStatusView(shown) { return CR_BUCKETS.map((b) => (crFilter && b.key !
 function crProjectView(shown) {
   return [...crProjectKeys()].filter(([k]) => !crProject || k === crProject).map(([k, n]) => crProjectBlock(k, n, shown.filter((l) => projKey(l) === k))).join('') || '<div class="small" style="padding:10px 0">No projects.</div>';
 }
+function applyEntryRise() { if (!entryRise) return; entryRise = false; const el = $('view').firstElementChild; if (!el) return; el.classList.add('ca-rise'); el.addEventListener('animationend', () => el.classList.remove('ca-rise'), { once: true }); }
 function renderControl() {
   const c = crCounts();
   const shown = lanes.filter((l) => (!crFilter || laneBucket(l) === crFilter) && (!crProject || projKey(l) === crProject));
@@ -867,13 +913,16 @@ function renderControl() {
     <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div>
     <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(crModels())}</div></div>`;
   for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; lsSet('ca-cr-filter', crFilter); renderControl(); };
-  for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); lsSet('ca-cr-open', [...crOpen].join(',')); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; const open = !crOpen.has(k); open ? crOpen.add(k) : crOpen.delete(k); lsSet('ca-cr-open', [...crOpen].join(',')); const sec = h.closest('.cr-sec'); if (sec) sec.classList.toggle('open', open); h.setAttribute('aria-expanded', String(open)); };
   for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
-  for (const h of $('view').querySelectorAll('[data-crold]')) h.onclick = () => { crOldOpen = !crOldOpen; lsSet('ca-cr-old', crOldOpen ? '1' : ''); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crold]')) h.onclick = () => { crOldOpen = !crOldOpen; lsSet('ca-cr-old', crOldOpen ? '1' : ''); const box = h.closest('.cr-old'); if (box) box.classList.toggle('open', crOldOpen); h.setAttribute('aria-expanded', String(crOldOpen)); };
   for (const x of $('view').querySelectorAll('[data-ack-stale]')) x.onclick = () => markAllStale();
   for (const g of $('view').querySelectorAll('[data-crgroup]')) g.onclick = () => { crGroup = g.dataset.crgroup; lsSet('ca-cr-group', crGroup); renderControl(); };
   for (const p of $('view').querySelectorAll('[data-crproj]')) p.onclick = () => { crProject = crProject === p.dataset.crproj ? '' : p.dataset.crproj; lsSet('ca-cr-project', crProject); renderControl(); };
   for (const x of $('view').querySelectorAll('[data-ack-id]')) x.onclick = () => { let note = ''; if (x.dataset.ackNote) { note = window.prompt('Mark handled. Note (optional), for example "merged by the lead":', ''); if (note === null) return; } setSeen(x.dataset.ackId, x.dataset.ackMark === '1', note); };
+  for (const row of $('view').querySelectorAll('.cr-row[data-lane]')) { if (crPrevIds.has(row.dataset.lane)) continue; row.classList.add('ca-rise'); row.addEventListener('animationend', () => row.classList.remove('ca-rise'), { once: true }); }
+  crPrevIds = new Set(shown.map((l) => l.id));
+  applyEntryRise();
   syncBarPad();
 }
 async function setSeen(id, seen, note = '') {
@@ -1034,6 +1083,7 @@ function renderPlan(p) {
     </div></div>`;
   for (const b of $('view').querySelectorAll('[data-wave]')) b.onclick = () => { waveCollapsed.has(b.dataset.wave) ? waveCollapsed.delete(b.dataset.wave) : waveCollapsed.set(b.dataset.wave, true); renderPlan(curPlan); };
   for (const b of $('view').querySelectorAll('[data-steps]')) b.onclick = () => toggleSteps(b.dataset.steps);
+  applyEntryRise();
   mountSprites();
   syncBarPad();
 }
@@ -1048,7 +1098,11 @@ function pipeline(d) {
     ['Review', ph === 'review' ? 'live' : d.verdict ? (d.verdict === 'ready' ? 'done' : 'fail') : ''],
     [d.result ? d.result : 'Result', d.result ? (d.result === 'done' ? 'done' : 'fail') : ''],
   ];
-  return `<div class="pipe">${st.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="true"' : ''}>${esc(n)}</span>`).join('')}</div>`;
+  const ic = (c) => c === 'done' ? '<span class="sg-ic" aria-hidden="true">&#10003;</span>'
+    : c === 'live' ? '<span class="sg-dot" aria-hidden="true"></span>'
+    : c === 'fail' ? '<span class="sg-ic" aria-hidden="true">&#10007;</span>'
+    : '<span class="sg-ic sg-future" aria-hidden="true">&#9675;</span>';
+  return `<div class="pipe">${st.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="step"' : ''}>${ic(c)}${esc(n)}</span>`).join('')}</div>`;
 }
 function renderLane(d, keep) {
   const vtop = keep ? $('view')?.scrollTop : 0;
@@ -1075,10 +1129,10 @@ function renderLane(d, keep) {
   const filesBody = d.files.length ? d.files.slice(-30).map((f) => `<div class="small" style="overflow-wrap:anywhere">${esc(f)}</div>`).join('') : '<div class="small">none yet</div>';
   const evts = [...d.steers.map((x) => ({ at: x.at, t: `[${x.by}] ${x.text}`, c: 'var(--run)' })), ...d.interruptions.map((x) => ({ at: x.at, t: `${x.phase}/${x.kind}: ${x.what}`, c: 'var(--amber)' })), ...d.errors.map((x) => ({ at: x.at, t: x.msg, c: 'var(--bad)' })), ...d.outside.map((x) => ({ at: x.at, t: `outside repo: ${x.tool} ${x.path}`, c: 'var(--amber)' }))].sort((a, b) => b.at - a.at);
   const evtsBody = evts.length ? evts.slice(0, 20).map((e) => `<div class="small"><span class="mute">${esc(clock(e.at))}</span> <span style="color:${e.c}">${esc(e.t)}</span></div>`).join('') : '<div class="small">none</div>';
-  const ctx = (k, title, sum, body) => `<div class="ctxrow"><button type="button" data-ctx="${k}" aria-expanded="${openCtx(k)}"><span class="ci">&#9654;</span>${title}<span class="sum">${sum}</span></button><div class="ctxbody" ${openCtx(k) ? '' : 'style="display:none"'}>${body}</div></div>`;
+  const ctx = (k, title, sum, body) => { const o = openCtx(k); return `<div class="ctxrow${o ? ' open' : ''}"><button type="button" data-ctx="${k}" aria-expanded="${o}"><span class="ci">&#9654;</span>${title}<span class="sum">${sum}</span></button><div class="ctxbody"><div class="ctx-inner">${body}</div></div></div>`; };
   $('view').innerHTML = `<div class="pad has-bar" style="flex:1">
-    <div class="crumb"><a class="backlink" href="#/">&larr; Control room</a>${plan ? `<a class="backlink" href="#/plan/${esc(plan.id)}">&larr; ${esc(plan.title)}</a>` : ''}</div>
-    <div class="lane-bucket" data-bucket="${esc(d.bucket || laneBucket(d))}">${crBadge(d.bucket || laneBucket(d))}${d.bucketWhy ? `<span class="cr-why-big">${esc(d.bucketWhy)}</span>` : ''}</div>
+    <div class="crumb"><a class="backlink" href="#/">Control room</a>${plan ? `<span class="crumb-sep" aria-hidden="true">/</span><a class="backlink" href="#/plan/${esc(plan.id)}">${esc(plan.title)}</a>` : ''}</div>
+    ${d.bucketWhy ? `<div class="lane-bucket" data-bucket="${esc(d.bucket || laneBucket(d))}"><span class="cr-why-big">${esc(d.bucketWhy)}</span></div>` : ''}
     <div class="idrow"><span class="spot" data-spot="lane:${esc(d.id)}" data-role="${d.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.875" data-work="${d.running ? 1 : 0}"></span><h1>${esc(d.task)}</h1>${CAUI.badge(st)}${d.verdict ? `<span class="ca-badge s-${d.verdict === 'ready' ? 'done' : 'warn'}">review: ${esc(d.verdict)}</span>` : ''}</div>
     ${metrics}
     ${contLine(d.continues ? d : wl)}
@@ -1115,8 +1169,8 @@ function renderLane(d, keep) {
   for (const b of $('view').querySelectorAll('[data-ctx]')) b.onclick = () => {
     const set = ctxOpen.get(d.id) || new Set(); const k = b.dataset.ctx;
     set.has(k) ? set.delete(k) : set.add(k); ctxOpen.set(d.id, set);
-    b.setAttribute('aria-expanded', set.has(k));
-    const body = b.parentElement.querySelector('.ctxbody'); if (body) body.style.display = set.has(k) ? '' : 'none';
+    b.setAttribute('aria-expanded', String(set.has(k)));
+    const row = b.closest('.ctxrow'); if (row) row.classList.toggle('open', set.has(k));
   };
   const stt = tget(d.id), out = $('out'), msgEl = $('msg'), errEl = $('steerErr');
   if (tab === 'log') {
@@ -1173,6 +1227,7 @@ function renderLane(d, keep) {
   if (keep) $('view').scrollTop = vtop;
   if (hadFocus) msgEl.focus();
   prevSteps.set(d.id, new Map(d.steps.map((s) => [s.n, s.state])));
+  applyEntryRise();
   mountSprites();
   syncBarPad();
 }
@@ -1359,6 +1414,7 @@ window.__lanes = { state: () => {
       title: document.title,
       banner: staleOn,
     },
+    polish: { toast: !!document.querySelector('.ca-toast'), updatePill: !!document.querySelector('.ca-update') },
   };
 }, // First-run panel snapshot for the check harness: the doctor rows, the setup prompt and the
 // manual command for the picked harness.
@@ -1476,7 +1532,7 @@ document.addEventListener('input', (e) => {
   const n = ctlNotes.get(ta.dataset.noteText);
   if (n) n.text = ta.value;
 });
-window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; refresh(true); };
+window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; entryRise = true; crPrevIds = new Set(); refresh(true); };
 syncRail();
 $('notify').onclick = toggleNotify; renderNotify(); updateFreshness();
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);

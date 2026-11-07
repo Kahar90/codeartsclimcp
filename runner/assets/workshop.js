@@ -205,6 +205,210 @@
       .catch(function (e) { return { error: String(e && e.message || e) }; });
   }
 
+  // ---------- floating surfaces ----------
+  // place(el, anchor, { side = 'bottom', align = 'start', gap = 8, margin = 8 }): keep a fixed element
+  // next to its anchor, flipping sides when it will not fit and clamping inside the viewport with margin.
+  // The element should have overflow: auto so a tall body scrolls instead of leaving the screen.
+  function place(el, anchor, opts) {
+    opts = opts || {};
+    var side = opts.side || 'bottom', align = opts.align || 'start';
+    var gap = opts.gap == null ? 8 : opts.gap, margin = opts.margin == null ? 8 : opts.margin;
+    if (!el || !anchor || !anchor.getBoundingClientRect) return;
+    var a = anchor.getBoundingClientRect();
+    var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    var ew = el.offsetWidth || 0, eh = el.offsetHeight || 0;
+    var roomBelow = vh - a.bottom - gap - margin, roomAbove = a.top - gap - margin;
+    if (side === 'top') { if (roomAbove < Math.min(eh || 64, 120) && roomBelow > roomAbove) side = 'bottom'; }
+    else { if (roomBelow < Math.min(eh || 64, 120) && roomAbove > roomBelow) side = 'top'; }
+    var avail = side === 'top' ? roomAbove : roomBelow;
+    if (avail < 64) avail = Math.max(64, Math.min(eh || 64, vh - 2 * margin));
+    var h = Math.min(eh || avail, avail);
+    var top = side === 'top' ? (a.top - gap - h) : (a.bottom + gap);
+    var left;
+    if (align === 'end') left = a.right - ew; else if (align === 'center') left = a.left + (a.width - ew) / 2; else left = a.left;
+    if (left + ew > vw - margin) left = vw - margin - ew;
+    if (left < margin) left = margin;
+    if (top < margin) top = margin;
+    if (top + h > vh - margin) top = Math.max(margin, vh - margin - h);
+    el.style.position = 'fixed';
+    el.style.left = Math.round(left) + 'px';
+    el.style.top = Math.round(top) + 'px';
+    el.style.maxHeight = Math.round(avail) + 'px';
+  }
+  // track(el, anchor, opts): place now and on window resize and scroll (capture). Returns a stop function.
+  function track(el, anchor, opts) {
+    function run() { place(el, anchor, opts); }
+    run();
+    window.addEventListener('resize', run);
+    window.addEventListener('scroll', run, true);
+    return function stop() {
+      window.removeEventListener('resize', run);
+      window.removeEventListener('scroll', run, true);
+    };
+  }
+  // toast(msg, { tone = 'info' | 'bad', ms = 3200 }): one status toast at the bottom centre.
+  // It animates in, animates out before removal, and a new toast replaces the old one.
+  var toastEl = null, toastTimer = 0;
+  function toast(msg, opts) {
+    opts = opts || {};
+    var ms = opts.ms == null ? 3200 : opts.ms;
+    if (toastEl) { clearTimeout(toastTimer); try { toastEl.remove(); } catch (e) {} toastEl = null; }
+    var el = document.createElement('div');
+    el.className = 'ca-toast' + (opts.tone === 'bad' ? ' bad' : '');
+    el.setAttribute('role', 'status');
+    el.textContent = String(msg == null ? '' : msg);
+    document.body.appendChild(el);
+    toastEl = el;
+    var drop = function () { if (el.isConnected) el.remove(); if (toastEl === el) toastEl = null; };
+    toastTimer = setTimeout(function () {
+      el.style.animation = 'ca-pop-out var(--dur-2) var(--ease-out) forwards';
+      el.addEventListener('animationend', drop, { once: true });
+      setTimeout(drop, 400);
+    }, ms);
+    return el;
+  }
+
+  // ---------- clipboard ----------
+  function copyText(t) {
+    t = String(t == null ? '' : t);
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { return true; }, function () { return false; });
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = t; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand('copy'); ta.remove(); return Promise.resolve(ok);
+    } catch (e) { return Promise.resolve(false); }
+  }
+
+  // ---------- update notice ----------
+  // A pill in the shared top bar when a newer CLI is available. Both pages get it from here.
+  function updateFixture() {
+    return { current: '0.2.0', latest: '0.3.0', available: true,
+      notes: [{ version: '0.3.0', date: '2026-11-08', items: [
+        'Update check: ca update --check, a notice in the CLI and this pill',
+        'Agent windows and menus always stay on screen',
+        'Animations and polish across the Office and Lanes'] }],
+      cmd: 'npm install -g github:Kahar90/codeartsclimcp' };
+  }
+  function updateDismissed(latest) { try { return localStorage.getItem('ca-update-dismissed') === latest; } catch (e) { return false; } }
+  function dismissUpdate(latest) { try { localStorage.setItem('ca-update-dismissed', latest); } catch (e) {} }
+  function initUpdate() {
+    var top = document.querySelector('.ca-top');
+    if (!top || typeof fetch !== 'function') return;
+    var demo = /(^|[?&])update=demo(&|$)/.test(location.search);
+    var get = demo ? Promise.resolve(updateFixture())
+      : fetch('/api/update', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+    get.then(function (info) {
+      if (!info || info.available !== true || !info.latest) return;
+      if (updateDismissed(info.latest)) return;
+      mountUpdate(top, info, demo);
+    }).catch(function () {});
+  }
+  function mountUpdate(top, info, demo) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ca-update';
+    btn.setAttribute('aria-haspopup', 'dialog');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('title', 'A newer CodeArts CLI is available');
+    btn.innerHTML = '<span class="ca-update-dot" aria-hidden="true"></span><span class="ca-update-l">Update</span><span class="ca-update-v">' + esc(info.latest) + '</span>';
+    var counts = top.querySelector('.ca-counts');
+    if (counts && counts.parentNode === top) top.insertBefore(btn, counts); else top.appendChild(btn);
+
+    var pop = null, stopTrack = null, clickTimer = 0;
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+    function onDoc(e) { if (pop && !pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close(); }
+    function close() {
+      if (!pop) return;
+      var p = pop; pop = null;
+      if (stopTrack) { stopTrack(); stopTrack = null; }
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('click', onDoc, true);
+      clearTimeout(clickTimer);
+      p.style.animation = 'ca-pop-out var(--dur-2) var(--ease-out) forwards';
+      var drop = function () { if (p.isConnected) p.remove(); };
+      p.addEventListener('animationend', drop, { once: true });
+      setTimeout(drop, 400);
+      btn.setAttribute('aria-expanded', 'false');
+      try { btn.focus(); } catch (e) {}
+    }
+    function open() {
+      if (pop) return;
+      pop = buildPop();
+      document.body.appendChild(pop);
+      btn.setAttribute('aria-expanded', 'true');
+      stopTrack = track(pop, btn, { side: 'bottom', align: 'end' });
+      document.addEventListener('keydown', onKey, true);
+      clickTimer = setTimeout(function () { document.addEventListener('click', onDoc, true); }, 0);
+      var now = pop.querySelector('.ca-update-now');
+      if (now) try { now.focus(); } catch (e) {}
+    }
+    function waitForUi() {
+      return new Promise(function (resolve) {
+        var tries = 0;
+        var iv = setInterval(function () {
+          tries++;
+          fetch('/api/ui', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function () { clearInterval(iv); resolve(); }).catch(function () { if (tries > 240) { clearInterval(iv); resolve(); } });
+        }, 500);
+      });
+    }
+    function buildPop() {
+      var el = document.createElement('div');
+      el.className = 'ca-update-pop';
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-label', 'Update available');
+      var notes = Array.isArray(info.notes) ? info.notes : [];
+      var groups = notes.map(function (n) {
+        var items = (Array.isArray(n.items) ? n.items : []).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('');
+        var head = esc(n.version || '') + (n.date ? ' &middot; ' + esc(n.date) : '');
+        return '<div class="ca-update-grp"><div class="ca-update-gh">' + head + '</div><ul>' + items + '</ul></div>';
+      }).join('');
+      el.innerHTML =
+        '<div class="ca-update-title">Update available</div>' +
+        '<div class="ca-update-ver"><b>' + esc(info.current) + '</b><span class="ca-update-arrow" aria-hidden="true">&rarr;</span><b>' + esc(info.latest) + '</b></div>' +
+        '<div class="ca-update-notes">' + groups + '</div>' +
+        '<div class="ca-update-acts">' +
+          '<button type="button" class="btn primary ca-update-now">Update now</button>' +
+          '<button type="button" class="btn ca-update-copy">Copy command</button>' +
+          '<button type="button" class="btn ca-update-later">Later</button>' +
+        '</div>' +
+        '<div class="ca-update-err" hidden></div>';
+      var now = el.querySelector('.ca-update-now');
+      var copy = el.querySelector('.ca-update-copy');
+      var later = el.querySelector('.ca-update-later');
+      var err = el.querySelector('.ca-update-err');
+      copy.addEventListener('click', function () { copyText(info.cmd || '').then(function (ok) { toast(ok ? 'Command copied' : 'Copy failed', { tone: ok ? 'info' : 'bad' }); }); });
+      later.addEventListener('click', function () { dismissUpdate(info.latest); if (btn.isConnected) btn.remove(); if (pop) close(); });
+      now.addEventListener('click', function () {
+        if (demo) { toast('Demo: would run the update'); return; }
+        now.disabled = true; now.classList.add('busy'); now.textContent = 'Updating...';
+        fetch('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } })
+          .then(function (r) { return r.json().catch(function () { return {}; }); })
+          .then(function (j) {
+            if (!j || j.ok !== true) throw new Error((j && j.error) || 'update failed');
+            now.textContent = 'Restarting the dashboard...';
+            return waitForUi();
+          })
+          .then(function () { location.reload(); })
+          .catch(function (e) {
+            now.disabled = false; now.classList.remove('busy'); now.textContent = 'Update now';
+            if (err) { err.hidden = false; err.textContent = String((e && e.message) || e); }
+            var fallback = document.createElement('button');
+            fallback.type = 'button'; fallback.className = 'btn tiny ca-update-copy'; fallback.textContent = 'Copy command';
+            fallback.addEventListener('click', function () { copyText(info.cmd || '').then(function (ok) { toast(ok ? 'Command copied' : 'Copy failed', { tone: ok ? 'info' : 'bad' }); }); });
+            if (err && !err.querySelector('.ca-update-copy')) err.appendChild(fallback);
+          });
+      });
+      return el;
+    }
+    btn.addEventListener('click', function () { if (pop) close(); else open(); });
+  }
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initUpdate); else initUpdate();
+  }
+
   window.CAUI = { status: status, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); },
-    tokenTotal: tokenTotal, fmtTokens: fmtTokens, tokenDetail: tokenDetail, tokenSplit: tokenSplit, ACTIONS: ACTIONS, QUICK_STEERS: QUICK_STEERS, control: control };
+    tokenTotal: tokenTotal, fmtTokens: fmtTokens, tokenDetail: tokenDetail, tokenSplit: tokenSplit, ACTIONS: ACTIONS, QUICK_STEERS: QUICK_STEERS, control: control,
+    place: place, track: track, toast: toast, copyText: copyText, update: initUpdate };
 })();
