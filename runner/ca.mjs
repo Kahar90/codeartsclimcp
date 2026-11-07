@@ -1443,7 +1443,7 @@ async function doctorData(repoArg) {
   // CodeArts version vs the last smoke-tested one. A broken lifecycle.mjs must never break doctor.
   try {
     const { lifecycleRows } = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href);
-    for (const row of lifecycleRows({ version: caVersion })) rows.push(row);
+    for (const row of await lifecycleRows({ version: caVersion })) rows.push(row);
   } catch {}
 
   const fails = rows.filter((r) => r.status === 'fail').length;

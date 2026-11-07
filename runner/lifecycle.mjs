@@ -301,8 +301,10 @@ function serverArg0(harness) {
 }
 
 // Doctor rows for the install lifecycle: every recorded harness config still points at this ca.mjs,
-// and the installed CodeArts version matches the one that last passed the smoke test.
-export function lifecycleRows({ version = null } = {}) {
+// the installed CodeArts version matches the one that last passed the smoke test, and a newer
+// release of codearts-lanes is flagged. The update row reads the cache and only does one short
+// blocking check when the cache is missing or stale (CA_NO_UPDATE_CHECK=1 turns that off).
+export async function lifecycleRows({ version = null } = {}) {
   const rows = [];
   const recorded = Object.keys(readManifest().harnesses);
   if (!recorded.length) rows.push({ name: 'harness config', status: 'ok', detail: 'no machine-wide setup recorded', fix: '' });
@@ -324,6 +326,19 @@ export function lifecycleRows({ version = null } = {}) {
     if (!smoke || !smoke.version) rows.push({ name: 'codearts version', status: 'warn', detail: 'no smoke test recorded yet', fix: 'ca onboard --yes --smoke' });
     else if (String(smoke.version) === installed) rows.push({ name: 'codearts version', status: 'ok', detail: `${installed} matches the last smoke test`, fix: '' });
     else rows.push({ name: 'codearts version', status: 'warn', detail: `${installed} was never smoke-tested (last passed: ${smoke.version})`, fix: 'ca onboard --yes --smoke' });
+  }
+
+  // ca version row: is a newer codearts-lanes published? Uses the cache; refreshes once (short
+  // timeout) only when the cache is missing or stale, and never when the check is turned off.
+  const cur = currentVersion();
+  if (process.env.CA_NO_UPDATE_CHECK === '1') rows.push({ name: 'ca version', status: 'ok', detail: `${cur} (update check off)`, fix: '' });
+  else {
+    let cache = readUpdateCache();
+    const stale = !cache || typeof cache.checkedAt !== 'number' || Date.now() - cache.checkedAt >= UPDATE_TTL_MS;
+    if (stale) { try { cache = await checkUpdate({ force: true, timeoutMs: 4000 }); } catch {} }
+    if (cache && cache.error) rows.push({ name: 'ca version', status: 'ok', detail: `${cur} (could not check: ${cache.error})`, fix: '' });
+    else if (cache && cache.available && cache.latest) rows.push({ name: 'ca version', status: 'warn', detail: `${cur} installed, ${cache.latest} available`, fix: 'ca update' });
+    else rows.push({ name: 'ca version', status: 'ok', detail: `${cur} (latest)`, fix: '' });
   }
   return rows;
 }
