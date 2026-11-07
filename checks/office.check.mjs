@@ -203,11 +203,17 @@ try {
   const pillS = await ev('(function(){ var p = document.getElementById("needsPill"); return { shown: getComputedStyle(p).display !== "none", n: document.getElementById("needsPillN").textContent }; })()');
   check('demo=crowd Needs you pill counts the stalled and failed lanes', pillS && pillS.shown && pillS.n === '2', JSON.stringify(pillS));
   check('demo=crowd pill shows the two overflow lanes', s.overflow.count === 2 && s.overflow.ids.join(',') === 'docs-site,perf-pass', JSON.stringify(s.overflow.ids));
+  const kindInfo = await ev('(function(){ var m = window.PixelSprites.manifest; var hot = window.__office.state().stations.filter(function(x){ return /^hot/.test(x.station); }); var roleOk = hot.every(function(x){ return x.role && x.role.indexOf(m.kinds[x.kind].rolePrefix) === 0; }); var propOk = hot.every(function(x){ var d = m.props[m.kinds[x.kind].prop]; return !!d && (x.deskImage || "").indexOf(d.image) >= 0; }); var kinds = Array.from(new Set(hot.map(function(x){ return x.kind; }))); return { roleOk: roleOk, propOk: propOk, n: kinds.length, roles: hot.map(function(x){ return x.station + ":" + x.role; }), desks: hot.map(function(x){ return x.station + ":" + x.deskImage; }) }; })()');
+  check('demo=crowd hot desks: every role starts with its kind rolePrefix', kindInfo && kindInfo.roleOk, JSON.stringify(kindInfo && kindInfo.roles));
+  check('demo=crowd hot desks: every desk image is that kind prop', kindInfo && kindInfo.propOk, JSON.stringify(kindInfo && kindInfo.desks));
+  check('demo=crowd hot desks show at least 3 different kinds', kindInfo && kindInfo.n >= 3, JSON.stringify(kindInfo && kindInfo.n));
   await shot('8-crowd');
+  await shot('9-kinds');
 
   await ev('window.__office.press("cli-dx")'); await wait(300);
   s = await st();
   check('demo=crowd clicking a hot worker opens its window', s.window.open && s.window.laneId === 'cli-dx', s.window.laneId);
+  check('demo=crowd window carries the lane kind', s.window.kind === 'code', String(s.window.kind));
   check('demo=crowd puts the suggested action first for the stalled lane', s.window.suggest === 'kick' && s.window.actions[0] === 'kick', s.window.actions.join(','));
   await ev('window.__office.press("mcp")'); await wait(250);
   s = await st();
