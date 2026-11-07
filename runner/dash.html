@@ -219,13 +219,29 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .crtile.s-bad { color: var(--bad) } .crtile.s-run, .crtile.s-done { color: var(--run) } .crtile.s-idle { color: var(--muted) }
 .cr-list { margin-top: 18px; display: grid; gap: 12px }
 .cr-sec { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); overflow: hidden }
-.cr-sec-h { display: flex; align-items: center; gap: 9px; padding: 11px 14px; font-weight: 700; color: var(--fg) }
+.cr-sec-h { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px; background: none; border: 0; color: var(--fg); font: 700 13.5px var(--font); cursor: pointer; text-align: left }
+.cr-sec-h:hover { background: var(--panel-2) }
 .cr-sec-h .buk-ico { width: 16px; height: 16px; flex: none }
-.cr-sec-h .cnt { margin-left: auto; color: var(--faint); font-size: 12.5px }
-.cr-name { padding: 10px 14px; border-top: 1px solid var(--border); cursor: pointer; font-size: 13.5px }
-.cr-name.eye { cursor: pointer }
-.cr-name.eye:hover { border-color: var(--sel) }
-.cr-name:hover { background: var(--panel-2) }
+.cr-sec-h .cnt { margin-left: auto; color: var(--faint); font-size: 12.5px; font-weight: 400 }
+.cr-sec-h .tri, .cr-seen-h .tri { color: var(--faint); font-size: 10px; transition: transform .15s }
+.cr-sec-h[aria-expanded="true"] .tri, .cr-seen-h[aria-expanded="true"] .tri { transform: rotate(90deg) }
+.cr-row { padding: 12px 14px; border-top: 1px solid var(--border); min-width: 0 }
+.cr-row:first-child { border-top: 0 }
+.cr-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0 }
+.cr-task { font: 700 15px/1.2 var(--font-display); color: var(--sel-ink); overflow-wrap: anywhere }
+.cr-task:hover { text-decoration: underline }
+.cr-time { color: var(--muted); font-size: 12.5px }
+.cr-open { margin-left: auto; font-size: 12.5px; white-space: nowrap }
+.cr-why { color: var(--muted); font-size: 12.5px; margin-top: 4px; overflow-wrap: anywhere }
+.cr-row-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; min-width: 0 }
+.cr-row-foot .prog { width: 150px; max-width: 40vw; flex: none }
+.cr-meta { color: var(--faint); font: 12px var(--mono) }
+.cr-row-foot .ctlbar { flex: none }
+.cr-seen-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 14px; background: var(--panel-2); border: 0; border-top: 1px solid var(--border); color: var(--muted); font: 650 12.5px var(--font); cursor: pointer; text-align: left }
+.cr-seen-h .cnt { margin-left: auto; color: var(--faint); font-weight: 400 }
+.ca-badge.buk { gap: 5px }
+.ca-badge.buk .buk-ico { width: 13px; height: 13px }
+button.btn.tiny { padding: 5px 10px; font-size: 12px }
 @media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
 /* ---------- motion ---------- */
@@ -571,6 +587,7 @@ async function sendControl(laneId, action, extra) {
 function rerenderLane(laneId) {
   if (route.kind === 'lane' && detail && detail.id === laneId) patchLane(detail);
   else if (route.kind === 'plan' && curPlan) renderPlan(curPlan);
+  else if (route.kind === '') renderControl();
 }
 function runControl(action, laneId) {
   const A = CAUI.ACTIONS[action]; if (!A || !laneId) return;
@@ -626,32 +643,74 @@ function laneBucket(l) {
   return 'ended';
 }
 let crFilter = ''; // '' = show all; a bucket key filters the list
+const crOpen = new Set(['attention', 'running']); // sections expanded; Done and Ended start collapsed
+let crSeenOpen = false; // the "Seen earlier" block inside Done
 function crCounts() {
   const c = { attention: 0, running: 0, done: 0, ended: 0 };
   for (const l of lanes) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; }
   return c;
 }
+function crMeta(key) { return CR_BUCKETS.find((x) => x.key === key) || CR_BUCKETS[3]; }
 function crTile(b, n) {
   const on = crFilter === b.key;
   return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}">${crIcon(b.key)}<span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></button>`;
 }
+function crBadge(key) { const m = crMeta(key); return `<span class="ca-badge s-${m.tone} buk">${crIcon(key)}${esc(m.word)}</span>`; }
+// "running 24m, step 3/8", "stuck 6m", "finished 2h ago": a phrase, never just a colour.
+function crTime(l) {
+  const b = laneBucket(l), p = l.progress || {};
+  if (b === 'running') return `running ${l.elapsed || ''}${p.total ? `, step ${p.done}/${p.total}` : ''}`.trim();
+  if (b === 'attention' && l.running) return `stuck ${(l.idle && l.idle !== '-') ? l.idle : 'quiet'}`.trim();
+  if (b === 'attention') return `${esc(l.result || 'needs you')} ${ago(l.finishedAt)}`.trim();
+  if (b === 'done') return `finished ${ago(l.finishedAt)}`.trim();
+  return `ended ${ago(l.finishedAt)}`.trim();
+}
+function crRow(l) {
+  const b = laneBucket(l), p = l.progress || {};
+  const why = l.bucketWhy || l.why || '';
+  const proj = (l.project && (l.project.name || l.project.key)) || '';
+  const sug = (l.suggest && (l.actions || []).includes(l.suggest)) ? ctlBar({ ...l, suggest: l.suggest }, true) : '';
+  const seenBtn = b === 'done'
+    ? (l.seen
+      ? `<button type="button" class="btn tiny" data-ack-id="${esc(l.id)}" data-ack-mark="0">Mark unseen</button>`
+      : `<button type="button" class="btn tiny" data-ack-id="${esc(l.id)}" data-ack-mark="1">Mark seen</button>`)
+    : '';
+  const href = `#/lane/${esc(l.id)}`;
+  return `<div class="cr-row" data-lane="${esc(l.id)}">
+    <div class="cr-row-top">${crBadge(b)}${proj ? `<span class="chip">${esc(proj)}</span>` : ''}<a class="cr-task" href="${href}">${esc(l.task)}</a><span class="cr-time">${crTime(l)}</span><span class="cr-open"><a href="${href}">Open</a></span></div>
+    ${why ? `<div class="cr-why">${esc(why)}</div>` : ''}
+    <div class="cr-row-foot">${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${p.total || 0} steps</span><span class="cr-meta">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</span>${sug}${seenBtn}</div>
+  </div>`;
+}
+function crSection(b, ls) {
+  const open = crOpen.has(b.key) || crFilter === b.key;
+  let body = ls.map(crRow).join('');
+  if (b.key === 'done') {
+    const seen = ls.filter((l) => l.seen);
+    body = ls.filter((l) => !l.seen).map(crRow).join('');
+    if (seen.length) body += `<div class="cr-seen"><button type="button" class="cr-seen-h" data-crseen="1" aria-expanded="${crSeenOpen}"><span class="tri">&#9654;</span>Seen earlier<span class="cnt">${seen.length}</span></button>${crSeenOpen ? seen.map(crRow).join('') : ''}</div>`;
+  }
+  if (!ls.length) body = '<div class="small" style="padding:10px 14px">none</div>';
+  return `<section class="cr-sec" data-bucket="${b.key}"><button type="button" class="cr-sec-h" data-crsec="${b.key}" aria-expanded="${open}"><span class="tri">&#9654;</span>${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></button>${open ? body : ''}</section>`;
+}
 function renderControl() {
   const c = crCounts();
   const picked = crFilter ? lanes.filter((l) => laneBucket(l) === crFilter) : lanes;
-  const secs = CR_BUCKETS.map((b) => {
-    if (crFilter && b.key !== crFilter) return '';
-    const ls = picked.filter((l) => laneBucket(l) === b.key);
-    const rows = ls.length ? ls.map((l) => `<div class="cr-name" data-go="/lane/${esc(l.id)}">${esc(l.task)}</div>`).join('') : '<div class="small" style="padding:10px 14px">none</div>';
-    return `<section class="cr-sec" data-bucket="${b.key}"><div class="cr-sec-h">${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></div>${rows}</section>`;
-  }).join('');
+  const secs = CR_BUCKETS.map((b) => (crFilter && b.key !== crFilter) ? '' : crSection(b, picked.filter((l) => laneBucket(l) === b.key))).join('');
   $('view').innerHTML = `<div class="pad">
     <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · pick a tile to filter</div></div>
     <div class="crtiles" role="group" aria-label="Lane buckets">${CR_BUCKETS.map((b) => crTile(b, c[b.key] || 0)).join('')}</div>
     <div class="cr-list">${secs || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div></div>`;
   for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; renderControl(); };
-  for (const g of $('view').querySelectorAll('[data-go]')) g.onclick = () => go(g.dataset.go);
-  mountSprites();
+  for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); renderControl(); };
+  for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; renderControl(); };
+  for (const x of $('view').querySelectorAll('[data-ack-id]')) x.onclick = () => setSeen(x.dataset.ackId, x.dataset.ackMark === '1');
   syncBarPad();
+}
+async function setSeen(id, seen) {
+  try { await api(`/api/lane/${encodeURIComponent(id)}/ack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seen }) }); } catch {}
+  const l = lanes.find((x) => x.id === id); if (l) l.seen = seen;
+  renderControl();
 }
 
 // ---------- plan-home state that survives the 2.5 s polls ----------
