@@ -35,6 +35,7 @@
 //        ca attach <lane>                  open the CodeArts TUI on the live session (watch + type)
 //        ca stop <lane>                    abort the session and end the lane
 //        ca ack <lane> [--note t] [--undo]  mark a finished lane seen; a needs-you lane becomes handled (ended)
+//        ca ack --stale [--older-than 48h] [--dry-run] [--note t]   mark every Needs-you lane older than that handled
 //        ca kick <lane> [--fresh|--server|--now] [message]  unstick a stuck turn: retry it (default),
 //                                  start a fresh session, restart the codearts server or skip a backoff
 //        ca resume <lane> [--note "<text>"] [--dry-run]  continue a paused, failed, stopped or DEAD
