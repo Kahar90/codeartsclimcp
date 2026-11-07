@@ -98,14 +98,14 @@ export default async function onboard(args) {
   const scope = flags.has('--repo-only') ? 'repo' : 'user';
   const interactive = !yes && !asJson && !dry && !!(process.stdin.isTTY && process.stdout.isTTY);
   const envRows = [], repoRows = [], harnessRows = [], smokeRows = [];
-  const add = (rows, name, status, detail, fix = '') => rows.push({ name, status, detail: oneLine(detail), fix });
+  const add = (rows, name, status, detail, fix = '', notes = []) => rows.push({ name, status, detail, fix, notes });
 
   // ---- 1. environment: doctor rows, with exact fix steps for missing credentials ----
   const dr = run(process.execPath, [CA_MJS, 'doctor', '--json', repo], { timeout: 45000 });
   let docChecks = null;
   try { docChecks = JSON.parse(dr.stdout || '').checks; } catch {}
   if (!Array.isArray(docChecks) || !docChecks.length) {
-    add(envRows, 'doctor', 'fail', `could not run doctor: ${oneLine(dr.stderr || dr.error?.message || 'no JSON output', 160)}`, `node ca.mjs doctor --json ${repo}`);
+    add(envRows, 'doctor', 'fail', `could not run doctor: ${String(dr.stderr || dr.error?.message || 'no JSON output').trim()}`, `node ca.mjs doctor --json ${repo}`);
   } else {
     const credFix = (what) => [`run: ca auth   (opens a local form for the human; then: ca auth --wait)`, `${what} at ${PORTAL}`].join('\n');
     for (const c of docChecks) {
@@ -132,11 +132,11 @@ export default async function onboard(args) {
       if (!doFix && interactive) doFix = await confirm(`${isRepo ? 'Create the first (empty) commit' : 'Run git init and create the first (empty) commit'} in ${repo}?`);
       if (doFix) {
         let err = '';
-        if (!isRepo) { const r = git(repo, 'init'); if (r.status !== 0) err = oneLine(r.stderr, 160); }
+        if (!isRepo) { const r = git(repo, 'init'); if (r.status !== 0) err = String(r.stderr || '').trim(); }
         if (!err) {
           let c = git(repo, 'commit', '--allow-empty', '-m', 'first commit');
           if (c.status !== 0) c = git(repo, '-c', 'user.email=ca@localhost', '-c', 'user.name=ca', 'commit', '--allow-empty', '-m', 'first commit');
-          if (c.status !== 0) err = oneLine(c.stderr, 160);
+          if (c.status !== 0) err = String(c.stderr || '').trim();
         }
         if (err) add(repoRows, 'git repo', 'fail', `git init/commit failed: ${err}`, cmd);
         else add(repoRows, 'git repo', 'fixed', isRepo ? 'created the first (empty) commit' : 'git init + first (empty) commit');
@@ -180,7 +180,7 @@ export default async function onboard(args) {
     const setupArgs = [CA_MJS, 'setup', harness, repo, ...(dry ? ['--dry-run'] : []), ...(scope === 'repo' ? [] : ['--user'])];
     if (dry) {
       const r = run(process.execPath, setupArgs, { timeout: 30000 });
-      if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} --dry-run exited ${r.status ?? '?'}: ${oneLine(r.stderr || r.stdout, 180)}`, `run node ca.mjs setup ${harness} ${repo}`);
+      if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} --dry-run exited ${r.status ?? '?'}: ${String(r.stderr || r.stdout || '').trim()}`, `run node ca.mjs setup ${harness} ${repo}`);
       else {
         const planned = (r.stdout || '').split(/\r?\n/).map((l) => l.trim())
           .filter((l) => { const lo = l.toLowerCase(); return lo === repo.toLowerCase() || lo.startsWith(repo.toLowerCase() + path.sep); });
@@ -191,15 +191,23 @@ export default async function onboard(args) {
       if (!doFix && interactive) doFix = await confirm(`Run ca setup ${harness} for ${repo} (writes the MCP server and rules config)?`);
       if (doFix) {
         const r = run(process.execPath, setupArgs, { timeout: 30000 });
-        if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} exited ${r.status ?? '?'}: ${oneLine(r.stderr || r.stdout, 180)}`, `run node ca.mjs setup ${harness} ${repo}`);
+        if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} exited ${r.status ?? '?'}: ${(r.stderr || r.stdout || '').trim()}`, `run node ca.mjs setup ${harness} ${repo}${scope === 'repo' ? '' : ' --user'}`);
         else {
           const lines = (r.stdout || '').split(/\r?\n/).filter(Boolean);
           const acts = lines.map((l) => l.match(/^(wrote|updated|unchanged) (.+)$/)).filter(Boolean);
-          // "restart ..." notes repeat the Next line; paths inside the repo are shown relative.
-          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l) && !/^\w+: restart /.test(l));
-          const rel = (p) => { const r = path.relative(repo, p); return r && !r.startsWith('..') && !path.isAbsolute(r) ? r : p; };
-          const detail = [acts.map((m) => `${m[1]} ${rel(m[2])}`).join(', '), ...notes.map((n) => oneLine(n, 140))].filter(Boolean).join('; ');
-          add(harnessRows, 'harness setup', acts.some((m) => m[1] !== 'unchanged') ? 'fixed' : 'ok', detail || `ca setup ${harness} ran`);
+          // The detail is only the file actions; setup notes are kept apart and printed on their own.
+          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l));
+          const rel = (p) => {
+            const rr = path.relative(repo, p);
+            if (rr && !rr.startsWith('..') && !path.isAbsolute(rr)) return rr;
+            const h = os.homedir();
+            const rp = path.resolve(p), rh = path.resolve(h);
+            if (rp === rh) return '~';
+            if (rp.startsWith(rh + path.sep)) return '~/' + path.relative(rh, rp).replace(/\\/g, '/');
+            return p;
+          };
+          const detail = acts.map((m) => `${m[1]} ${rel(m[2])}`).join(', ');
+          add(harnessRows, 'harness setup', acts.some((m) => m[1] !== 'unchanged') ? 'fixed' : 'ok', detail || `ca setup ${harness} ran`, '', notes);
         }
       } else add(harnessRows, 'harness setup', 'planned', `ca setup ${harness} ${repo} writes the MCP server and rules config`, 'ca onboard --yes');
     }
@@ -247,20 +255,25 @@ export default async function onboard(args) {
   else next.push(scope === 'repo' ? HARNESS_NEXT[harness] : HARNESS_NEXT_USER[harness]);
   next.push(`Dashboard: ${DASH}`);
 
-  if (asJson) console.log(JSON.stringify({ harness, repo, scope, ready, steps, next }, null, 2));
-  else {
+  if (asJson) {
+    // JSON details may be shortened; the text output below never truncates.
+    const jsonSteps = steps.map((s) => ({ name: s.name, status: s.status, detail: oneLine(s.detail, 200), fix: s.fix, notes: s.notes || [] }));
+    console.log(JSON.stringify({ harness, repo, scope, ready, steps: jsonSteps, next }, null, 2));
+  } else {
     const L = (s) => process.stdout.write(s + '\n');
     const W = 7;
     const show = { ok: 'ok', warn: 'warn', fail: 'FAIL', fixed: 'fixed', planned: 'planned', skipped: 'skipped' };
     L('CodeArts lanes onboarding');
     L(`repo: ${repo}${harness ? `  harness: ${harness}` : ''}`);
     L(`scope: ${scope === 'repo' ? 'this repo' : 'machine-wide'}`);
+    const indented = (v) => { for (const ln of String(v).split(/\r?\n/)) L(`${' '.repeat(W + 4)}${ln}`); };
     const section = (n, title, rows) => {
       L('');
       L(`${n}. ${title}`);
       for (const r of rows) {
         L(`  ${(show[r.status] || r.status).padEnd(W)}  ${r.name}${r.detail ? `: ${r.detail}` : ''}`);
-        if (r.fix && ['fail', 'warn', 'planned'].includes(r.status)) for (const ln of String(r.fix).split(/\r?\n/)) L(`${' '.repeat(W + 4)}${ln}`);
+        if (r.notes && r.notes.length) for (const note of r.notes) indented(note);
+        if (r.fix && ['fail', 'warn', 'planned'].includes(r.status)) indented(r.fix);
       }
     };
     section(1, 'Environment', envRows);
