@@ -74,15 +74,26 @@ the count in the tab title and optional browser notifications.
   says it is done. Failures go back to the agent (up to 3 rounds), and uncommitted work is
   never reported as done.
 - **Never silently stuck:** a watchdog tells running from stuck, resumes stalled sessions and
-  backs off when the model service has problems.
+  backs off when the model service has problems. Rate limits, network drops and a sleeping
+  laptop are waited out; a lane that shows `rate limited`, `offline` or `queued` continues by itself.
+- **Clear when something is wrong:** a rejected key ends the lane in seconds and names the key
+  to fix (`ca auth --force`).
 - **Reviewed:** a separate read-only reviewer reads every lane's work before you see it.
 - **You stay in control:** starting, steering and stopping lanes ask for your approval;
   everything is a normal git commit you can inspect or revert.
 
+## Keep it current
+
+- `ca --version` shows what you have; `ca update` installs the latest and refreshes your
+  agent's config; `ca doctor` checks everything (each problem comes with the command that fixes it).
+- `ca uninstall` removes exactly what setup added to your agents' config and nothing else
+  (`--keys` also deletes your saved keys). See the [changelog](CHANGELOG.md).
+
 ## Privacy
 
-Your code and task briefs are sent to Huawei Cloud models. Your keys stay on your computer (in
-a file only your user can read) and are never written to the repo or shown to the agent.
+Your code and task briefs are sent to Huawei Cloud models. Your keys stay on your computer (on
+Windows encrypted for your user, elsewhere in a file only your user can read) and are never
+written to the repo or shown to the agent.
 
 ## More
 
