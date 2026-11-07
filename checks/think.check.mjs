@@ -63,7 +63,7 @@ check('lane with a recent tool call is running', row('busyok').health === 'runni
 check('lane with a tool running is running tool', row('tooling').health === 'running tool', row('tooling').health);
 check('old state without progress fields still works', ['running', 'quiet', 'STALLED'].includes(row('oldstate').health), row('oldstate').health);
 const txt = spawnSync(process.execPath, [CA, 'status'], { env, encoding: 'utf8', timeout: 60000 }).stdout || '';
-check('plain ca status shows the thinking health', /demo-repo--ponder\s+thinking \(25m/.test(txt), txt.split('\n').find((l) => l.includes('ponder')));
+check('plain ca status shows the thinking health', /demo-repo--ponder\s+attention\s+thinking \(25m/.test(txt), txt.split('\n').find((l) => l.includes('ponder')));
 
 // ---- 3. wiring in the runner ----
 const src = fs.readFileSync(CA, 'utf8');
