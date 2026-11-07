@@ -24,10 +24,49 @@ body.narrow .runstrip .pnow { flex: 1 1 100%; white-space: normal; overflow: vis
 body.narrow .ca-counts { display: none }
 .np-mark { display: none }
 body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; font-weight: 800 } body.narrow .needs-pill { padding: 0 9px } /* phone: the Needs you pill matters more than the counts */
-#planSel { height: 28px; padding: 0 6px; background: var(--panel); color: var(--fg); border: 1px solid var(--border-2); border-radius: 6px; font: 13px var(--font); max-width: 260px; }
-#motionBtn { flex: none; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel); color: var(--muted); font: 600 13px var(--font); cursor: pointer; }
-#motionBtn[aria-pressed="true"] { color: var(--fg); border-color: var(--sel); }
-#motionBtn:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
+#planSel { display: none !important; } /* keeps the value, the change event and the test hook; #planPick is what people see */
+#planPick { position: relative; flex: 0 1 auto; min-width: 0; }
+#planPick[hidden] { display: none; }
+#planBtn { display: flex; align-items: center; gap: 8px; height: 28px; max-width: 320px; padding: 0 9px 0 11px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 13px var(--font); cursor: pointer; transition: border-color .15s, background .15s; }
+#planBtn:hover, #planBtn[aria-expanded="true"] { border-color: var(--sel); background: var(--raise); }
+#planBtn .pp-cap { color: var(--faint); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
+#planBtn .pp-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#planBtn .pp-chev { flex: none; width: 10px; height: 10px; color: var(--muted); transition: transform .15s; }
+#planBtn[aria-expanded="true"] .pp-chev { transform: rotate(180deg); }
+.ca-menu, .ca-card { position: fixed; z-index: 40; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 14px 36px rgba(0, 0, 0, .55); color: var(--fg); }
+.ca-menu[hidden], .ca-card[hidden] { display: none; }
+#planMenu { min-width: 250px; max-width: min(440px, calc(100vw - 24px)); max-height: min(60vh, 440px); overflow-y: auto; margin: 0; padding: 6px; list-style: none; outline: none; }
+.pm-head { padding: 7px 10px 4px; color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.pm-sep { height: 1px; margin: 5px 4px; background: var(--border); }
+#planMenu [role="option"] { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-sm); color: var(--muted); font-size: 13.5px; cursor: pointer; white-space: nowrap; }
+#planMenu [role="option"] .pm-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#planMenu [role="option"].active { background: var(--raise); color: var(--fg); }
+#planMenu [role="option"][aria-selected="true"] { background: var(--sel-bg); color: var(--sel-ink); font-weight: 650; }
+.pm-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--border-2); }
+.pm-dot.run { background: var(--run); box-shadow: 0 0 0 3px rgba(131, 242, 207, .18); }
+.pm-dot.closed { background: transparent; border: 1.5px solid var(--faint); width: 6px; height: 6px; }
+.pm-tag { flex: none; font-size: 11px; color: var(--faint); }
+.pm-tag.run { color: var(--run); }
+.pm-check { flex: none; width: 12px; height: 12px; color: var(--sel); visibility: hidden; }
+[aria-selected="true"] > .pm-check { visibility: visible; }
+/* hover cards (tokens, plan outcome): styled replacements for native title tooltips */
+#statusBadge, #tokenChip { cursor: default; }
+#tokenChip:hover, #tokenChip:focus-visible { border-color: var(--sel); color: var(--fg); }
+#hoverCard { width: 300px; max-width: calc(100vw - 24px); padding: 14px 16px 12px; pointer-events: none; font-size: 13px; }
+.hc-kicker { color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.hc-big { font: 700 24px/1.15 var(--font-display); margin: 2px 0 10px; }
+.hc-big small { font: 600 13px var(--font); color: var(--muted); margin-left: 6px; }
+.hc-sec { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border); }
+.hc-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--muted); }
+.hc-row .hc-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-row .hc-v { flex: none; color: var(--fg); font-weight: 650; font-variant-numeric: tabular-nums; }
+.hc-row .hc-v.dim { color: var(--faint); font-weight: 500; }
+.hc-sw { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.hc-tag { flex: none; font-size: 10.5px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border-2); color: var(--faint); }
+.hc-tag.lead { color: var(--lead); border-color: rgba(220, 165, 255, .45); }
+.hc-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--panel-2); margin-bottom: 4px; }
+.hc-bar span { height: 100%; }
+.hc-note { margin-top: 8px; color: var(--faint); font-size: 12px; }
 #stagewrap { flex: 1; min-height: 420px; background: var(--stage); display: flex; align-items: center; justify-content: center; }
 #stage { position: relative; overflow: hidden; background: var(--stage); }
 #room { position: absolute; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
@@ -177,12 +216,16 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
   <span class="ptitle" id="planTitle"></span>
   <span class="pnow" id="nowLine" hidden></span>
   <span class="chip" id="leadChip" hidden></span>
-  <span id="statusBadge"></span>
-  <span class="chip" id="tokenChip" hidden></span>
+  <span id="statusBadge" tabindex="0"></span>
+  <span class="chip" id="tokenChip" tabindex="0" hidden></span>
   <span class="topfill"></span>
   <select id="planSel" hidden aria-label="plan"></select>
-  <button id="motionBtn" type="button" aria-pressed="true">Motion</button>
+  <div id="planPick" hidden>
+    <button id="planBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="planMenu"><span class="pp-cap">Plan</span><span class="pp-label" id="planBtnLabel"></span><svg class="pp-chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </div>
 </div>
+<ul id="planMenu" class="ca-menu" role="listbox" aria-label="Plan" tabindex="-1" hidden></ul>
+<div id="hoverCard" class="ca-card" role="tooltip" hidden></div>
 <main id="stagewrap">
   <div id="stage">
     <img id="room" src="/assets/workshop.png" alt="" aria-hidden="true">
@@ -291,7 +334,23 @@ async function loadScene() {
   } catch (e) {}
 }
 
-let plansArr = [], lanesArr = [], planSel = null, plansSig = "";
+let plansArr = [], lanesArr = [], planSel = null, plansSig = "", planUserPicked = false, knownPlans = null;
+const RECENT = "__recent"; // the "Recent lanes" view: running lanes and lanes started in the last 24 h
+// What to show when the human has not picked: the plan that has a running lane, else the newest open
+// plan, else "Recent lanes" when lanes run outside every plan, else the newest plan. Running lanes outside
+// the shown plan always join the cast (liveModel), so a running lane is never hidden.
+function defaultPlanId() {
+  const running = new Set(lanesArr.filter((l) => l.running).map((l) => l.id));
+  const laneIds = (p) => (p.waves || []).flatMap((w) => (w.lanes || []).map((l) => l.id));
+  const hasRunning = (p) => laneIds(p).some((id) => running.has(id));
+  const withRun = plansArr.find((p) => !p.closed && hasRunning(p)) || plansArr.find(hasRunning);
+  if (withRun) return withRun.id;
+  const open = plansArr.find((p) => !p.closed); // /api/plans lists open plans first, newest activity first
+  if (open) return open.id;
+  const inPlans = new Set(plansArr.flatMap(laneIds));
+  if ([...running].some((id) => !inPlans.has(id))) return RECENT;
+  return (plansArr[0] || {}).id || RECENT;
+}
 let model = null, fetchErr = "";
 const detailCache = new Map();
 
@@ -560,9 +619,16 @@ function demoModel() {
 }
 
 function liveModel() {
-  const plan = (planSel && plansArr.find((p) => p.id === planSel)) || plansArr[0] || null;
-  if (plan) return { plan, lanes: plan.waves.flatMap((w) => w.lanes || []), waves: plan.waves };
-  const recent = lanesArr.filter((l) => l.startedAt && Date.now() - l.startedAt < 86400e3);
+  const plan = planSel === RECENT ? null : (planSel && plansArr.find((p) => p.id === planSel)) || plansArr[0] || null;
+  if (plan) {
+    // A running lane is always on screen: lanes outside the shown plan (another project, a quick
+    // lane without a plan) join the cast after the plan's own lanes.
+    const planLanes = plan.waves.flatMap((w) => w.lanes || []);
+    const ids = new Set(planLanes.map((l) => l.id));
+    const extra = lanesArr.filter((l) => l.running && !ids.has(l.id));
+    return { plan, lanes: planLanes.concat(extra), waves: extra.length ? plan.waves.concat([{ name: "Running outside this plan", lanes: extra }]) : plan.waves };
+  }
+  const recent = lanesArr.filter((l) => l.running || (l.startedAt && Date.now() - l.startedAt < 86400e3));
   return {
     plan: { id: "", title: "Recent lanes", goal: "Recent lanes", lead: "Claude", status: "", now: "", next: [], decisions: [] },
     lanes: recent, waves: [{ name: "Recent lanes", lanes: recent }],
@@ -626,6 +692,68 @@ function planBucket(lanes) {
   return "ended";
 }
 function bucketBadge(b) { return '<span class="ca-badge s-' + BUCKET_TONE[b] + '">' + BUCKET_WORD[b] + "</span>"; }
+// How a lane finished, for the plan outcome card. Continued lanes live on in their follow-up and are not counted.
+const OUTCOME = {
+  done: { word: "Done", color: "var(--run)" },
+  handled: { word: "Failed, handled by the lead", color: "var(--amber)" },
+  stopped: { word: "Stopped", color: "var(--bad)" },
+  dropped: { word: "Dropped, never started", color: "var(--faint)" },
+  notrun: { word: "Never ran", color: "var(--faint)" },
+  continued: { word: "Continued in a later lane", color: "var(--border-2)" },
+};
+function laneOutcome(l) {
+  const r = l.result || "";
+  if (r === "done") return "done";
+  if (r === "continued") return "continued";
+  if (r === "dropped") return "dropped";
+  if (r === "stopped" || r === "killed") return "stopped";
+  if (l.handled || r) return "handled";
+  return "notrun";
+}
+// An ended plan says how it ended: "Done", "Done 3 of 5" or "Not finished", never a bare "Ended".
+function planOutcome(lanes) {
+  const n = {}; for (const l of lanes) { const o = laneOutcome(l); n[o] = (n[o] || 0) + 1; }
+  const done = n.done || 0, counted = lanes.length - (n.continued || 0) - (n.dropped || 0);
+  let word, tone;
+  if (counted > 0 && done === counted) { word = "Done"; tone = "done"; }
+  else if (done > 0) { word = `Done ${done} of ${counted}`; tone = "warn"; }
+  else { word = "Not finished"; tone = "bad"; }
+  return { n, done, counted, word, tone };
+}
+function planBadgeHtml(lanes) {
+  const b = planBucket(lanes);
+  if (b !== "ended") return bucketBadge(b);
+  const o = planOutcome(lanes);
+  return '<span class="ca-badge s-' + o.tone + '">' + CAUI.esc(o.word) + "</span>";
+}
+function outcomeCard(lanes) {
+  const b = planBucket(lanes), o = planOutcome(lanes);
+  const head = b === "ended" ? "Plan finished" : "Plan " + BUCKET_WORD[b].toLowerCase();
+  const big = b === "ended" ? o.word : BUCKET_WORD[b];
+  const bucketsN = {}; for (const l of lanes) { const k = laneBucket(l); bucketsN[k] = (bucketsN[k] || 0) + 1; }
+  const live = b === "ended" ? "" : '<div class="hc-sec">' + ["attention", "running"].filter((k) => bucketsN[k]).map((k) =>
+    `<div class="hc-row"><span class="hc-sw" style="background:var(--${k === "running" ? "run" : "bad"})"></span><span class="hc-l">${BUCKET_WORD[k]}</span><span class="hc-v">${bucketsN[k]}</span></div>`).join("") + "</div>";
+  const rows = Object.keys(OUTCOME).filter((k) => o.n[k]).map((k) =>
+    `<div class="hc-row"><span class="hc-sw" style="background:${OUTCOME[k].color}"></span><span class="hc-l">${OUTCOME[k].word}</span><span class="hc-v">${o.n[k]}</span></div>`).join("");
+  const bar = o.counted > 0 ? '<div class="hc-bar">' + ["done", "handled", "stopped", "notrun"].filter((k) => o.n[k]).map((k) =>
+    `<span style="width:${(100 * o.n[k]) / o.counted}%;background:${OUTCOME[k].color}"></span>`).join("") + "</div>" : "";
+  return `<div class="hc-kicker">${head}</div><div class="hc-big">${CAUI.esc(big)}<small>${lanes.length} lane${lanes.length === 1 ? "" : "s"}</small></div>${bar}${live}${rows ? '<div class="hc-sec">' + rows + "</div>" : ""}`;
+}
+function tokenCard(p) {
+  const total = CAUI.tokenTotal(p.tokens);
+  const ROLE_COLOR = { build: "var(--builder)", review: "var(--reviewer)", other: "var(--faint)" };
+  const roles = CAUI.tokenSplit(p.tokensBy).filter((x) => x.total);
+  const sum = roles.reduce((a, x) => a + x.total, 0) || 1;
+  const bar = roles.length ? '<div class="hc-bar">' + roles.map((x) => `<span style="width:${(100 * x.total) / sum}%;background:${ROLE_COLOR[x.role] || "var(--faint)"}"></span>`).join("") + "</div>" : "";
+  const roleRows = roles.map((x) => `<div class="hc-row"><span class="hc-sw" style="background:${ROLE_COLOR[x.role] || "var(--faint)"}"></span><span class="hc-l">${CAUI.esc(x.label)}</span><span class="hc-v">${CAUI.fmtTokens(x.total)}</span></div>`).join("");
+  const models = Object.entries(p.tokensByModel || {}).sort((a, b) => ((typeof b[1]?.total === "number" ? b[1].total : -1) - (typeof a[1]?.total === "number" ? a[1].total : -1)));
+  const unknown = models.some(([, e]) => e.source === "none" || typeof e.total !== "number");
+  const modelRows = models.map(([m, e]) => {
+    const none = e.source === "none" || typeof e.total !== "number";
+    return `<div class="hc-row"><span class="hc-l">${CAUI.esc(CAUI.shortModel(m))}</span><span class="hc-tag${e.who === "lead" ? " lead" : ""}">${e.who === "lead" ? "lead" : "worker"}</span><span class="hc-v${none ? " dim" : ""}">${none ? "not reported" : CAUI.fmtTokens(e.total)}</span></div>`;
+  }).join("");
+  return `<div class="hc-kicker">${unknown ? "Known tokens" : "Tokens"}</div><div class="hc-big">${CAUI.fmtTokens(total)}</div>${bar}${roleRows ? '<div class="hc-sec" style="border:0;margin-top:4px;padding-top:2px">' + roleRows + "</div>" : ""}${modelRows ? '<div class="hc-sec"><div class="hc-kicker" style="margin-bottom:4px">By model</div>' + modelRows + "</div>" : ""}${unknown ? '<div class="hc-note">Some models do not report usage; totals cover what is known.</div>' : ""}`;
+}
 // The plan carries the author name as leadName (lead is now the lead token table); old/demo fixtures still use a string.
 function leadName(p) { return (p && (p.leadName || (typeof p.lead === "string" ? p.lead : ""))) || "Lead"; }
 
@@ -637,7 +765,8 @@ function renderTop() {
   $("nowLine").textContent = now ? "Now: " + now : "";
   $("leadChip").hidden = !leadName(p);
   $("leadChip").textContent = leadName(p);
-  $("statusBadge").innerHTML = bucketBadge(planBucket(model.lanes));
+  const badgeHtml = planBadgeHtml(model.lanes);
+  if ($("statusBadge").innerHTML !== badgeHtml) $("statusBadge").innerHTML = badgeHtml;
   const attn = model.lanes.filter((l) => laneBucket(l) === "attention").length;
   const pill = $("needsPill");
   if (pill) { pill.hidden = attn === 0; const pn = $("needsPillN"); if (pn) pn.textContent = String(attn); }
@@ -647,19 +776,96 @@ function renderTop() {
     $("tokenChip").textContent = "Tokens " + CAUI.fmtTokens(pt);
     const mm = Object.entries(p.tokensByModel || {}).sort((a, b) => ((typeof b[1]?.total === "number" ? b[1].total : -1) - (typeof a[1]?.total === "number" ? a[1].total : -1)))
       .map(([m, e]) => CAUI.shortModel(m) + " " + ((e.source === "none" || typeof e.total !== "number") ? "not reported" : CAUI.fmtTokens(e.total)) + " (" + (e.who === "lead" ? "lead" : "worker") + ")");
-    $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).concat(mm).join(" \u00b7 ");
+    $("tokenChip").setAttribute("aria-label", "Tokens " + CAUI.fmtTokens(pt) + ": " + CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).concat(mm).join(", "));
   }
   const nPlans = mode === "demo" ? 1 : plansArr.length;
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
   $("counts").textContent = `${nPlans} plan${nPlans === 1 ? "" : "s"} \u00b7 ${nLanes} lane${nLanes === 1 ? "" : "s"}`;
   const sel = $("planSel");
   const sig = JSON.stringify(plansArr.map((x) => x.id));
-  if (mode === "live" && plansArr.length > 1) {
+  if (mode === "live" && plansArr.length >= 1) {
     sel.hidden = false;
-    if (sig !== plansSig) { plansSig = sig; sel.innerHTML = plansArr.map((x) => `<option value="${CAUI.esc(x.id)}">${CAUI.esc(x.title)}</option>`).join(""); }
-    sel.value = (planSel && plansArr.some((x) => x.id === planSel)) ? planSel : plansArr[0].id;
+    if (sig !== plansSig) { plansSig = sig; sel.innerHTML = `<option value="${RECENT}">Recent lanes</option>` + plansArr.map((x) => `<option value="${CAUI.esc(x.id)}">${CAUI.esc(x.title)}${x.closed ? " (closed)" : ""}</option>`).join(""); }
+    sel.value = (planSel === RECENT || (planSel && plansArr.some((x) => x.id === planSel))) ? planSel : plansArr[0].id;
   } else { sel.hidden = true; plansSig = ""; }
+  $("planPick").hidden = sel.hidden;
+  if (sel.hidden) closePlanMenu();
+  const cur = sel.options[sel.selectedIndex];
+  const curText = cur ? cur.textContent.replace(/ \(closed\)$/, "") : "";
+  $("planBtnLabel").textContent = curText;
+  $("planBtn").setAttribute("aria-label", "Plan: " + curText);
+  if (!$("planMenu").hidden) renderPlanMenu();
+  if (hoverOn) showHoverCard(hoverOn);
 }
+
+// Plan picker: a styled listbox over the hidden #planSel (which keeps the value and fires change).
+let planMenuActive = -1;
+function planRunning(id) {
+  const p = plansArr.find((x) => x.id === id);
+  if (!p) return false;
+  const run = new Set(lanesArr.filter((l) => l.running).map((l) => l.id));
+  return (p.waves || []).some((w) => (w.lanes || []).some((l) => l.running || run.has(l.id)));
+}
+function renderPlanMenu() {
+  const sel = $("planSel"), opts = [...sel.options].map((o, i) => [o, i]);
+  const row = ([o, i]) => {
+    const p = plansArr.find((x) => x.id === o.value);
+    const running = planRunning(o.value), closed = !!(p && p.closed);
+    const label = o.textContent.replace(/ \(closed\)$/, "");
+    const dot = `<span class="pm-dot${running ? " run" : closed ? " closed" : ""}" aria-hidden="true"></span>`;
+    const tag = running ? '<span class="pm-tag run">running</span>' : closed ? '<span class="pm-tag">closed</span>' : "";
+    return `<li role="option" id="pm-${i}" data-i="${i}" aria-selected="${o.value === sel.value}"${i === planMenuActive ? ' class="active"' : ""}>${dot}<span class="pm-t" title="${CAUI.esc(label)}">${CAUI.esc(label)}</span>${tag}<svg class="pm-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></li>`;
+  };
+  const isPlan = ([o]) => plansArr.some((x) => x.id === o.value);
+  const views = opts.filter((x) => !isPlan(x)), plans = opts.filter(isPlan);
+  let html = views.map(row).join("");
+  if (views.length && plans.length) html += '<li class="pm-sep" role="presentation"></li>';
+  if (plans.length) html += '<li class="pm-head" role="presentation">Plans</li>' + plans.map(row).join("");
+  const m = $("planMenu");
+  m.innerHTML = html;
+  if (planMenuActive >= 0) m.setAttribute("aria-activedescendant", "pm-" + planMenuActive); else m.removeAttribute("aria-activedescendant");
+}
+function placeFloat(el, anchor, align) {
+  const b = anchor.getBoundingClientRect(), w = el.offsetWidth;
+  el.style.top = Math.round(b.bottom + 8) + "px";
+  const x = align === "center" ? b.left + b.width / 2 - w / 2 : b.right - w;
+  el.style.left = Math.round(Math.max(12, Math.min(x, window.innerWidth - w - 12))) + "px";
+}
+function openPlanMenu() {
+  hideHoverCard();
+  planMenuActive = $("planSel").selectedIndex;
+  renderPlanMenu();
+  $("planMenu").hidden = false;
+  $("planBtn").setAttribute("aria-expanded", "true");
+  placeFloat($("planMenu"), $("planBtn"), "right");
+  const a = $("planMenu").querySelector(".active"); if (a) a.scrollIntoView({ block: "nearest" });
+  $("planMenu").focus();
+}
+function closePlanMenu(focusBtn) {
+  if ($("planMenu").hidden) return;
+  $("planMenu").hidden = true;
+  $("planBtn").setAttribute("aria-expanded", "false");
+  if (focusBtn) $("planBtn").focus();
+}
+function pickPlan(i) {
+  const sel = $("planSel");
+  closePlanMenu(true);
+  if (i < 0 || i >= sel.options.length || sel.selectedIndex === i) return;
+  sel.selectedIndex = i;
+  sel.dispatchEvent(new Event("change"));
+}
+
+// Hover cards for the token chip and the plan badge.
+let hoverOn = null;
+function showHoverCard(id) {
+  const anchor = $(id), card = $("hoverCard");
+  if (!model || !anchor || anchor.hidden || !$("planMenu").hidden) return hideHoverCard();
+  const html = id === "tokenChip" ? tokenCard(model.plan) : outcomeCard(model.lanes);
+  if (card.innerHTML !== html) card.innerHTML = html;
+  hoverOn = id; card.hidden = false;
+  placeFloat(card, anchor, "center");
+}
+function hideHoverCard() { hoverOn = null; $("hoverCard").hidden = true; }
 
 function render() {
   model = mode === "demo" ? demoModel() : liveModel();
@@ -681,7 +887,12 @@ async function tick() {
       const [pr, lr] = await Promise.all([fetch("/api/plans"), fetch("/api/lanes")]);
       plansArr = await pr.json();
       lanesArr = await lr.json();
-      if (!planSel) planSel = (plansArr[0] && plansArr[0].id) || null;
+      // A plan that appears while the page is open is new work: show it, even over a hand-picked view.
+      const ids = plansArr.map((p) => p.id);
+      const fresh = knownPlans ? ids.filter((id) => !knownPlans.has(id)) : [];
+      knownPlans = new Set(ids);
+      if (fresh.length) { planUserPicked = false; planSel = fresh[0]; }
+      else if (!planUserPicked || (planSel !== RECENT && !ids.includes(planSel))) planSel = defaultPlanId(); // follow the work until the human picks a view
       fetchErr = "";
     } catch (e) { fetchErr = "dashboard server not reachable"; }
   }
@@ -1711,13 +1922,38 @@ window.__office = {
   demoFail,
 };
 
-const motionBtn = $("motionBtn");
-function syncMotionBtn() { motionBtn.setAttribute("aria-pressed", PixelSprites.motionPref() ? "true" : "false"); }
-motionBtn.addEventListener("click", () => { PixelSprites.setMotion(!PixelSprites.motionPref()); syncMotionBtn(); });
-PixelSprites.onMotion(syncMotionBtn);
-syncMotionBtn();
+$("planBtn").addEventListener("click", () => ($("planMenu").hidden ? openPlanMenu() : closePlanMenu(true)));
+$("planBtn").addEventListener("keydown", (e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); openPlanMenu(); } });
+$("planMenu").addEventListener("click", (e) => { const li = e.target.closest("[role=option]"); if (li) pickPlan(Number(li.dataset.i)); });
+$("planMenu").addEventListener("mousemove", (e) => {
+  const li = e.target.closest("[role=option]"); if (!li || Number(li.dataset.i) === planMenuActive) return;
+  planMenuActive = Number(li.dataset.i);
+  $("planMenu").querySelectorAll("[role=option]").forEach((x) => x.classList.toggle("active", x === li));
+  $("planMenu").setAttribute("aria-activedescendant", li.id);
+});
+$("planMenu").addEventListener("keydown", (e) => {
+  const n = $("planSel").options.length;
+  if (e.key === "Escape") { e.preventDefault(); closePlanMenu(true); return; }
+  if (e.key === "Tab") { closePlanMenu(); return; }
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickPlan(planMenuActive); return; }
+  const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+  if (step) planMenuActive = (planMenuActive + step + n) % n;
+  else if (e.key === "Home") planMenuActive = 0;
+  else if (e.key === "End") planMenuActive = n - 1;
+  else return;
+  e.preventDefault(); renderPlanMenu();
+  const a = $("planMenu").querySelector(".active"); if (a) a.scrollIntoView({ block: "nearest" });
+});
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#planMenu, #planBtn")) closePlanMenu(); });
+window.addEventListener("resize", () => { closePlanMenu(); hideHoverCard(); });
+for (const id of ["tokenChip", "statusBadge"]) {
+  $(id).addEventListener("mouseenter", () => showHoverCard(id));
+  $(id).addEventListener("mouseleave", hideHoverCard);
+  $(id).addEventListener("focus", () => showHoverCard(id));
+  $(id).addEventListener("blur", hideHoverCard);
+}
 
-$("planSel").addEventListener("change", () => { planSel = $("planSel").value; render(); });
+$("planSel").addEventListener("change", () => { planSel = $("planSel").value; planUserPicked = true; render(); });
 new ResizeObserver(() => { sizeStage(); layoutStations(); renderNarrowList(); }).observe($("stagewrap"));
 (async () => {
   await loadScene();
