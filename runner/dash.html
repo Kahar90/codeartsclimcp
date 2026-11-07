@@ -205,6 +205,29 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .small { color: var(--muted); font-size: 12.5px }
 .mute { color: var(--muted) }
 
+/* ---------- control room ---------- */
+.cr-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap }
+.cr-head h1 { font: 700 28px/1.2 var(--font-display); margin: 0 }
+.cr-sub { color: var(--muted); font-size: 13.5px }
+.crtiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px }
+.crtile { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 2px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; color: var(--muted); font: inherit; text-align: left }
+.crtile:hover { border-color: var(--border-2) }
+.crtile.on { border-color: var(--sel); background: var(--sel-bg) }
+.crtile .buk-ico { width: 20px; height: 20px; flex: none }
+.crtile .crn { font: 700 22px/1 var(--font-display); margin-left: auto }
+.crtile .crw { font-size: 12.5px; font-weight: 650 }
+.crtile.s-bad { color: var(--bad) } .crtile.s-run, .crtile.s-done { color: var(--run) } .crtile.s-idle { color: var(--muted) }
+.cr-list { margin-top: 18px; display: grid; gap: 12px }
+.cr-sec { border: 1px solid var(--border); background: var(--panel); border-radius: var(--radius); overflow: hidden }
+.cr-sec-h { display: flex; align-items: center; gap: 9px; padding: 11px 14px; font-weight: 700; color: var(--fg) }
+.cr-sec-h .buk-ico { width: 16px; height: 16px; flex: none }
+.cr-sec-h .cnt { margin-left: auto; color: var(--faint); font-size: 12.5px }
+.cr-name { padding: 10px 14px; border-top: 1px solid var(--border); cursor: pointer; font-size: 13.5px }
+.cr-name.eye { cursor: pointer }
+.cr-name.eye:hover { border-color: var(--sel) }
+.cr-name:hover { background: var(--panel-2) }
+@media (max-width: 640px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+
 /* ---------- motion ---------- */
 @keyframes rowflash { 0% { background: var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel) } 100% { background: transparent; box-shadow: none } }
 .flash { animation: rowflash 1.6s ease-out 1 }
@@ -573,6 +596,64 @@ function prog(p, res) {
   const k = res === 'failed' ? 'bad' : res === 'done' ? 'ok' : '';
   return `<div class="prog ${k}"><i style="width:${pct}%"></i></div>`;
 }
+// ---------- control room: the default route (#/) ----------
+// Bucket order and wording; tone maps to the shared badge colours (s-bad / s-run / s-done / s-idle).
+const CR_BUCKETS = [
+  { key: 'attention', word: 'Needs you', tone: 'bad' },
+  { key: 'running', word: 'Running', tone: 'run' },
+  { key: 'done', word: 'Done', tone: 'done' },
+  { key: 'ended', word: 'Ended', tone: 'idle' },
+];
+// Every bucket gets its own icon shape so a status is never colour-only.
+const CR_SHAPE = { attention: 'triangle', running: 'circle', done: 'diamond', ended: 'square' };
+function crIcon(key) {
+  const s = CR_SHAPE[key] || 'circle';
+  const d = s === 'triangle' ? '<path d="M9 2.2 16.2 15.4H1.8Z"/>'
+    : s === 'diamond' ? '<path d="M9 2.2 15.8 9 9 15.8 2.2 9Z"/>'
+    : s === 'square' ? '<rect x="2.6" y="2.6" width="12.8" height="12.8" rx="1.6"/>'
+    : '<circle cx="9" cy="9" r="6.6"/>';
+  return `<svg class="buk-ico" data-shape="${s}" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+// The server sends bucket on every lane; this fallback keeps old payloads (and the demo fixture
+// until it carries bucket itself) rendering by mirroring the server's laneBucket rules.
+function laneBucket(l) {
+  if (l && l.bucket) return l.bucket;
+  const x = l || {}, r = String(x.result || '');
+  const h = String(x.health || '').toLowerCase();
+  if (/stall|dead/.test(h) || ['failed', 'stopped', 'killed', 'paused', 'needs review'].includes(r)) return 'attention';
+  if (x.running) return 'running';
+  if (r === 'done' || r === 'continued') return 'done';
+  return 'ended';
+}
+let crFilter = ''; // '' = show all; a bucket key filters the list
+function crCounts() {
+  const c = { attention: 0, running: 0, done: 0, ended: 0 };
+  for (const l of lanes) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; }
+  return c;
+}
+function crTile(b, n) {
+  const on = crFilter === b.key;
+  return `<button type="button" class="crtile s-${b.tone}${on ? ' on' : ''}" data-cr="${b.key}" aria-pressed="${on}" title="${esc(b.word)}">${crIcon(b.key)}<span class="crn">${n}</span><span class="crw">${esc(b.word)}</span></button>`;
+}
+function renderControl() {
+  const c = crCounts();
+  const picked = crFilter ? lanes.filter((l) => laneBucket(l) === crFilter) : lanes;
+  const secs = CR_BUCKETS.map((b) => {
+    if (crFilter && b.key !== crFilter) return '';
+    const ls = picked.filter((l) => laneBucket(l) === b.key);
+    const rows = ls.length ? ls.map((l) => `<div class="cr-name" data-go="/lane/${esc(l.id)}">${esc(l.task)}</div>`).join('') : '<div class="small" style="padding:10px 14px">none</div>';
+    return `<section class="cr-sec" data-bucket="${b.key}"><div class="cr-sec-h">${crIcon(b.key)}<span>${esc(b.word)}</span><span class="cnt">${ls.length}</span></div>${rows}</section>`;
+  }).join('');
+  $('view').innerHTML = `<div class="pad">
+    <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · pick a tile to filter</div></div>
+    <div class="crtiles" role="group" aria-label="Lane buckets">${CR_BUCKETS.map((b) => crTile(b, c[b.key] || 0)).join('')}</div>
+    <div class="cr-list">${secs || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div></div>`;
+  for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; renderControl(); };
+  for (const g of $('view').querySelectorAll('[data-go]')) g.onclick = () => go(g.dataset.go);
+  mountSprites();
+  syncBarPad();
+}
+
 // ---------- plan-home state that survives the 2.5 s polls ----------
 let curPlan = null;
 const waveCollapsed = new Map(); // "planId::waveIndex" -> true
@@ -616,7 +697,11 @@ function renderRail() {
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
   const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
   const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${dot(CAUI.status(l.health))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
-  let h = '<div class="rail-h">Plans</div>';
+  const attention = lanes.filter((l) => laneBucket(l) === 'attention').length;
+  let h = `<div class="rail-card cr${route.kind === '' ? ' sel' : ''}" data-go="/">
+    <div class="rail-row"><span class="ca-dot" style="color:var(--sel)"></span><span class="rail-title">Control room</span>${attention ? `<span class="ca-badge s-bad">${attention}</span>` : ''}</div>
+    <div class="rail-sub">what needs you, running, done, ended</div></div>`;
+  h += '<div class="rail-h">Plans</div>';
   h += plans.length ? plans.map((p) => {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
@@ -943,13 +1028,14 @@ async function refresh(full) {
   try { [plans, lanes] = await Promise.all([api('/api/plans'), api('/api/lanes')]); }
   catch { $('counts').textContent = 'dashboard server not reachable'; return; }
   $('counts').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`;
-  if (!route.kind) { const p = plans[0], l = lanes.find((x) => x.running) || lanes[0]; if (p) return go('plan/' + p.id); if (l) return go('lane/' + l.id); }
   renderRail();
   if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
   else if (route.kind === 'lane') {
     try { const d = await api(`/api/lane/${encodeURIComponent(route.id)}/detail`); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
     catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-  }   else if (!plans.length && !lanes.length) await renderOnboard();
+  }
+  else if (!plans.length && !lanes.length) await renderOnboard();
+  else renderControl();
 }
 // Control buttons and inline note boxes are wired once by delegation so re-renders never double-bind them.
 document.addEventListener('click', (e) => {
