@@ -282,6 +282,12 @@ async function runLane(repoArg, task, opts = {}) {
   if (opts.resume && !(prev && prev.result && prev.result !== 'done')) die(`nothing to resume: lane ${id} has no paused, stopped or failed run`, 2);
   // Request errors first (they need no CodeArts), then the install.
   if (!fs.existsSync(EXE)) die(`codearts not found at ${EXE}; ca onboard --yes installs it`, 2);
+  // Bind the lane to the repo's plan before it is registered (create, append or un-archive it). A resume
+  // of a lane the plan already lists is left alone; a failure here only warns, it never stops the lane.
+  if (!(opts.resume && laneAlreadyPlanned(repo, task))) {
+    try { ensurePlan(repo, task, briefEarly); }
+    catch (e) { process.stderr.write(`[${task}] plan warning: ${oneLine(String((e && e.message) || e), 200)}\n`); }
+  }
   if (!resumed) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
   fs.rmSync(path.join(dir, 'KICK'), { force: true }); // a stale kick must not fire at once on resume
@@ -1515,6 +1521,11 @@ function ensurePlan(repo, task, briefText) {
     registerPlan(planFile);
     return planFile;
   });
+}
+// True when the lane is already listed in its repo's open plan (a resume must not rewrite that plan).
+function laneAlreadyPlanned(repo, task) {
+  try { const main = projectOf(repo).key; const p = readJSON(path.join(main, 'tasks', 'plan.json')); return !!(p && !planClosed(p) && planListsLane(p, main, repo, task)); }
+  catch { return false; }
 }
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
