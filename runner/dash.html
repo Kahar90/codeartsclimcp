@@ -223,6 +223,11 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .onb-detail { color: var(--muted); font-size: 12.5px; margin-top: 3px; overflow-wrap: anywhere }
 .onb-fix { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 4px; min-width: 0 }
 .onb-fix code { flex: 1; min-width: 0; font: 11.5px var(--mono); background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 9px; color: var(--sel-ink); white-space: pre-wrap; overflow-wrap: anywhere }
+.onb-tbl { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12.5px }
+.onb-tbl th, .onb-tbl td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere }
+.onb-tbl th { color: var(--faint); font-size: 11px; letter-spacing: .06em; text-transform: uppercase }
+.onb-tbl tr:first-child th { border-top: 0 }
+.onb-tbl td:first-child { font-weight: 650 }
 #onboard code { overflow-wrap: anywhere }
 #onboard .box, #onboard ul.plain li > span, #onboard .cmd > *, #onboard .onb-row > * { min-width: 0 }
 
@@ -1183,6 +1188,8 @@ async function copyText(t) {
 }
 // The setup prompt a human pastes into their coding agent; the copy box must show it verbatim.
 const ONBOARD_PROMPT = 'Set up CodeArts lanes by following https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md';
+// How to ask for a lane in each harness, shown as a small table under the setup prompt.
+const ASK = [['Claude Code', '/codearts-build <goal>'], ['Kiro', '#codearts-lanes <goal>'], ['Cursor', 'Use CodeArts lanes to <goal>'], ['Codex', 'Use CodeArts lanes to <goal>'], ['opencode', 'Use CodeArts lanes to <goal>'], ['VS Code', 'Use CodeArts lanes to <goal>']];
 async function renderOnboard() {
   const d = await fetchDoctor();
   const rows = Array.isArray(d?.checks) ? d.checks : [];
@@ -1201,6 +1208,9 @@ async function renderOnboard() {
     <div class="box"><h4>Set up in one prompt</h4>
       <p class="small">Paste this into your coding agent (Claude Code, Kiro, Cursor, Codex, opencode or VS Code). It installs and connects everything; you only paste your Huawei Cloud keys into a local form.</p>
       <div class="cmd" data-copy="${esc(ONBOARD_PROMPT)}" title="click to copy"><code>${esc(ONBOARD_PROMPT)}</code><button type="button" class="onb-copy">Copy</button></div></div>
+    <div class="box"><h4>Then ask for work, in any repo</h4>
+      <table class="onb-tbl"><thead><tr><th>Harness</th><th>What to type</th></tr></thead><tbody>${ASK.map(([h, t]) => `<tr><td>${esc(h)}</td><td><code>${esc(t)}</code></td></tr>`).join('')}</tbody></table>
+      <p class="small" style="margin-top:8px">Restart your agent once after setup so it loads the CodeArts tools.</p></div>
     <div class="box" id="onb-doctor"><h4>Environment (doctor)</h4>${summary}${doctorRows}</div>
     <div class="box"><h4>Fix everything in one go</h4>
       <div class="cmd" id="onboard-cmd" title="click to copy"><code>ca onboard --yes</code><button id="onboard-copy">Copy</button></div>
