@@ -52,6 +52,8 @@
 //        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
 //        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
 //        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
+//        CA_MAX_LANES_PER_MODEL=maas/glm-5.3=2,default=4 (cap lanes per build model; glm 3,
+//        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
 //        lane, 3 missing credentials, 4 needs review, 5 paused at LANE_TIMEOUT (resume with --resume),
 //        124 wait timeout.
@@ -723,11 +725,14 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       } else if (kick) {
         await send(sid, resumeText('kick', `${kick.mode} kick from ${kick.by}`) + extra, model, agent);
       } else if (o.kind === 'think') {
+        let switched = false;
         if (++thinkStalls >= 2 && (label === 'build' || label === 'fix') && FALLBACK && FALLBACK !== 'none' && FALLBACK !== model) {
           say(`thinking stalled ${thinkStalls} times on ${model}: switching the builder to ${FALLBACK} (same session, context kept)`);
           S.modelSwitches = [...(S.modelSwitches || []), { at: now(), from: model, to: FALLBACK, why: `${thinkStalls} thinking stalls` }];
           model = FALLBACK; curModel = model; buildModel = model; S.models.build = model; thinkStalls = 0; interruptions = 0; save(true);
+          switched = true;
         }
+        if (switched) await waitForSlot(model);
         await send(sid, o.nudge, model, agent);
       } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
@@ -771,6 +776,25 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.`;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
 
+  // Model slots: before a build session starts (and after a fallback model switch), wait until
+  // fewer than the model's cap of the OTHER running lanes use it. A crowded model must not get
+  // another session. While queued the lane shows it in its activity and ca stop still works.
+  let queuedTotal = 0;
+  const waitForSlot = async (model) => {
+    const limits = parseLimits(process.env.CA_MAX_LANES_PER_MODEL || '');
+    const t0 = now(); let logged = false;
+    for (;;) {
+      const running = lanes().filter((l) => !l.s.result && l.id !== id).map((l) => (l.s.models && l.s.models.build) || '').filter(Boolean);
+      const slot = laneSlots({ model, running, limits });
+      if (slot.ok) break;
+      if (!logged) { logged = true; say(`queued: ${slot.reason}`); L(`  ! queued: ${slot.reason}`); }
+      S.activity = `queued: ${slot.reason}`; S.queuedMs = queuedTotal + (now() - t0); save();
+      if (fs.existsSync(stopFile)) { const e = new Error('stopped'); e.caStop = true; throw e; }
+      await sleep(20000);
+    }
+    if (logged) { queuedTotal += now() - t0; S.queuedMs = queuedTotal; say(`slot free for ${model} after ${dur(now() - t0)}`); save(true); }
+  };
+
   // ---- run ----
   let exitCode = 1, reason = '', review = null;
   server.events(onEvent, (up) => { S.sse = up; }).catch(() => {});
@@ -788,7 +812,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     for (let i = 0; i < 30 && !startKeys; i++) { startKeys = keyProblem(buildModel, ''); if (!startKeys) await sleep(100); }
     if (startKeys) { L(`  ! ${startKeys.message}`); S.keysMessage = startKeys.message; throw Object.assign(new Error('auth'), { caAuth: true }); }
 
-    // BUILD
+    // BUILD (first wait for a free slot on the build model: a crowded model must not start a session)
+    await waitForSlot(buildModel);
     let sid = await newSession(`${task} build`); S.buildSession = sid; builderSessions.add(sid); S.attempt = 1;
     phase('build', 'sending brief'); L(`== build (${BUILD}) session ${sid}; ${checks.length} CHECK lines, ${stepCount} steps`);
     let first = brief;
@@ -847,6 +872,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     }
   } catch (err) {
     if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
+    else if (err && err.caStop) { reason = 'stopped'; exitCode = 1; L('== stopped while queued for a model slot'); }
     else { reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`); }
   }
 
@@ -868,7 +894,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
-    `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}`,
+    `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}${S.queuedMs ? ` (queued ${dur(S.queuedMs)} for a model slot)` : ''}`,
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
     ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
     `steering: ${S.steers.length ? S.steers.map((x) => `[${x.by}] ${oneLine(x.text, 160)}`).join(' / ') : 'none'}`,
