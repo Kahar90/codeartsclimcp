@@ -294,6 +294,37 @@ const TOOLS = [
     build: (a) => ['plan', needStr(a.file, 'file')],
   },
   {
+    name: 'ca_plan_list',
+    description: 'List the registered plans with their state and a per-wave lane summary (ca plan list). Use it to see which plan is active and what it still contains before closing it.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    ok: [0],
+    timeout: 30000,
+    build: () => ['plan', 'list'],
+  },
+  {
+    name: 'ca_plan_close',
+    description: 'Close a registered plan (ca plan close [id] --reason <reason>) when the work is finished or a wave will not run: the plan is marked done, the reason is recorded, and never-started lanes become Dropped. Defaults to the newest registered plan when id is omitted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'plan id to close (default: the newest registered plan)' },
+        reason: { type: 'string', description: 'why the plan is closed; recorded on the plan' },
+      },
+      required: [],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['plan', 'close', ...optStr(a, 'id'), ...(a.reason === undefined || a.reason === null ? [] : ['--reason', needStr(a.reason, 'reason')])],
+  },
+  {
+    name: 'ca_gc',
+    description: 'Forget lanes that finished more than 3 days ago (ca gc) so ca_status and the dashboard stay short. Use it once old lanes no longer matter.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    ok: [0],
+    timeout: 60000,
+    build: () => ['gc'],
+  },
+  {
     name: 'ca_note',
     description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use it to keep the dashboard current while lanes run.',
     inputSchema: {
