@@ -72,11 +72,13 @@ Two sets of models are involved; they are independent.
 - **Your model (the lead):** any model your harness runs. It only plans, writes briefs and
   reads summaries, so a small context is enough.
 - **The worker models (CodeArts):**
-  - with `MAAS_API_KEY`: builder `maas/deepseek-v4.1-flash` (default, fast), `maas/glm-5.3`
-    (long or cross-cutting lanes, also the default reviewer), `maas/glm-5.2`;
+  - with `MAAS_API_KEY`: builder `maas/deepseek-v4.1-flash` (default for every lane, UI and
+    8-step lanes included), reviewer `maas/glm-5.3`. Use GLM 5.3 as the builder only for very
+    complex lanes: many files across modules, long context, hard design reasoning. After 2
+    thinking stalls the runner switches a stuck builder to flash (`FALLBACK_MODEL:`);
   - without it: `huaweicloud-maas/GLM-5.2` (builder) and `huaweicloud-maas/GLM-5.1` (reviewer)
     on the CodeArts quota.
-  - Per lane: first brief line `MODEL: maas/glm-5.3` and/or `REVIEW_MODEL: ...`. Globally: env
+  - Per lane: first brief line `MODEL: maas/glm-5.3` (complex lanes only) and/or `REVIEW_MODEL: ...`. Globally: env
     `BUILD_MODEL`, `REVIEW_MODEL`. `NO_REVIEW=1` skips the review.
 
 ## 4. Run a lane
