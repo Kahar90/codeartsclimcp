@@ -283,12 +283,6 @@ async function runLane(repoArg, task, opts = {}) {
   if (opts.resume && !(prev && prev.result && prev.result !== 'done')) die(`nothing to resume: lane ${id} has no paused, stopped or failed run`, 2);
   // Request errors first (they need no CodeArts), then the install.
   if (!fs.existsSync(EXE)) die(`codearts not found at ${EXE}; ca onboard --yes installs it`, 2);
-  // Bind the lane to the repo's plan before it is registered (create, append or un-archive it). A resume
-  // of a lane the plan already lists is left alone; a failure here only warns, it never stops the lane.
-  if (!(opts.resume && laneAlreadyPlanned(repo, task))) {
-    try { ensurePlan(repo, task, briefEarly); }
-    catch (e) { process.stderr.write(`[${task}] plan warning: ${oneLine(String((e && e.message) || e), 200)}\n`); }
-  }
   if (!resumed) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
   fs.rmSync(path.join(dir, 'KICK'), { force: true }); // a stale kick must not fire at once on resume
@@ -350,6 +344,14 @@ async function runLane(repoArg, task, opts = {}) {
   const save = (force) => { if (!force && now() - lastWrite < 1000) return; lastWrite = now(); S.updatedAt = now(); writeAtomic(path.join(dir, 'state.json'), JSON.stringify(S, null, 2));
     // finished lanes also keep a copy in the registry, so merged and removed worktrees stay visible
     if (S.result) try { fs.mkdirSync(path.join(REG, 'final'), { recursive: true }); fs.writeFileSync(path.join(REG, 'final', `${id}.json`), JSON.stringify(S, null, 2)); } catch {} };
+  // Write the first state, then bind the lane to the repo's plan (create, append or un-archive it): the plan
+  // never appears on the dashboard before its lane shows as running. A resume of a lane the plan already
+  // lists is left alone; a failure here only warns, it never stops the lane.
+  save(true);
+  if (!(opts.resume && laneAlreadyPlanned(repo, task))) {
+    try { ensurePlan(repo, task, briefEarly); }
+    catch (e) { process.stderr.write(`[${task}] plan warning: ${oneLine(String((e && e.message) || e), 200)}\n`); }
+  }
   const phase = (p, activity) => { if (S.phase !== p) S.phases.push({ phase: p, at: now() }); S.phase = p; if (activity) S.activity = activity; save(true); };
   const syncCommits = () => {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);

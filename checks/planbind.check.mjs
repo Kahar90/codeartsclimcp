@@ -87,6 +87,14 @@ r = ca(['lane', repo3, 'probe'], { CA_NO_PLAN: '1' });
 check('CA_NO_PLAN=1 runs the lane without creating a plan', r.status === 0 && !fs.existsSync(path.join(repo3, 'tasks', 'plan.json')) && !/smoke probe/.test(planList()));
 check('onboard runs its smoke lane with CA_NO_PLAN=1', /CA_NO_PLAN/.test(fs.readFileSync(path.join(ROOT, 'runner', 'onboard.mjs'), 'utf8')));
 
+// ---- 6b. the plan never appears before its lane is visible as running ----
+{
+  const src = fs.readFileSync(CA, 'utf8');
+  const iSave = src.search(/ {2}save\(true\);\r?\n {2}if \(!\(opts\.resume && laneAlreadyPlanned\(repo, task\)\)\) \{/);
+  const iReg = src.indexOf('fs.writeFileSync(path.join(REG, `${id}.json`)');
+  check('runLane binds the plan only after the lane is registered and its first state is saved', iSave > 0 && iReg > 0 && iReg < iSave, `reg ${iReg} save+bind ${iSave}`);
+}
+
 // ---- 7. Office follows the working plan ----
 const chromePath = findChrome();
 if (!chromePath) results.push('PASS SKIP office part: no Chrome found (set CHROME_PATH)');
