@@ -86,7 +86,14 @@ function addTrusted(folder) {
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 // First summary line mentioning AK/SK, MaaS or auth (a smoke run rejected the keys).
-const authReason = (file) => (readFileSafe(file).split(/\r?\n/).find((l) => l.trim() && /AK\/SK|MaaS|auth/i.test(l)) || '').trim();
+// The runner's `keys:` line names the rejected key and the fix; older summaries fall back to any
+// line about AK/SK, MaaS or auth that is not the `=== lane ... ===` header.
+const authReason = (file) => {
+  const lines = readFileSafe(file).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const keys = lines.find((l) => l.startsWith('keys:'));
+  if (keys) return keys.replace(/^keys:\s*/, '');
+  return lines.find((l) => !l.startsWith('===') && /AK\/SK|MaaS|auth/i.test(l)) || '';
+};
 // The "== finished:" reason from the live log (never the CA_RESULT line).
 const finishedReason = (file) => {
   const hit = readFileSafe(file).split(/\r?\n/).find((l) => l.startsWith('== finished:'));
@@ -207,7 +214,7 @@ export default async function onboard(args) {
           const lines = (r.stdout || '').split(/\r?\n/).filter(Boolean);
           const acts = lines.map((l) => l.match(/^(wrote|updated|unchanged) (.+)$/)).filter(Boolean);
           // The detail is only the file actions; setup notes are kept apart and printed on their own.
-          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l));
+          const notes = lines.filter((l) => !/^(wrote|updated|unchanged) /.test(l) && !/^\w+: restart /i.test(l)); // the restart line repeats Next
           const rel = (p) => {
             const rr = path.relative(repo, p);
             if (rr && !rr.startsWith('..') && !path.isAbsolute(rr)) return rr;

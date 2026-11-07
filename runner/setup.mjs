@@ -220,7 +220,7 @@ function buildPlan(harness, repo, flags) {
       const entry = { type: 'stdio', ...SERVER, env: {} };
       let current = null;
       try { current = loadJSON(userJson).mcpServers?.codearts; } catch { current = null; }
-      if (deepEqual(current, entry)) {
+      if (current && current.command === entry.command && JSON.stringify(current.args) === JSON.stringify(entry.args)) {
         notes.push(`claude: MCP server already in ${userJson}`);
       } else if (!flags.dryRun && process.env.CA_CLAUDE_CLI !== 'none' && claudeCliAdd()) {
         notes.push('claude: MCP server added with the claude CLI');
@@ -228,7 +228,6 @@ function buildPlan(harness, repo, flags) {
         addJSON(plan, errors, userJson, 'mcpServers', 'codearts', entry);
       }
       notes.push('claude: restart Claude Code (or run /mcp), then in any repo type: /codearts-build <goal>');
-      notes.push(`claude: to register the server by hand: claude mcp add -s user codearts -- node ${CA_MJS} mcp`);
     } else {
       addJSON(plan, errors, path.join(repo, '.mcp.json'), 'mcpServers', 'codearts', SERVER);
       // Pre-approve the project server and the read-only tools in the personal (gitignored)

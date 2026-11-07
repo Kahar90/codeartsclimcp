@@ -60,8 +60,8 @@ fs.writeFileSync(skillP, '---\nname: codearts-build\n---\nmy own\n');
 r = ca(['setup', 'claude', repo]);
 check('claude: a user-edited skill (no marker) is never overwritten', rd(skillP).includes('my own') && /kept your own skill/.test(r.out), r.out);
 const claudeHome = path.join(tmp, 'claude-home');
-r = spawnSync(process.execPath, [CA, 'setup', 'claude', repo, '--user'], { env: { ...env, CLAUDE_CONFIG_DIR: claudeHome }, encoding: 'utf8' });
-check('claude --user: also installs the skill in the user skills dir and prints claude mcp add', /name: codearts-build/.test(rd(path.join(claudeHome, 'skills', 'codearts-build', 'SKILL.md')) || '') && /claude mcp add/.test(r.stdout), r.stdout + r.stderr);
+r = spawnSync(process.execPath, [CA, 'setup', 'claude', repo, '--user'], { env: { ...env, CLAUDE_CONFIG_DIR: claudeHome, CA_CLAUDE_CLI: 'none' }, encoding: 'utf8' });
+check('claude --user: installs the skill in the user skills dir and registers the user MCP server', /name: codearts-build/.test(rd(path.join(claudeHome, 'skills', 'codearts-build', 'SKILL.md')) || '') && isServer(js(path.join(claudeHome, '.claude.json'))?.mcpServers?.codearts), r.stdout + r.stderr);
 
 // codex: config.toml is always written (machine-wide), once
 r = ca(['setup', 'codex', repo]);
