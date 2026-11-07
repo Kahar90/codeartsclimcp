@@ -2,6 +2,7 @@
 // --status never printing values. Uses a temp CA_CREDENTIALS file; never touches real keys.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-auth-'));
 const cred = path.join(tmp, 'sub', 'credentials.json');
-const env = { ...process.env, CA_CREDENTIALS: cred, CA_DASH: '0' };
+// A fake ModelArts MaaS endpoint so the MaaS key in this check verifies locally (never a real key).
+const fakeMaas = http.createServer((req, res) => {
+  const ok = req.url.endsWith('/models') && req.headers.authorization === 'Bearer mk-333';
+  res.writeHead(ok ? 200 : 401, { 'content-type': 'application/json' });
+  res.end(ok ? '{"data":[{"id":"glm-5.3"}]}' : '{"error":"unauthorized"}');
+});
+await new Promise((r) => fakeMaas.listen(0, '127.0.0.1', r));
+const env = { ...process.env, CA_CREDENTIALS: cred, CA_DASH: '0', MAAS_BASE_URL: `http://127.0.0.1:${fakeMaas.address().port}/openai/v1` };
 const ca = (args, input = '') => { const r = spawnSync(process.execPath, [CA, 'auth', ...args], { env, encoding: 'utf8', input, timeout: 30000 }); return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }; };
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 200) : ''}`);
 const rd = () => { try { return JSON.parse(fs.readFileSync(cred, 'utf8')); } catch { return null; } };
@@ -41,6 +49,7 @@ await new Promise((x) => setTimeout(x, 800));
 let gone = false; try { await fetch(f.url, { signal: AbortSignal.timeout(1500) }); } catch { gone = true; }
 check('form server exits after a successful save', gone);
 
+fakeMaas.close();
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;
