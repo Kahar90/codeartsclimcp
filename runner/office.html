@@ -90,6 +90,12 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 .plate.compact .p-badge { right: -6px; top: -6px; width: 15px; height: 15px; font: 700 10px/15px var(--font); }
 #overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #overflow[hidden] { display: none; }
+.empty-card { position: absolute; left: 50%; top: 58%; transform: translate(-50%, -50%); z-index: 7; width: min(360px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; background: rgba(35, 29, 44, .92); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, .5); text-align: center; animation: ca-rise var(--dur-3) var(--ease-out); backdrop-filter: blur(4px); }
+.empty-card[hidden] { display: none !important; }
+.empty-card b { font: 700 16px var(--font-display); }
+.empty-card span { color: var(--muted); font-size: 13.5px; }
+.empty-card a { margin-top: 4px; font-weight: 600; }
+body.narrow .empty-card { top: 50%; padding: 12px 14px; }
 .ov-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border-2); color: var(--fg); font: 650 13px var(--font); cursor: pointer; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); }
 .ov-pill:hover { border-color: var(--sel); }
 .ov-pill:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
@@ -271,6 +277,7 @@ body.narrow #win a { display: inline-flex; align-items: center; }
       <button type="button" class="plate" id="plate-artist" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span></button>
       <button type="button" class="plate" id="plate-reviewer" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span></button>
     </div>
+    <div id="emptyCard" class="empty-card" role="status" hidden><b>The workshop is quiet</b><span>No lanes yet. Ask your agent to plan and start one; it shows up here as soon as it runs.</span><a href="/">Open Lanes for setup</a></div>
     <div id="overflow" hidden>
       <div class="ov-list" id="ovList" hidden></div>
       <button type="button" id="ovPill" class="ov-pill" aria-expanded="false" aria-controls="ovList"></button>
@@ -751,7 +758,8 @@ function planOutcome(lanes) {
   const n = {}; for (const l of lanes) { const o = laneOutcome(l); n[o] = (n[o] || 0) + 1; }
   const done = n.done || 0, counted = lanes.length - (n.continued || 0) - (n.dropped || 0);
   let word, tone;
-  if (counted > 0 && done === counted) { word = "Done"; tone = "done"; }
+  if (!lanes.length) { word = "No lanes yet"; tone = "idle"; }
+  else if (counted > 0 && done === counted) { word = "Done"; tone = "done"; }
   else if (done > 0) { word = `Done ${done} of ${counted}`; tone = "warn"; }
   else { word = "Not finished"; tone = "bad"; }
   return { n, done, counted, word, tone };
@@ -941,6 +949,7 @@ function render() {
   renderNarrowList();
   fireCues(cues);
   updateWin();
+  $("emptyCard").hidden = !(mode !== "demo" && model && model.lanes.length === 0 && !(model.plan && model.plan.waves && model.plan.waves.some((w) => (w.lanes || []).length)));
 }
 
 async function tick() {

@@ -121,3 +121,5 @@ a { color: var(--sel-ink); }
   .ca-counts { font-size: 12.5px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; animation-duration: 0s !important; } }
+.ca-update-status { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--sel-bg); color: var(--sel-ink); font-weight: 600; font-size: 13px; animation: ca-fade-in var(--dur-2) var(--ease-out); }
+.ca-spin { width: 14px; height: 14px; flex: none; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: ca-spin 0.7s linear infinite; }

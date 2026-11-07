@@ -373,26 +373,30 @@
           '<button type="button" class="btn ca-update-copy">Copy command</button>' +
           '<button type="button" class="btn ca-update-later">Later</button>' +
         '</div>' +
+        '<div class="ca-update-status" role="status" hidden><span class="ca-spin" aria-hidden="true"></span><span class="ca-update-st"></span></div>' +
         '<div class="ca-update-err" hidden></div>';
       var now = el.querySelector('.ca-update-now');
       var copy = el.querySelector('.ca-update-copy');
       var later = el.querySelector('.ca-update-later');
       var err = el.querySelector('.ca-update-err');
+      var acts = el.querySelector('.ca-update-acts'), stat = el.querySelector('.ca-update-status'), st = el.querySelector('.ca-update-st');
+      function busy(text) { acts.hidden = !!text; stat.hidden = !text; if (text) st.textContent = text; }
       copy.addEventListener('click', function () { copyText(info.cmd || '').then(function (ok) { toast(ok ? 'Command copied' : 'Copy failed', { tone: ok ? 'info' : 'bad' }); }); });
       later.addEventListener('click', function () { dismissUpdate(info.latest); if (btn.isConnected) btn.remove(); if (pop) close(); });
       now.addEventListener('click', function () {
         if (demo) { toast('Demo: would run the update'); return; }
-        now.disabled = true; now.classList.add('busy'); now.textContent = 'Updating...';
+        if (err) { err.hidden = true; err.textContent = ''; }
+        busy('Installing the update...');
         fetch('/api/update', { method: 'POST', headers: { 'content-type': 'application/json' } })
           .then(function (r) { return r.json().catch(function () { return {}; }); })
           .then(function (j) {
             if (!j || j.ok !== true) throw new Error((j && j.error) || 'update failed');
-            now.textContent = 'Restarting the dashboard...';
+            busy('Restarting the dashboard...');
             return waitForUi();
           })
           .then(function () { location.reload(); })
           .catch(function (e) {
-            now.disabled = false; now.classList.remove('busy'); now.textContent = 'Update now';
+            busy(''); now.focus();
             if (err) { err.hidden = false; err.textContent = String((e && e.message) || e); }
             var fallback = document.createElement('button');
             fallback.type = 'button'; fallback.className = 'btn tiny ca-update-copy'; fallback.textContent = 'Copy command';
