@@ -1589,6 +1589,30 @@ window.__office = {
         suggest: l ? (l.suggest || "") : "",
       };
     });
+    const hotStations = SCENE.hotdesks.map((hd) => {
+      const id = hotSeat[hd.key];
+      const l = id && model ? model.lanes.find((x) => x.id === id) : null;
+      if (!l) return null;
+      const f = hd.foot;
+      const plate = $("plate-" + hd.key).getBoundingClientRect();
+      const sp = hotSprites[hd.key];
+      const st = CAUI.status(l.health);
+      const desk = desks[hd.key];
+      return {
+        station: hd.key, role: hd.role, laneId: id, name: laneName(l),
+        status: st.key,
+        clip: sp ? sp.clip : "",
+        frame: sp && sp.el && sp.el.dataset.frame !== undefined ? Number(sp.el.dataset.frame) : null,
+        foot: { x: r.x + ox + f[0] * k, y: r.y + oy + f[1] * k },
+        plate: { x: plate.x, y: plate.y, w: plate.width, h: plate.height },
+        done: l.progress ? (l.progress.done || 0) : 0,
+        total: l.progress ? (l.progress.total || 0) : 0,
+        tokens: CAUI.tokenTotal(l.tokens),
+        suggest: l.suggest || "",
+        desk: !!desk && desk.style.display !== "none",
+      };
+    }).filter(Boolean);
+    const allStations = stations.concat(hotStations);
     const winLane = winFor && winFor !== "lead" && model ? model.lanes.find((x) => x.id === winFor) : null;
     const winSrc = winFor === "lead" ? (model && model.plan) : winLane;
     const winTk = winSrc
@@ -1599,8 +1623,8 @@ window.__office = {
       plan: (model && model.plan && model.plan.title) || "",
       goal: (model && model.plan && model.plan.goal) || "",
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
-      stations,
-      overflow: model ? model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).map((l) => l.id) : [],
+      stations: allStations,
+      overflow: (() => { const ids = model ? model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).map((l) => l.id) : []; return { count: ids.length, ids, open: ovOpen }; })(),
       window: { open: !win.hidden && !!winFor, laneId: winFor, x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement), tokens: winTk, actions: [...$("winBtns").children].map((b) => b.dataset.action), suggest: (winLane && winLane.suggest) || "", noteOpen: !$("winNote").hidden },
       effects: effects.slice(),
       motion: PixelSprites.motion(),
