@@ -1,4 +1,4 @@
-MODEL: maas/glm-5.3
+MODEL: maas/deepseek-v4.1-flash
 You are working in a git repo (current directory): the `ca` CodeArts lane runner and its dashboard.
 Goal: the user runs lanes in several repos and projects at once and acts as the management plane. Rework the
 Lanes page home into a Control room that answers in two seconds: what needs me, what is running, what finished,

@@ -100,6 +100,15 @@ const dur = (ms) => {
 const oneLine = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const compact = (n) => { n = Number(n) || 0; if (n < 1000) return String(n); if (n < 1e6) { const v = n / 1000; return `${v < 10 ? v.toFixed(1) : Math.round(v)}k`.replace('.0k', 'k'); } return `${(n / 1e6).toFixed(n < 1e7 ? 2 : n < 1e8 ? 1 : 0)}M`; };
 const readJSON = (f, d = null) => { for (let i = 0; i < 3; i++) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return d; } } return d; };
+// state.json is read every 2 s by status, wait and the dashboard: a plain overwrite let readers see a half-written
+// file and the lane vanished from the list for one poll. Write a temp file and rename it over the old one; on
+// Windows a reader holding the file open makes rename fail with EPERM, so retry briefly, then fall back.
+const writeAtomic = (f, text) => {
+  const tmp = `${f}.${process.pid}.tmp`;
+  try { fs.writeFileSync(tmp, text); } catch { return; }
+  for (let i = 0; i < 5; i++) { try { fs.renameSync(tmp, f); return; } catch { const t = Date.now() + 15; while (Date.now() < t); } }
+  try { fs.writeFileSync(f, text); } catch {} try { fs.rmSync(tmp, { force: true }); } catch {}
+};
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const killTree = (pid) => { if (!pid) return; if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} } } };
 const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding: 'utf8' }); return (r.stdout || '').trim(); };
@@ -285,7 +294,7 @@ async function runLane(repoArg, task, opts = {}) {
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
-  const save = (force) => { if (!force && now() - lastWrite < 1000) return; lastWrite = now(); S.updatedAt = now(); try { fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(S, null, 2)); } catch {}
+  const save = (force) => { if (!force && now() - lastWrite < 1000) return; lastWrite = now(); S.updatedAt = now(); writeAtomic(path.join(dir, 'state.json'), JSON.stringify(S, null, 2));
     // finished lanes also keep a copy in the registry, so merged and removed worktrees stay visible
     if (S.result) try { fs.mkdirSync(path.join(REG, 'final'), { recursive: true }); fs.writeFileSync(path.join(REG, 'final', `${id}.json`), JSON.stringify(S, null, 2)); } catch {} };
   const phase = (p, activity) => { if (S.phase !== p) S.phases.push({ phase: p, at: now() }); S.phase = p; if (activity) S.activity = activity; save(true); };
@@ -914,7 +923,7 @@ function resumeLane(l, { note = '', by = 'ca resume' } = {}) {
   const logFile = path.join(l.repo, 'tasks', `${l.task}.lane.log`);
   const out = fs.openSync(logFile, 'a');
   const child = spawn(process.execPath, argv, { detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, CA_RESUMED_BY: by } });
-  child.unref();
+  child.unref(); fs.closeSync(out); // the child keeps its own handle; the long-lived dashboard must not leak one per resume
   return { ok: true, dry: false, argv, message: `resumed ${l.id} (pid ${child.pid}); log: ${logFile}` };
 }
 function cmdResume(args) {
