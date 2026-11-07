@@ -216,7 +216,11 @@
     if (!el || !anchor || !anchor.getBoundingClientRect) return;
     var a = anchor.getBoundingClientRect();
     var vw = window.innerWidth || document.documentElement.clientWidth || 0;
-    var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    // the smaller of the layout and visual viewport: a phone rotating or a mobile browser bar
+    // changing size can report a transient innerHeight larger than what is visible
+    var vv = window.visualViewport, de = document.documentElement;
+    var vh = Math.min(window.innerHeight || 1e9, (de && de.clientHeight) || 1e9, (vv && vv.height) || 1e9);
+    if (vh >= 1e9) vh = 0;
     var ew = el.offsetWidth || 0, eh = el.offsetHeight || 0;
     var roomBelow = vh - a.bottom - gap - margin, roomAbove = a.top - gap - margin;
     if (side === 'top') { if (roomAbove < Math.min(eh || 64, 120) && roomBelow > roomAbove) side = 'bottom'; }
@@ -238,13 +242,23 @@
   }
   // track(el, anchor, opts): place now and on window resize and scroll (capture). Returns a stop function.
   function track(el, anchor, opts) {
-    function run() { place(el, anchor, opts); }
+    var raf = 0;
+    function now() { place(el, anchor, opts); }
+    // place at once, then again on the next frame, after the browser has settled the new viewport
+    function run() { now(); if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(function () { raf = 0; now(); }); }
+    var vv = window.visualViewport;
+    var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(run) : null;
     run();
     window.addEventListener('resize', run);
     window.addEventListener('scroll', run, true);
+    if (vv) vv.addEventListener('resize', run);
+    if (ro) ro.observe(document.documentElement);
     return function stop() {
+      if (raf) cancelAnimationFrame(raf);
       window.removeEventListener('resize', run);
       window.removeEventListener('scroll', run, true);
+      if (vv) vv.removeEventListener('resize', run);
+      if (ro) ro.disconnect();
     };
   }
   // toast(msg, { tone = 'info' | 'bad', ms = 3200 }): one status toast at the bottom centre.
@@ -361,7 +375,7 @@
       el.setAttribute('aria-label', 'Update available');
       var notes = Array.isArray(info.notes) ? info.notes : [];
       var groups = notes.map(function (n) {
-        var items = (Array.isArray(n.items) ? n.items : []).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('');
+        var items = (Array.isArray(n.items) ? n.items : []).map(function (t) { return '<li>' + esc(t).replace(/`([^`]+)`/g, '<code>$1</code>') + '</li>'; }).join('');
         var head = esc(n.version || '') + (n.date ? ' &middot; ' + esc(n.date) : '');
         return '<div class="ca-update-grp"><div class="ca-update-gh">' + head + '</div><ul>' + items + '</ul></div>';
       }).join('');

@@ -123,3 +123,9 @@ a { color: var(--sel-ink); }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; animation-duration: 0s !important; } }
 .ca-update-status { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--sel-bg); color: var(--sel-ink); font-weight: 600; font-size: 13px; animation: ca-fade-in var(--dur-2) var(--ease-out); }
 .ca-spin { width: 14px; height: 14px; flex: none; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: ca-spin 0.7s linear infinite; }
+.ca-update-pop li code { font: 11.5px var(--mono); background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--sel-ink); }
+/* long release notes: title and actions stay put, only the notes scroll */
+.ca-update-pop:not([hidden]) { display: flex; flex-direction: column; overflow: hidden; }
+.ca-update-pop > .ca-update-title, .ca-update-pop > .ca-update-ver, .ca-update-pop > .ca-update-acts, .ca-update-pop > .ca-update-status, .ca-update-pop > .ca-update-err { flex: none; }
+.ca-update-notes { flex: 1 1 auto; min-height: 60px; overflow-y: auto; overscroll-behavior: contain; margin-right: -8px; padding-right: 8px; -webkit-mask-image: linear-gradient(#000 calc(100% - 18px), transparent); mask-image: linear-gradient(#000 calc(100% - 18px), transparent); padding-bottom: 10px; }
+.ca-update-pop li code { white-space: nowrap; }

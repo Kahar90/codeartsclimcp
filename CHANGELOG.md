@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.0 (2026-11-08)
+
+Updates
+- You now hear about new versions: `ca status`, `ca doctor`, `ca plan` and `ca lane` print one line when
+  a newer release is out (checked at most once a day in the background, never slowing a command;
+  `CA_NO_UPDATE_CHECK=1` turns it off).
+- `ca update --check` shows what is new in every newer version; `ca update` installs it and says to
+  restart your agent so its MCP server loads the new code.
+- Both dashboards show an Update pill with the release notes, Update now (installs, restarts the
+  dashboard and reloads the page), Copy command and Later.
+- MCP: `ca_update_check` and `ca_update`; your agent is told once when an update is available.
+- `ca doctor` has a `ca version` row.
+
+Office
+- Agent windows always stay on screen at any window size, scroll inside themselves when tall, and
+  move back inside when you resize.
+- On phones and portrait tablets the room sits on top with the lane list below, and an agent opens
+  as a bottom sheet.
+- Every window, menu, card and toast animates in and out (instant with reduced motion); nameplates
+  respond to hover and press and stay highlighted while their window is open.
+- A first run shows a friendly empty state instead of "Not finished".
+- Every lane belongs to a plan, and the Office follows the plan that is working.
+
+Lanes dashboard
+- Redesigned Control room tiles and rows, animated sections, consistent disclosure arrows.
+- Lane page: one breadcrumb, one status badge, a read-only pipeline stepper; on phones the steer box
+  and controls take two compact rows.
+- Needs-you rows show their age; lanes older than 2 days group under one Mark all handled
+  (`ca ack --stale`, MCP `ca_ack` stale).
+- Bigger tap targets on phones, themed scrollbars, skeleton while loading.
+
 ## 0.2.0 (2026-11-07)
 
 Setup and first use
