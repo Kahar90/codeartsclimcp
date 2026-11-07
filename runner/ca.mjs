@@ -93,6 +93,8 @@ const CFG = {
   // GLM 5.3 got stuck re-planning big existing UI files twice; flash finished both lanes. '' or 'none' disables.
   get thinkFallback() { return process.env.THINK_FALLBACK_MODEL ?? (HAS_MAAS() ? 'maas/deepseek-v4.1-flash' : ''); },          // busy this long with no tool call or answer text -> abort + nudge
   retries: num('MAX_RETRIES', 3),      // interruptions (stall, transport, crash) per phase
+  rateWait: num('RATE_WAIT_S', 1800),  // total time a phase may wait out model rate limits (not counted as retries)
+  rateBackoff: num('RATE_BACKOFF_S', 45), // first rate-limit wait, doubles per hit, capped at 300 s
   fixes: num('MAX_FIXES', 3),          // gate failures fed back to the builder
   laneTimeout: num('LANE_TIMEOUT', 5400),
   checkTimeout: num('CHECK_TIMEOUT', 900),
@@ -392,7 +394,7 @@ async function runLane(repoArg, task, opts = {}) {
         if (!sid) break; const s = sx(sid); const st = pr.status?.type;
         if (st === 'busy' || st === 'retry') { s.busy = true; s.sawBusy = true; }
         if (st === 'idle') s.busy = false;
-        if (st === 'retry') { const msg = `model service retry ${pr.status.attempt ?? ''}: ${oneLine(pr.status.message, 160)}`; L(`  ! ${msg}`); S.activity = msg; }
+        if (st === 'retry') { const msg = `model service retry ${pr.status.attempt ?? ''}: ${oneLine(pr.status.message, 160)}`; L(`  ! ${msg}`); S.activity = msg; S.lastRetry = { at: now(), message: oneLine(pr.status.message, 200) }; }
         if (sid === S.activeSession) S.busy = s.busy;
         break;
       }
@@ -580,8 +582,12 @@ async function runLane(repoArg, task, opts = {}) {
       }
     }
   }
+  // CodeArts retries a rate limit itself and then aborts the turn: the error is a bare
+  // MessageAbortedError, the reason is in the retry events just before it.
+  const recentRate = () => !!(S.lastRetry && now() - S.lastRetry.at < 120000 && /429|rate.?limit|too many requests|quota|Queuing/i.test(S.lastRetry.message || ''));
   const classify = (err) => {
     const m = JSON.stringify(err || {});
+    if (/Abort/i.test(m) && recentRate()) return 'rate';
     if (/Authentication failed|MISSING_CREDENTIAL|\b401\b|\b403\b|AK\/SK|invalid.*credential/i.test(m)) return 'auth';
     if (/\b429\b|rate.?limit|too many requests|quota|Queuing/i.test(m)) return 'rate';
     if (/timeout|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket|\b50[0234]\b|Cannot connect|network/i.test(m)) return 'transport';
@@ -603,7 +609,7 @@ async function runLane(repoArg, task, opts = {}) {
   async function drive(sid, model, agent, label, resumeText, freshSession) {
     curModel = model; curAgent = agent;
     if (label === 'build' || label === 'fix') builderSessions.add(sid);
-    let interruptions = 0, sameSessionFails = 0, thinkStalls = 0;
+    let interruptions = 0, sameSessionFails = 0, thinkStalls = 0, rateHits = 0, rateWaited = 0;
     for (;;) {
       const o = await waitTurn(sid);
       if (o.kind === 'idle') return { ok: true, sid };
@@ -640,6 +646,19 @@ async function runLane(repoArg, task, opts = {}) {
       }
       if (cls === 'auth') return { ok: false, sid, reason: 'auth', exit: 3, what };
       if (cls === 'other' && o.kind === 'error' && /Abort/i.test(o.error.name || '')) { /* user aborted in TUI: resume */ }
+      // Rate limits are not failures: own budget (RATE_WAIT_S, default 1800 s), jittered backoff, no retry count.
+      if (cls === 'rate' && rateWaited < CFG.rateWait) {
+        rateHits++; const wait = Math.min(300, CFG.rateBackoff * 2 ** (rateHits - 1)) + Math.floor(Math.random() * Math.min(30, CFG.rateBackoff)); rateWaited += wait;
+        say(`rate limited (${what}); waiting ${wait}s before resuming (${Math.round(rateWaited / 60)} of ${Math.round(CFG.rateWait / 60)} min rate budget)`);
+        S.lastRetry = null; phase('backoff');
+        if (!(await waitInterruptible(wait, 'rate limited, waiting'))) return { ok: false, sid, reason: 'stopped' };
+        phase(label, 'resuming after rate limit');
+        const rk = pendingKick; pendingKick = null; // a kick during the wait only ends the wait early
+        await send(sid, resumeText('rate', 'the model service was rate limited; continue where you stopped') + (rk?.text ? `
+
+Message from the lead: ${rk.text}` : ''), model, agent);
+        continue;
+      }
       if (++interruptions > CFG.retries) return { ok: false, sid, reason: `gave up after ${CFG.retries} interruptions (last: ${cls}: ${what})` };
       say(`interrupted (${cls}: ${what}); resume ${interruptions}/${CFG.retries}`);
       if (o.kind === 'server-died') {

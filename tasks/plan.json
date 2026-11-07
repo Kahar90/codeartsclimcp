@@ -1,113 +1,42 @@
 {
-  "title": "Onboarding and hardening",
-  "goal": "Make installing and using CodeArts lanes as easy as possible for a new user on any harness: one prompt, one keys form, then any repo works; wrong keys explained in seconds; a first-run dashboard that says what to do.",
+  "title": "Reliability: platforms, lifecycle, network, keys",
+  "goal": "Close the reliability gaps found after the onboarding work: run on macOS and Linux with CI on all three platforms, a full install lifecycle (update, uninstall, stale-config and untested-version warnings), lanes that survive network drops, sleep and crowded models, and keys encrypted at rest on Windows.",
   "lead": "Claude Opus 5.5",
-  "status": "done",
-  "now": "Closed: waves 1 and 2 merged, checks green, synced to the skill and pushed",
+  "status": "running",
+  "now": "Wave 3 running: portable, lifecycle, netwait, vault",
   "waves": [
     {
-      "name": "Wave 1 · Setup scope, keys, first-run page",
-      "lanes": [
-        "scope",
-        "keys",
-        "firstrun"
-      ],
-      "note": "Contract checks written first (checks/scope.check.mjs, checks/authfast.check.mjs). No shared files except a small route in ca.mjs (keys and firstrun touch different parts)."
+      "name": "Wave 3 · Platforms, lifecycle, network, keys",
+      "lanes": ["portable", "lifecycle", "netwait", "vault"],
+      "note": "Contract checks first (portable, lifecycle, netwait, vault). Separate files except small, separate places in runner/ca.mjs (portable: attach line and EXE; lifecycle: dispatch, help, one doctor call; netwait: supervisor and help knobs)."
     },
     {
-      "name": "Wave 2 · MCP results and runner hardening",
-      "lanes": [
-        "mcpfix",
-        "harden"
-      ],
-      "note": "Starts only after wave 1 merges (keys and firstrun edit runner/ca.mjs). Contract checks: mcpwave, runnerwave."
+      "name": "Wave 4 · Split runner/ca.mjs",
+      "lanes": ["split"],
+      "note": "After wave 3 merges: move the dashboard server, the lane supervisor and the CLI commands into modules, behaviour unchanged, every check as the safety net."
     }
   ],
   "lanes": [
-    {
-      "task": "scope",
-      "repo": "../ca-office-wt-scope",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "Machine-wide setup by default, Codex MCP always written, smoke test outside the user's repo",
-      "files": [
-        "runner/setup.mjs",
-        "runner/onboard.mjs",
-        "templates/claude-skill.md",
-        "checks/onboard.check.mjs"
-      ]
-    },
-    {
-      "task": "keys",
-      "repo": "../ca-office-wt-keys",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "Rejected AK/SK or MaaS key ends the lane in seconds with a plain message; MaaS key verified on save; readable doctor",
-      "files": [
-        "runner/authsignal.mjs",
-        "runner/ca.mjs",
-        "runner/auth.mjs",
-        "checks/auth.check.mjs"
-      ]
-    },
-    {
-      "task": "firstrun",
-      "repo": "../ca-office-wt-firstrun",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "First-run dashboard: one setup prompt, how to ask for work, Connect keys button, readable rows, no overflow",
-      "files": [
-        "runner/dash.html",
-        "runner/ca.mjs",
-        "checks/lanes.check.mjs"
-      ]
-    },
-    {
-      "task": "mcpfix",
-      "repo": "../ca-office-wt-mcpfix",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "ca_wait exits 3/5 as results with next steps, plan close/list and gc tools, version, annotations, brief template wording",
-      "files": [
-        "runner/mcp.mjs",
-        "templates/brief.md",
-        "checks/mcp.check.mjs"
-      ]
-    },
-    {
-      "task": "harden",
-      "repo": "../ca-office-wt-harden",
-      "model": "maas/deepseek-v4.1-flash",
-      "why": "Env dump redaction, placeholder CHECK refusal, dashboard Host check, 400 on bad JSON, unambiguous lookups, Open TUI quoting",
-      "files": [
-        "runner/ca.mjs"
-      ]
-    }
+    { "task": "portable", "repo": "../ca-office-wt-portable", "model": "maas/deepseek-v4.1-flash", "why": "Linux/macOS fixes (trust.mjs crash), Chrome helper, CI on 3 OSes with annotations", "files": ["scripts/trust.mjs", "runner/ca.mjs", "checks/lib/chrome.mjs", "tools/run-checks.mjs", ".github/workflows/check.yml"] },
+    { "task": "lifecycle", "repo": "../ca-office-wt-lifecycle", "model": "maas/deepseek-v4.1-flash", "why": "ca update, ca uninstall, manifest, doctor rows for stale paths and untested CodeArts versions", "files": ["runner/lifecycle.mjs", "runner/setup.mjs", "runner/onboard.mjs", "runner/ca.mjs"] },
+    { "task": "netwait", "repo": "../ca-office-wt-netwait", "model": "maas/deepseek-v4.1-flash", "why": "Wait for the network, survive sleep, cap lanes per model", "files": ["runner/netwait.mjs", "runner/ca.mjs"] },
+    { "task": "vault", "repo": "../ca-office-wt-vault", "model": "maas/deepseek-v4.1-flash", "why": "DPAPI-encrypted keys file on Windows, migration, clear errors", "files": ["runner/auth.mjs"] },
+    { "task": "split", "repo": "../ca-office-wt-split", "model": "maas/deepseek-v4.1-flash", "why": "Split the 1700-line runner so parallel lanes stop sharing one file", "files": ["runner/ca.mjs", "runner/dash-server.mjs", "runner/lane.mjs", "runner/commands.mjs"] }
   ],
   "next": [
-    "Merge wave 1 (keys, scope, firstrun), run every check on master",
-    "Start wave 2 (mcpfix, harden)",
-    "Smoke lane without NODE_TLS_REJECT_UNAUTHORIZED=0; remove it if MaaS and CodeArts auth still work",
-    "Check the T3 preview still reaches the dashboard with the Host check",
-    "Real fresh-user rerun: install in a fake home, onboard claude and codex, smoke, wrong keys",
-    "npm run sync to the live skill, push master to origin main"
+    "Merge wave 3, resolve runner/ca.mjs merges, run every check",
+    "Push and read the GitHub Actions annotations for Linux and macOS; fix what they show",
+    "Real tests: ca update and ca uninstall in a fake home, a lane with the network cut by a fake probe, keys migration on a copy",
+    "Write docs/client-checklist.md for Kiro, Cursor and VS Code (needs the user, signed in)",
+    "Wave 4: split runner/ca.mjs",
+    "Sync to the skill, push, close the plan"
   ],
   "decisions": [
-    {
-      "at": "2026-11-07T12:20:00.000Z",
-      "text": "Fresh-user walkthrough found: smoke repo created inside the user's repo, Codex MCP never written by onboard, wrong keys look like an IAM outage and retry for 70 s, doctor table unreadable, first-run panel glued rows and overflow, setup needed again in every repo."
-    },
-    {
-      "at": "2026-11-07T12:22:00.000Z",
-      "text": "User chose machine-wide setup by default (--repo-only keeps the per-repo files)."
-    },
-    {
-      "at": "2026-11-07T12:38:48.993Z",
-      "text": "Audit wave queued. Deleted D:/Coding/codearts testing/runner-env.json (env dump with live keys, never in git). Contract checks mcpwave and runnerwave reproduce every item; also found the MaaS key inside OPENCODE_CONFIG_CONTENT (name-based redaction alone would leak it) and fuzzy plan lookup (sho closed shop-admin)."
-    },
-    {
-      "at": "2026-11-07T13:26:49.497Z",
-      "text": "Plan closed: waves 1 and 2 merged, checks green, synced to the skill and pushed."
-    }
+    { "at": "2026-11-07T14:10:00.000Z", "text": "User asked to queue and close as much as possible. No WSL, Docker or gh on this machine: Linux and macOS are proven through GitHub Actions only." }
   ],
   "risks": [
-    "Kiro, Cursor and VS Code user-level paths come from their docs; they cannot be signed in here to test.",
-    "Writing ~/.claude.json directly races with a running Claude Code; the claude CLI is preferred."
+    "Four lanes touch runner/ca.mjs in different places: merge conflicts resolved by the lead.",
+    "Real network drop and laptop sleep cannot be produced here; netwait is proven with injected probes and a simulated tick gap.",
+    "DPAPI keys are bound to the Windows user: a profile restore on another machine needs ca auth again (the error says so)."
   ]
 }
