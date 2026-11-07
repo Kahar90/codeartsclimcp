@@ -38,6 +38,7 @@ try {
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
   const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result?.result?.value;
   const st = () => ev('window.__office && window.__office.state()');
+  const stReady = async () => { let v; for (let i = 0; i < 12 && !v; i++) { v = await st(); if (!v) await wait(400); } return v; };
   const shot = async (name) => { const r = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(out, `${name}.png`), Buffer.from(r.result.data, 'base64')); };
   const click = async (x, y) => { for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }); };
   const size = (width, height) => send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -59,7 +60,7 @@ try {
   const feetIn = (s, m = 40) => s.stations.every((x) => x.foot.x >= s.stage.x - m && x.foot.y >= s.stage.y - m && x.foot.x <= s.stage.x + s.stage.w + m && x.foot.y <= s.stage.y + s.stage.h + m);
 
   await size(1280, 800); await send('Page.navigate', { url: base + '/office?demo=1&still=1' }); await wait(1800);
-  let s = await st();
+  let s = await stReady();
   check('test hook window.__office.state()', !!s && s.mode === 'demo', s && s.mode);
   if (s) {
     check('stage fills the width at 1280x800', near(s.stage.w, 1280), `${s.stage.w}x${s.stage.h}`);
@@ -139,7 +140,7 @@ try {
   check('outside click closes the window', !(await st()).window.open);
 
   await send('Page.navigate', { url: base + '/office?demo=1&still=1' }); await wait(1800);
-  s = await st();
+  s = await stReady();
   check('reload with the same state adds no effects', s.effects.length === 0, JSON.stringify(s.effects));
 
   await size(1920, 1080); await wait(500);
@@ -180,13 +181,13 @@ try {
 
   await size(1280, 800); await wait(400);
   await send('Page.navigate', { url: base + '/office?demo=big' }); await wait(1800);
-  s = await st();
+  s = await stReady();
   check('demo=big has 8 lanes', s.lanes.length === 8, String(s.lanes.length));
   check('demo=big sends 5 lanes to the overflow list', s.overflow.length === 5, s.overflow.join(','));
   await shot('5-big');
 
   await send('Page.navigate', { url: base + '/office?demo=stuck&still=1' }); await wait(1800);
-  s = await st();
+  s = await stReady();
   check('demo=stuck: builder STALLED, artist running, reviewer failed',
     s.lanes.find((l) => l.id === 'office-scene')?.health === 'STALLED' &&
     s.lanes.find((l) => l.id === 'office-sprites')?.running === true &&
