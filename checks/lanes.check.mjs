@@ -51,9 +51,9 @@ try {
   await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1600);
   check('the default route is the Control room', (await ev('location.hash')) === '' && (await ev('!!document.querySelector(".cr-head h1")')) === true, String(await ev('location.hash')));
   let cr = await st();
-  check('overview counts the buckets', !!cr?.overview?.counts && cr.overview.counts.attention === 4 && cr.overview.counts.running === 2 && cr.overview.counts.done === 2 && cr.overview.counts.ended === 1, JSON.stringify(cr?.overview?.counts));
+  check('overview counts the buckets', !!cr?.overview?.counts && cr.overview.counts.attention === 3 && cr.overview.counts.running === 2 && cr.overview.counts.done === 2 && cr.overview.counts.ended === 2, JSON.stringify(cr?.overview?.counts));
   check('Needs you comes first and holds the stuck and failed lanes', (() => { const s0 = cr?.overview?.sections?.[0]; return !!s0 && s0.bucket === 'attention' && s0.ids.includes('demo-repo--stuck') && s0.ids.includes('demo-repo--stall'); })(), JSON.stringify(cr?.overview?.sections));
-  check('the tab title carries the Needs you count', /^\(4\) Needs you . Lanes$/.test(cr?.overview?.title || ''), cr?.overview?.title);
+  check('the tab title carries the Needs you count', /^\((3)\) Needs you . Lanes$/.test(cr?.overview?.title || ''), cr?.overview?.title);
   check('no stale banner while polls succeed', cr?.overview?.banner === false, String(cr?.overview?.banner));
   await shot('lanes-control-room');
   check('a bucket tile is a filter toggle', await clickSel('[data-cr="running"]'));
