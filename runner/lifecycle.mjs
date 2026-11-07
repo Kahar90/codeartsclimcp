@@ -136,6 +136,39 @@ function installCommand() {
   return 'npm install -g github:Kahar90/codeartsclimcp';
 }
 
+// Compare two x.y.z versions (optional leading "v", missing parts are 0): -1, 0 or 1.
+export function compareVersions(a, b) {
+  const parts = (v) => String(v == null ? '' : v).trim().replace(/^v/i, '').split('.')
+    .map((x) => { const n = parseInt(x, 10); return Number.isFinite(n) ? n : 0; });
+  const pa = parts(a); const pb = parts(b);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const x = pa[i] || 0; const y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+// Parse a CHANGELOG.md into sections "## 1.2.3 (YYYY-MM-DD)", newest first. Items are the "- "
+// bullets; a wrapped bullet continues on following indented lines (joined with one space); plain
+// sub-heading lines inside a section are skipped.
+export function parseChangelog(text) {
+  const sections = [];
+  let cur = null; let item = -1;
+  for (const raw of String(text == null ? '' : text).split(/\r?\n/)) {
+    const head = raw.match(/^##\s+(\S+)\s+\((\d{4}-\d{2}-\d{2})\)\s*$/);
+    if (head) { cur = { version: head[1], date: head[2], items: [] }; sections.push(cur); item = -1; continue; }
+    if (!cur) continue;
+    if (!raw.trim()) { item = -1; continue; }
+    const bullet = raw.match(/^\s*-\s+(.*)$/);
+    if (bullet) { cur.items.push(bullet[1].trim()); item = cur.items.length - 1; continue; }
+    if (/^\s+\S/.test(raw)) { if (item >= 0) cur.items[item] = `${cur.items[item]} ${raw.trim()}`.trim(); continue; }
+    item = -1; // a plain sub-heading line: skip it
+  }
+  return sections.sort((a, b) => compareVersions(b.version, a.version));
+}
+
 // `ca update [--dry-run]`: reinstall the latest version, then rerun `ca setup <h> --user` for every
 // recorded harness so each config is refreshed. A failing install command changes nothing.
 export async function update(args) {
