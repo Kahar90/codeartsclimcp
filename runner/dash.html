@@ -510,6 +510,17 @@ async function api(path, opts) {
   const r = await fetch(path, opts);
   return r.json();
 }
+// CAUI.control (workshop.js) always fetches the server, so on ?demo=1 it never reaches the in-page
+// fixture. Swap it for api(), the demo-aware layer, only while demo mode is on.
+if (DEMO) {
+  CAUI.control = function (laneId, action, extra) {
+    const a = CAUI.ACTIONS[action];
+    if (!a) return Promise.resolve({ error: 'unknown action ' + action });
+    const body = Object.assign({}, a.body || {}, extra || {});
+    return api(`/api/lane/${encodeURIComponent(laneId)}/${a.path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then((r) => (r && r.error ? r : Object.assign({ ok: true }, r || {})));
+  };
+}
 
 let plans = [], lanes = [], detail = null, route = { kind: '', id: '' }, tab = 'log';
 const tstate = new Map(); // laneId -> {html, pos, rendered, follow, top, atBottom} transcript state
