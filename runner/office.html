@@ -32,9 +32,11 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #room { position: absolute; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
 #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #links path { fill: none; stroke: var(--sel); stroke-opacity: 0.75; }
-#sprites { position: absolute; inset: 0; pointer-events: none; }
+#sprites { position: absolute; inset: 0; pointer-events: none; z-index: 1; } /* own stacking context: depth-sorted sprite z values never rise above plates */
 #sprites .px-sprite { position: absolute; }
-#plates { position: absolute; inset: 0; pointer-events: none; }
+.desk { position: absolute; background-repeat: no-repeat; image-rendering: pixelated; pointer-events: none; }
+#plates { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.needs-pill[hidden] { display: none !important; }
 .plate { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 13px; background: var(--panel-2); border: 2px solid var(--border-2); border-radius: 9px; font: 14px/1.3 var(--font); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); color: var(--fg); cursor: pointer; text-align: center; white-space: nowrap; }
 .plate .p-name { font-weight: 700; }
 .plate .p-sub { color: var(--muted); font-size: 12.5px; }
@@ -44,11 +46,23 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 #plate-builder { border-color: var(--builder); }
 #plate-artist { border-color: var(--artist); }
 #plate-reviewer { border-color: var(--reviewer); }
-#overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; gap: 4px; max-width: 320px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.plate.compact { font-size: 12px; padding: 4px 9px; gap: 1px; max-width: 170px; }
+.plate.compact .p-name { font-size: 12px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
+.plate.compact .p-sub { font-size: 10.5px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
+.plate.compact .p-badge { right: -6px; top: -6px; width: 15px; height: 15px; font: 700 10px/15px var(--font); }
+#links path.lk-hover { stroke: var(--faint); stroke-opacity: 0.6; stroke-width: 1; stroke-dasharray: 4 4; }
+#overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #overflow[hidden] { display: none; }
-.ov-title { padding: 0 2px 4px; color: var(--muted); font-size: 13px; font-weight: 600; }
-.ov-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px; font: 14px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: left; white-space: nowrap; }
-.ov-row .ov-st { color: var(--muted); font-size: 12.5px; }
+.ov-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border-2); color: var(--fg); font: 650 13px var(--font); cursor: pointer; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); }
+.ov-pill:hover { border-color: var(--sel); }
+.ov-pill:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
+.ov-list { display: flex; flex-direction: column; gap: 4px; max-width: 320px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.ov-list[hidden] { display: none; }
+.ov-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px; font: 13px/1.3 var(--font); color: var(--fg); cursor: pointer; text-align: left; white-space: nowrap; }
+.ov-row .ov-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ov-row .ov-st { color: var(--muted); font-size: 12px; }
+.ov-row .ov-flag { color: var(--amber); font-weight: 800; }
+.ov-row .ov-flag[hidden] { display: none; }
 .hit { position: absolute; pointer-events: auto; cursor: pointer; }
 #win { position: absolute; left: 0; top: 0; width: 440px; max-width: calc(100% - 24px); z-index: 10; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); }
 #win[hidden] { display: none; }
@@ -135,7 +149,9 @@ body.no-motion #lamp { display: none; }
 .st-row.st-reviewer { border-left-color: var(--reviewer); }
 body.narrow .plate { display: none !important; }
 body.narrow #links { display: none; }
-body.narrow #overflow { display: none; }
+body.narrow #overflow { left: 0; right: 0; bottom: 0; align-items: stretch; gap: 0; }
+body.narrow .ov-pill { width: 100%; justify-content: center; height: 34px; border-radius: 0; border-left: 0; border-right: 0; box-shadow: none; }
+body.narrow .ov-list { max-width: none; border-radius: 0; border-left: 0; border-right: 0; }
 body.narrow #win:not([hidden]) { display: flex; flex-direction: column; width: calc(100% - 24px); max-height: min(55vh, calc(100% - 24px)); }
 body.narrow .win-head, body.narrow #winForm, body.narrow #winErr, body.narrow #winChips { flex: none; }
 body.narrow #winBody { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
@@ -178,7 +194,8 @@ body.narrow #stagewrap { flex: none; min-height: 0; }
       <button type="button" class="plate" id="plate-reviewer" style="display: none" aria-expanded="false" aria-controls="win"><b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span></button>
     </div>
     <div id="overflow" hidden>
-      <div class="ov-title" id="ovTitle"></div>
+      <div class="ov-list" id="ovList" hidden></div>
+      <button type="button" id="ovPill" class="ov-pill" aria-expanded="false" aria-controls="ovList"></button>
     </div>
     <div id="win" role="dialog" aria-labelledby="winTitle" hidden>
       <div class="win-head">
@@ -231,11 +248,20 @@ const q = new URLSearchParams(location.search);
 const demoBig = q.get("demo") === "big";
 const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const demoStuck = q.get("demo") === "stuck";
+const demoCrowd = q.get("demo") === "crowd";
 const mode = q.has("demo") ? "demo" : "live";
 let STAGE_W = 1280, STAGE_H = 720;
+const HOTDESKS = [
+  { key: "hot1", role: "hot1", foot: [470, 250], prop: "hotdesk", plate: "below" },
+  { key: "hot2", role: "hot2", foot: [455, 470], prop: "hotdesk", plate: "below" },
+  { key: "hot3", role: "hot3", foot: [840, 290], prop: "hotdesk", plate: "below" },
+  { key: "hot4", role: "hot4", foot: [480, 625], prop: "hotdesk", plate: "below" },
+  { key: "hot5", role: "hot5", foot: [1010, 615], prop: "hotdesk", plate: "below" },
+];
 let SCENE = {
   stage: [1280, 720],
   stations: { lead: { foot: [292, 356] }, builder: { foot: [626, 354] }, artist: { foot: [759, 601] }, reviewer: { foot: [1036, 350] } },
+  hotdesks: HOTDESKS,
   fixture: {
     events: [
       { atMs: 1300, type: "assignment", from: "lead", to: "builder" },
@@ -256,7 +282,8 @@ async function loadScene() {
     if (!r.ok) return;
     const j = await r.json();
     if (j && Array.isArray(j.stageSize) && j.stageSize.length === 2 && j.stations && ["lead", "builder", "artist", "reviewer"].every((s) => j.stations[s] && Array.isArray(j.stations[s].foot))) {
-      SCENE = { stage: j.stageSize, stations: j.stations, fixture: j.fixture || { events: [] } };
+      const hd = Array.isArray(j.hotdesks) && j.hotdesks.length ? j.hotdesks : HOTDESKS;
+      SCENE = { stage: j.stageSize, stations: j.stations, hotdesks: hd, fixture: j.fixture || { events: [] } };
     }
   } catch (e) {}
 }
@@ -324,7 +351,40 @@ const DEMO_BIG_BASE = {
     texts: ["Welcome panel copy", "Doctor rows per harness", "Onboard command snippet", "First-lane list", "Links to the docs", "Dismiss and remember", "Onboard check", "Screenshots for the README"],
     init: { dn: 0, cur: 0, health: "planned", running: false, result: "", verdict: "" } },
 };
-const DEMO_SET = demoBig ? DEMO_BIG_BASE : DEMO_BASE;
+const DEMO_CROWD_BASE = {
+  "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 46, by: { build: [12100, 21400, 4800, 680000, 4], review: [2100, 900, 200, 12000, 1], other: [400, 150, 0, 2000, 1] },
+    texts: ["Routes in ca.mjs", "Page shell with the goal box", "Data layer with demo mode", "Scene, cards and completion"],
+    init: { dn: 3, cur: 4, health: "running", running: true, result: "", verdict: "" } },
+  "office-sprites": { phase: "build", model: "maas/glm-5.3", dur: 32, by: { build: [3900, 7100, 1400, 280000, 3], review: [1500, 700, 150, 9000, 1], other: [300, 120, 0, 1500, 1] },
+    texts: ["Sprite contract check", "Draw the five roles", "Polish the animations"],
+    init: { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" } },
+  "office-review": { phase: "review", model: "maas/glm-5.3", dur: 8, by: { build: [500, 200, 50, 3000, 1], review: [1700, 3200, 700, 190000, 4], other: [250, 100, 0, 1200, 1] },
+    texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"],
+    init: { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" } },
+  "cli-dx": { phase: "build", model: "maas/qwen3-coder", dur: 41, by: { build: [8600, 12300, 2600, 240000, 8], review: [1800, 800, 150, 8000, 1], other: [350, 130, 0, 1400, 1] },
+    texts: ["Split ca.mjs commands", "Harness-neutral arg parsing", "Help text for every command", "Exit codes and stderr", "Shell completion stubs", "Version and doctor output", "Man page snippet", "CLI contract check"],
+    runs: 2, continues: [{ id: "cli-dx-v2", task: "cli-dx-v2", reason: "paused for the arg parser rewrite", commits: "4/8", progress: { done: 4, total: 8 }, elapsed: "52m" }],
+    init: { dn: 4, cur: 5, health: "STALLED", running: true, result: "", verdict: "" } },
+  "mcp": { phase: "build", model: "maas/glm-5.3", dur: 37, by: { build: [6400, 9800, 1900, 210000, 8], review: [1600, 750, 140, 7000, 1], other: [300, 110, 0, 1300, 1] },
+    texts: ["MCP server skeleton", "Tool schemas", "stdio transport", "Auth from the user env", "List and read tools", "Error shapes", "Logging without secrets", "MCP check green"],
+    init: { dn: 5, cur: 6, health: "failed", running: false, result: "failed", verdict: "" } },
+  "setup": { phase: "build", model: "maas/qwen3-max", dur: 29, by: { build: [5200, 8100, 1200, 150000, 8], review: [1400, 650, 120, 6000, 1], other: [280, 100, 0, 1200, 1] },
+    texts: ["Detect installed harnesses", "Per-harness setup notes", "Doctor rows", "Copyable onboard command", "First-lane quick start", "Trust the worktree folder", "Windows path quirks", "Re-run the setup check"],
+    init: { dn: 6, cur: 7, health: "running", running: true, result: "", verdict: "" } },
+  "onboard": { phase: "build", model: "maas/glm-5.3", dur: 25, by: { build: [4300, 6900, 1100, 90000, 8], review: [1300, 600, 110, 5000, 1], other: [260, 95, 0, 1100, 1] },
+    texts: ["Welcome panel copy", "Doctor rows per harness", "Onboard command snippet", "First-lane list", "Links to the docs", "Dismiss and remember", "Onboard check", "Screenshots for the README"],
+    init: { dn: 2, cur: 3, health: "running", running: true, result: "", verdict: "" } },
+  "office-motion": { phase: "build", model: "maas/glm-5.3", dur: 34, by: { build: [7300, 10600, 2200, 190000, 8], review: [1500, 700, 130, 6500, 1], other: [290, 105, 0, 1250, 1] },
+    texts: ["Motion brief", "Intro tilt", "Hover lift", "Working bob", "Packet trails", "Done burst", "Reduced motion fades", "Motion check green"],
+    init: { dn: 7, cur: 8, health: "running", running: true, result: "", verdict: "" } },
+  "docs-site": { phase: "build", model: "maas/glm-5.3", dur: 22, by: { build: [3800, 5900, 900, 80000, 8], review: [1200, 550, 100, 4500, 1], other: [240, 90, 0, 1000, 1] },
+    texts: ["Docs landing page", "Quick start guide", "Lead workflow page", "Run a lane page", "Troubleshooting page", "Search index", "Link check", "Publish the docs"],
+    init: { dn: 5, cur: 6, health: "running", running: true, result: "", verdict: "" } },
+  "perf-pass": { phase: "build", model: "maas/glm-5.3", dur: 18, by: { build: [3100, 4600, 700, 60000, 8], review: [1000, 480, 90, 4000, 1], other: [220, 85, 0, 950, 1] },
+    texts: ["Profile the render loop", "Trim the sprite atlas", "Cache the scene JSON", "Debounce the resize", "Verdict and notes", "Perf check green"],
+    init: { dn: 6, cur: 0, health: "done", running: false, result: "done", verdict: "ready" } },
+};
+const DEMO_SET = demoBig ? DEMO_BIG_BASE : demoCrowd ? DEMO_CROWD_BASE : DEMO_BASE;
 const DEMO_STUCK_INIT = {
   "office-scene": { dn: 2, cur: 3, health: "STALLED", running: true, result: "", verdict: "" },
   "office-sprites": { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" },
@@ -393,7 +453,7 @@ function demoApply(ev) {
 
 const DEMO_LEAD = 1000;
 function scheduleDemoEvents() {
-  if (mode !== "demo" || demoBig || demoDone || demoStuck || q.get("still") === "1") return;
+  if (mode !== "demo" || demoBig || demoDone || demoStuck || demoCrowd || q.get("still") === "1") return;
   for (const ev of (SCENE.fixture && SCENE.fixture.events) || []) {
     setTimeout(() => { if (mode === "demo") demoApply(ev); }, (ev.atMs || 0) + DEMO_LEAD);
   }
@@ -442,6 +502,31 @@ function demoModel() {
         { name: "Wave 2", lanes: [byId["office-review"], byId["cli-dx"]] },
         { name: "Wave 3", lanes: [byId["mcp"], byId["setup"], byId["office-motion"]] },
         { name: "Wave 4", lanes: [byId["onboard"]] },
+      ],
+    };
+  }
+  if (demoCrowd) {
+    const lanes = Object.keys(DEMO_CROWD_BASE).map(mk);
+    const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
+    const pt = planTokenSums(lanes);
+    return {
+      plan: {
+        id: "demo-crowd", title: "Ten lanes, eight seats", goal: "Seat a crowded plan: three stations, five hot desks, the rest in the +N list",
+        lead: "Claude Opus 5.5", status: "running",
+        tokens: pt.tokens, tokensBy: pt.tokensBy,
+        now: "Two lanes need a hand, the other running lanes share the desks, and the finished lanes wait in the +N list.",
+        next: [{ text: "Kick the stalled CLI lane and resume the failed MCP lane", done: false }, { text: "Give the first freed desk to the waiting running lane", done: false }, { text: "Merge the finished perf pass into main", done: true }],
+        decisions: [
+          { at: at(64), text: "The stalled CLI lane and the failed MCP lane take the first hot desks; both need the lead." },
+          { at: at(38), text: "A finished lane always releases its desk to a running lane that has none." },
+          { at: at(14), text: "Anything past eight seats drops into the +N list, needs-you first." },
+        ],
+      },
+      lanes,
+      waves: [
+        { name: "Wave 1", lanes: [byId["office-scene"], byId["office-sprites"], byId["office-review"]] },
+        { name: "Wave 2", lanes: [byId["cli-dx"], byId["mcp"], byId["setup"]] },
+        { name: "Wave 3", lanes: [byId["onboard"], byId["office-motion"], byId["docs-site"], byId["perf-pass"]] },
       ],
     };
   }
@@ -518,6 +603,7 @@ function planStatus(p, lanes) {
 // The office speaks the Control room buckets, so both views name a state the same way.
 function laneBucket(l) {
   if (l.bucket) return l.bucket;
+  if (isNeedsYou(l)) return "attention"; // payloads without bucket (older runner, demos) use the same rule as seating
   if (l.running) return "running";
   if (l.result === "done" || l.result === "continued") return "done";
   return "ended";
@@ -572,7 +658,9 @@ function render() {
   renderTop();
   const cues = diffCues();
   assignStations();
+  assignHot();
   renderStations();
+  renderHotDesks();
   renderOverflow();
   renderNarrowList();
   fireCues(cues);
@@ -628,12 +716,22 @@ const CLIP_BY_KEY = { run: "work", done: "idle", bad: "blocked", warn: "idle", i
 const stationLane = { builder: null, artist: null, reviewer: null };
 const laneStation = new Map();
 const sprites = {};
+const hotSeat = {};
+const laneHot = new Map();
+const hotSprites = {};
+const desks = {};
+const hotHits = {};
 const ovBtns = new Map();
 const stRows = new Map();
 const winHooks = { open: () => {}, close: () => {} };
 let assignedOnce = false, prevPlanId = null, prevRunning = new Map();
+let ovOpen = false;
 
 function spriteScale() { return Math.max(0.25, Math.round(k * 2 * 4) / 4); }
+function deskProp(hd) {
+  const props = PixelSprites.manifest && PixelSprites.manifest.props;
+  return (hd && props && props[hd.prop]) || null;
+}
 function laneName(l) { return l.task || l.id; }
 function stationSub(l) {
   const st = CAUI.status(l.health);
@@ -684,9 +782,50 @@ function assignStations() {
   }
   prevRunning = new Map(lanes.map((l) => [l.id, !!l.running]));
 }
+function isNeedsYou(l) {
+  const h = String(l.health || "").toUpperCase();
+  if (h === "STALLED" || h === "DEAD") return true;
+  const low = String(l.health || "").toLowerCase();
+  if (low === "failed" || low === "paused" || low === "thinking" || low === "needs review") return true;
+  return l.bucket === "attention";
+}
+function isReleased(l) {
+  const r = String(l.result || "").toLowerCase();
+  const h = String(l.health || "").toLowerCase();
+  return ["done", "stopped", "continued", "dropped"].some((x) => r === x || h === x);
+}
+function hotCandidates(lanes) {
+  const rank = (l) => isNeedsYou(l) ? 0 : l.running ? 1 : 2;
+  return lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 2) return (Date.parse(b.finishedAt) || 0) - (Date.parse(a.finishedAt) || 0);
+    return 0;
+  });
+}
+function assignHot() {
+  const lanes = model.lanes;
+  const keys = SCENE.hotdesks.map((h) => h.key);
+  for (const key of keys) if (!(key in hotSeat)) hotSeat[key] = null;
+  const alive = new Set(lanes.map((l) => l.id));
+  for (const [id, key] of [...laneHot]) {
+    if (!alive.has(id) || laneStation.has(id)) { laneHot.delete(id); if (hotSeat[key] === id) hotSeat[key] = null; }
+  }
+  for (const l of hotCandidates(lanes)) {
+    let free = keys.find((key) => !hotSeat[key]);
+    if (!free) {
+      const victim = keys.map((key) => hotSeat[key]).find((id) => id && isReleased(lanes.find((x) => x.id === id)));
+      if (victim) { const vk = laneHot.get(victim); laneHot.delete(victim); hotSeat[vk] = null; free = vk; }
+    }
+    if (!free) break;
+    hotSeat[free] = l.id;
+    laneHot.set(l.id, free);
+  }
+}
 function setStation(key, opts) {
   const plate = $("plate-" + key);
-  const sp = sprites[key];
+  const sp = sprites[key] || hotSprites[key];
+  if (!plate) { if (sp) sp.el.style.display = opts ? "" : "none"; return; }
   const badge = plate.querySelector(".p-badge");
   if (!opts) {
     plate.style.display = "none";
@@ -717,6 +856,34 @@ function renderStations() {
     setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
   }
 }
+function hotSub(l) {
+  const st = CAUI.status(l.health);
+  const p = l.progress || {};
+  let s = st.label;
+  if (p.total) s += " " + (p.done || 0) + "/" + p.total;
+  const tt = CAUI.tokenTotal(l.tokens);
+  if (tt) s += " " + CAUI.fmtTokens(tt);
+  return s;
+}
+function renderHotDesks() {
+  if (!model) return;
+  for (const hd of SCENE.hotdesks) {
+    const id = hotSeat[hd.key];
+    const l = id && model.lanes.find((x) => x.id === id);
+    const desk = desks[hd.key];
+    const hit = hotHits[hd.key];
+    if (!l) {
+      setStation(hd.key, null);
+      if (desk) desk.style.display = "none";
+      if (hit) { hit.style.display = "none"; hit.dataset.lane = ""; }
+      continue;
+    }
+    setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
+    if (desk) desk.style.display = "";
+    if (hit) { hit.style.display = ""; hit.dataset.lane = l.id; }
+  }
+}
+let hoverHot = null;
 function renderLinks() {
   const lead = SCENE.stations.lead.foot;
   let d = "";
@@ -725,7 +892,12 @@ function renderLinks() {
     const f = SCENE.stations[stKey].foot;
     d += "M" + (ox + lead[0] * k) + "," + (oy + (lead[1] + 34) * k) + "H" + (ox + f[0] * k) + "V" + (oy + (f[1] + 34) * k);
   }
-  $("links").innerHTML = d ? '<path d="' + d + '" stroke-width="' + Math.max(1, 1.5 * k).toFixed(2) + '"></path>' : "";
+  let hover = "";
+  if (hoverHot) {
+    const hd = SCENE.hotdesks.find((h) => h.key === hoverHot);
+    if (hd) { const f = hd.foot; hover = '<path class="lk-hover" d="M' + (ox + lead[0] * k) + ',' + (oy + (lead[1] + 34) * k) + 'H' + (ox + f[0] * k) + 'V' + (oy + (f[1] + 34) * k) + '"></path>'; }
+  }
+  $("links").innerHTML = (d ? '<path d="' + d + '" stroke-width="' + Math.max(1, 1.5 * k).toFixed(2) + '"></path>' : "") + hover;
 }
 function layoutStations() {
   const a = PixelSprites.anchor();
@@ -742,6 +914,7 @@ function layoutStations() {
       if (sp.scale !== sc) sp.setScale(sc);
       sp.el.style.left = ox + f[0] * k - a[0] * sc + "px";
       sp.el.style.top = oy + f[1] * k - a[1] * sc + "px";
+      sp.el.style.zIndex = String(Math.round(f[1] * 10) + 5);
     }
     const hit = hits[key];
     if (hit && sp) {
@@ -754,19 +927,65 @@ function layoutStations() {
     plate.style.left = (ox + f[0] * k) + "px";
     plate.style.top = (oy + (f[1] + 34) * k) + "px";
   }
+  for (const hd of SCENE.hotdesks) {
+    const f = hd.foot;
+    const sp = hotSprites[hd.key];
+    if (sp) {
+      if (sp.scale !== sc) sp.setScale(sc);
+      sp.el.style.left = ox + f[0] * k - a[0] * sc + "px";
+      sp.el.style.top = oy + f[1] * k - a[1] * sc + "px";
+      sp.el.style.zIndex = String(Math.round(f[1] * 10) + 5);
+    }
+    const desk = desks[hd.key];
+    const def = deskProp(hd);
+    if (desk && def) {
+      desk.style.width = def.size[0] * sc + "px";
+      desk.style.height = def.size[1] * sc + "px";
+      desk.style.backgroundSize = def.size[0] * sc + "px " + def.size[1] * sc + "px";
+      desk.style.left = ox + f[0] * k - def.anchor[0] * sc + "px";
+      desk.style.top = oy + f[1] * k - def.anchor[1] * sc + "px";
+      desk.style.zIndex = String(Math.round(f[1] * 10));
+    }
+    const hb = hotHits[hd.key];
+    if (hb && sp) {
+      hb.style.left = sp.el.style.left;
+      hb.style.top = sp.el.style.top;
+      hb.style.width = sp.el.offsetWidth + "px";
+      hb.style.height = sp.el.offsetHeight + "px";
+    }
+    const plate = $("plate-" + hd.key);
+    if (plate) {
+      plate.style.left = (ox + f[0] * k) + "px";
+      plate.style.top = (oy + (f[1] + 34) * k) + "px";
+    }
+  }
   renderLinks();
   if (!$("win").hidden) positionWin();
 }
+function ovRank(l) { return isNeedsYou(l) ? 0 : l.running ? 1 : 2; }
+function ovMeta(l) {
+  const st = CAUI.status(l.health).label;
+  const tt = CAUI.tokenTotal(l.tokens);
+  return tt ? st + " \u00b7 " + CAUI.fmtTokens(tt) : st;
+}
 function renderOverflow() {
   if (!model) return;
-  const rest = model.lanes.filter((l) => !laneStation.has(l.id));
-  const box = $("overflow");
+  const rest = model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id));
+  const box = $("overflow"), list = $("ovList"), pill = $("ovPill");
   for (const [id, b] of [...ovBtns]) {
     if (!rest.some((l) => l.id === id)) { b.remove(); ovBtns.delete(id); }
   }
-  if (!rest.length) { box.hidden = true; return; }
+  if (!rest.length) { box.hidden = true; list.hidden = true; ovOpen = false; pill.setAttribute("aria-expanded", "false"); return; }
   box.hidden = false;
-  $("ovTitle").textContent = "Other lanes (" + rest.length + ")";
+  rest.sort((a, b) => {
+    const ra = ovRank(a), rb = ovRank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 2) return (Date.parse(b.finishedAt) || 0) - (Date.parse(a.finishedAt) || 0);
+    return 0;
+  });
+  pill.textContent = "+" + rest.length + " more";
+  list.hidden = !ovOpen;
+  pill.setAttribute("aria-expanded", ovOpen ? "true" : "false");
   for (const l of rest) {
     let b = ovBtns.get(l.id);
     if (!b) {
@@ -774,19 +993,23 @@ function renderOverflow() {
       b.type = "button";
       b.className = "ov-row";
       b.dataset.lane = l.id;
-      b.innerHTML = '<span class="ov-name"></span><span class="ov-st"></span>';
+      b.innerHTML = '<span class="ov-name"></span><span class="ov-st"></span><span class="ov-flag" hidden>!</span>';
       b.setAttribute("aria-controls", "win");
       b.setAttribute("aria-expanded", "false");
       b.addEventListener("click", (ev) => winHooks.open(l.id, b, ev.detail === 0));
       ovBtns.set(l.id, b);
     }
     b.querySelector(".ov-name").textContent = laneName(l);
-    b.querySelector(".ov-st").textContent = CAUI.status(l.health).label;
+    b.querySelector(".ov-st").textContent = ovMeta(l);
+    const flag = b.querySelector(".ov-flag");
+    flag.hidden = !l.suggest;
+    if (l.suggest) flag.title = l.why || "";
   }
   const want = rest.map((l) => l.id).join(",");
-  const have = [...box.querySelectorAll(".ov-row")].map((b) => b.dataset.lane).join(",");
-  if (want !== have) for (const l of rest) box.appendChild(ovBtns.get(l.id));
+  const have = [...list.querySelectorAll(".ov-row")].map((b) => b.dataset.lane).join(",");
+  if (want !== have) for (const l of rest) list.appendChild(ovBtns.get(l.id));
 }
+$("ovPill").addEventListener("click", () => { ovOpen = !ovOpen; renderOverflow(); });
 function renderNarrowList() {
   const box = $("stlist");
   if (!narrow || !model) { if (!box.hidden) box.hidden = true; return; }
@@ -836,8 +1059,52 @@ async function initSprites() {
     hits[key] = hit;
     $("sprites").appendChild(hit);
   }
+  for (const hd of SCENE.hotdesks) {
+    const sp = PixelSprites.create(hd.role, { scale: spriteScale(), seed: hd.key, clip: "idle" });
+    sp.el.style.display = "none";
+    hotSprites[hd.key] = sp;
+    $("sprites").appendChild(sp.el);
+    const def = deskProp(hd);
+    if (def) {
+      const desk = document.createElement("div");
+      desk.className = "desk";
+      desk.style.display = "none";
+      desk.style.backgroundImage = 'url("/assets/' + def.image + '")';
+      $("sprites").appendChild(desk);
+      desks[hd.key] = desk;
+    }
+    const hit = document.createElement("div");
+    hit.className = "hit";
+    hit.setAttribute("aria-hidden", "true");
+    hit.style.display = "none";
+    hit.addEventListener("click", (ev) => { const id = hotSeat[hd.key]; if (id) winHooks.open(id, $("plate-" + hd.key), ev.detail === 0); });
+    hit.addEventListener("mouseenter", () => { hoverHot = hd.key; renderLinks(); });
+    hit.addEventListener("mouseleave", () => { if (hoverHot === hd.key) { hoverHot = null; renderLinks(); } });
+    hotHits[hd.key] = hit;
+    $("sprites").appendChild(hit);
+    const plate = document.createElement("button");
+    plate.type = "button";
+    plate.className = "plate compact";
+    plate.id = "plate-" + hd.key;
+    plate.style.display = "none";
+    plate.setAttribute("aria-controls", "win");
+    plate.setAttribute("aria-expanded", "false");
+    plate.innerHTML = '<b class="p-name"></b><span class="p-sub"></span><span class="p-badge" hidden>!</span>';
+    plate.addEventListener("click", (ev) => { const id = hotSeat[hd.key]; if (id) winHooks.open(id, plate, ev.detail === 0); });
+    plate.addEventListener("mouseenter", () => { hoverHot = hd.key; renderLinks(); });
+    plate.addEventListener("mouseleave", () => { if (hoverHot === hd.key) { hoverHot = null; renderLinks(); } });
+    plate.querySelector(".p-badge").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const id = hotSeat[hd.key];
+      if (!id) return;
+      winHooks.open(id, plate, false);
+      requestAnimationFrame(() => { if (!$("win").hidden && winFor === id) $("winCtl").scrollIntoView({ block: "nearest" }); });
+    });
+    $("plates").appendChild(plate);
+  }
   layoutStations();
   renderStations();
+  renderHotDesks();
 }
 for (const key of STATION_KEYS) {
   $("plate-" + key).addEventListener("click", (ev) => {
@@ -1135,8 +1402,8 @@ function focusFallback() {
     const row = stRows.get("lead");
     if (row) { row.focus(); return; }
   }
-  const box = $("overflow");
-  const first = box.hidden ? null : box.querySelector(".ov-row");
+  const list = $("ovList");
+  const first = list.hidden ? null : list.querySelector(".ov-row");
   if (first) first.focus();
   else $("plate-lead").focus();
 }
@@ -1161,6 +1428,7 @@ winHooks.close = () => closeWin(false);
 demoHooks.press = (id) => {
   let anchor = null;
   for (const stKey of WORKER_STATIONS) if (stationLane[stKey] === id) anchor = $("plate-" + stKey);
+  for (const hd of SCENE.hotdesks) if (hotSeat[hd.key] === id) anchor = $("plate-" + hd.key);
   if (!anchor) anchor = ovBtns.get(id) || null;
   winHooks.open(id, anchor, false);
 };
@@ -1181,7 +1449,7 @@ document.addEventListener("pointerdown", (ev) => {
   if ($("win").hidden) return;
   const t = ev.target;
   if ($("win").contains(t) || (winAnchor && winAnchor.contains(t))) return;
-  if (t.closest && t.closest(".plate, .ov-row, .hit")) return;
+  if (t.closest && t.closest(".plate, .ov-row, .ov-pill, .ov-list, .hit")) return;
   closeWin(false);
 });
 $("winInput").addEventListener("input", () => { if (winFor && winFor !== "lead") drafts.set(winFor, $("winInput").value); });
@@ -1277,19 +1545,19 @@ function fireCues(cues) {
   const on = PixelSprites.motion();
   for (const c of cues) {
     const stKey = laneStation.get(c.id);
-    if (!stKey || !on) continue;
+    const key = stKey || laneHot.get(c.id);
+    if (!key || !on) continue;
+    const sp = sprites[key] || hotSprites[key];
     if (c.type === "receive") {
       recordEffect("receive", c.id);
       if (sprites.lead) sprites.lead.play("receive");
-      if (!narrow) firePacket(stKey);
-      const sp = sprites[stKey];
-      if (sp) setTimeout(() => { if (laneStation.get(c.id) === stKey) sp.play("receive"); }, 600);
+      if (stKey && !narrow) firePacket(stKey);
+      if (sp) setTimeout(() => { if ((laneStation.get(c.id) || laneHot.get(c.id)) === key) sp.play("receive"); }, 600);
     } else if (c.type === "step") {
       recordEffect("step", c.id);
-      if (!narrow) fireCheck(stKey);
+      if (!narrow) fireCheck(key);
     } else if (c.type === "complete") {
       recordEffect("complete", c.id);
-      const sp = sprites[stKey];
       if (sp) sp.play("complete");
     }
   }
@@ -1324,6 +1592,32 @@ window.__office = {
         suggest: l ? (l.suggest || "") : "",
       };
     });
+    const hotStations = SCENE.hotdesks.map((hd) => {
+      const id = hotSeat[hd.key];
+      const l = id && model ? model.lanes.find((x) => x.id === id) : null;
+      if (!l) return null;
+      const plateEl = $("plate-" + hd.key);
+      if (!plateEl) return null;
+      const f = hd.foot;
+      const plate = plateEl.getBoundingClientRect();
+      const sp = hotSprites[hd.key];
+      const st = CAUI.status(l.health);
+      const desk = desks[hd.key];
+      return {
+        station: hd.key, role: hd.role, laneId: id, name: laneName(l),
+        status: st.key,
+        clip: sp ? sp.clip : "",
+        frame: sp && sp.el && sp.el.dataset.frame !== undefined ? Number(sp.el.dataset.frame) : null,
+        foot: { x: r.x + ox + f[0] * k, y: r.y + oy + f[1] * k },
+        plate: { x: plate.x, y: plate.y, w: plate.width, h: plate.height },
+        done: l.progress ? (l.progress.done || 0) : 0,
+        total: l.progress ? (l.progress.total || 0) : 0,
+        tokens: CAUI.tokenTotal(l.tokens),
+        suggest: l.suggest || "",
+        desk: !!desk && desk.style.display !== "none",
+      };
+    }).filter(Boolean);
+    const allStations = stations.concat(hotStations);
     const winLane = winFor && winFor !== "lead" && model ? model.lanes.find((x) => x.id === winFor) : null;
     const winSrc = winFor === "lead" ? (model && model.plan) : winLane;
     const winTk = winSrc
@@ -1334,8 +1628,8 @@ window.__office = {
       plan: (model && model.plan && model.plan.title) || "",
       goal: (model && model.plan && model.plan.goal) || "",
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
-      stations,
-      overflow: model ? model.lanes.filter((l) => !laneStation.has(l.id)).map((l) => l.id) : [],
+      stations: allStations,
+      overflow: (() => { const ids = model ? model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).map((l) => l.id) : []; return { count: ids.length, ids, open: ovOpen }; })(),
       window: { open: !win.hidden && !!winFor, laneId: winFor, x: wr.x, y: wr.y, w: wr.width, h: wr.height, focusInside: win.contains(document.activeElement), tokens: winTk, actions: [...$("winBtns").children].map((b) => b.dataset.action), suggest: (winLane && winLane.suggest) || "", noteOpen: !$("winNote").hidden },
       effects: effects.slice(),
       motion: PixelSprites.motion(),
@@ -1351,6 +1645,7 @@ window.__office = {
     if (!model.lanes.some((l) => l.id === id)) return false;
     let anchor = null;
     for (const stKey of WORKER_STATIONS) if (stationLane[stKey] === id) anchor = $("plate-" + stKey);
+    for (const hd of SCENE.hotdesks) if (hotSeat[hd.key] === id) anchor = $("plate-" + hd.key);
     if (!anchor) anchor = ovBtns.get(id) || stRows.get(id) || null;
     winHooks.open(id, anchor, false);
     return true;
