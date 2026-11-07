@@ -350,17 +350,25 @@ function lastJsonObject(s) {
   return null;
 }
 
-// ca_wait: exit codes 0, 1, 4 and 124 are results; 2 (unknown lane) and anything else are tool errors.
+// ca_wait: exit codes 0, 1, 3, 4, 5 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
+const WAIT_NEXT = {
+  0: 'read ca_summary for each lane and verify the work',
+  1: 'read ca_summary; ca_resume continues a failed or stopped lane with a note',
+  3: 'keys missing or rejected: ask the human to run ca auth (a local form opens; never ask for keys in chat), then ca_resume the lane',
+  4: 'read ca_summary: the reviewer asked for changes',
+  5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
+  124: 'still running: call ca_wait again',
+};
 async function waitResult(a) {
   const lanes = needLanes(a.lanes);
   const timeoutS = needCount(a.timeout_s, 'timeout_s', 300, 3000);
   const r = await runCli(['wait', ...lanes, '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
-  if (![0, 1, 4, 124].includes(r.code) || !final) {
+  if (![0, 1, 3, 4, 5, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();
     return { content: [{ type: 'text', text: `ca_wait exited ${r.code}${raw ? ':\n' + raw : ' with no output'}` }], isError: true };
   }
-  return { content: [{ type: 'text', text: JSON.stringify({ ...final, exit: r.code, timedOut: r.code === 124 }, null, 2) }], isError: false };
+  return { content: [{ type: 'text', text: JSON.stringify({ ...final, exit: r.code, timedOut: r.code === 124, next: WAIT_NEXT[r.code] }, null, 2) }], isError: false };
 }
 
 async function cliResult(tool, cliArgs) {
