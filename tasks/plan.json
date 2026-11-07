@@ -20,6 +20,13 @@
         "overview"
       ],
       "note": "Starts after wave 1 merges (shares dash.html). Status buckets, projects, freshness, notifications."
+    },
+    {
+      "name": "Wave 3 · Office crowd",
+      "lanes": [
+        "office-crowd"
+      ],
+      "note": "After the Control room merges (both touch office.html). Lanes 4 to 8 sit at hot desks as sprites, +N pill beyond."
     }
   ],
   "lanes": [
@@ -64,6 +71,16 @@
         "runner/dash.html",
         "runner/ca.mjs",
         "runner/office.html"
+      ]
+    },
+    {
+      "task": "office-crowd",
+      "repo": "../ca-office-wt-office-crowd",
+      "model": "maas/glm-5.3",
+      "why": "Hot desks for lanes beyond three, attention-first seating, +N pill",
+      "files": [
+        "runner/office.html",
+        "checks/office.check.mjs"
       ]
     }
   ],
@@ -117,6 +134,10 @@
     {
       "at": "2026-11-07T09:04:32.548Z",
       "text": "Wave 1 merged (3 lanes, all 13 check suites green). Real lane test on the dev runner: dashboard Retry turn, Restart server and Resume-with-note all worked; found and fixed a stale STOP file that ended a resumed run at once. Also fixed: state.json now written atomically (lanes flickered out of status), resume log fd leak."
+    },
+    {
+      "at": "2026-11-07T09:42:00.403Z",
+      "text": "User wants lanes beyond three as sprites in the Office. Lead drew the art (5 coloured hot-desk robots + hot desk prop, slots checked against nameplates in a composite preview); wiring goes to wave 3."
     }
   ],
   "risks": [
