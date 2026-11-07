@@ -150,5 +150,65 @@
     }, 10000);
   }
   if (typeof location !== 'undefined' && typeof setInterval === 'function') watchUi();
-  window.CAUI = { status: status, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); } };
+  // ---------- tokens ----------
+  // A token record is { input, output, reasoning, cacheRead, steps, total }. total may be missing on old lanes.
+  function tokenTotal(t) {
+    if (!t) return 0;
+    if (typeof t.total === 'number') return t.total;
+    return (+t.input || 0) + (+t.output || 0) + (+t.reasoning || 0) + (+t.cacheRead || 0);
+  }
+  // 0, 950, 12.3k, 1.24M
+  function fmtTokens(n) {
+    n = +n || 0;
+    if (n < 1000) return String(Math.round(n));
+    if (n < 1e6) return (n < 1e4 ? (n / 1e3).toFixed(1) : Math.round(n / 1e3)) + 'k';
+    return (n < 1e7 ? (n / 1e6).toFixed(2) : (n / 1e6).toFixed(1)) + 'M';
+  }
+  // "12.3k in / 4.1k out / 900 reasoning / 30k cache"
+  function tokenDetail(t) {
+    t = t || {};
+    var bits = [fmtTokens(t.input) + ' in', fmtTokens(t.output) + ' out'];
+    if (+t.reasoning) bits.push(fmtTokens(t.reasoning) + ' reasoning');
+    if (+t.cacheRead) bits.push(fmtTokens(t.cacheRead) + ' cache');
+    return bits.join(' / ');
+  }
+  // Per-agent split of a lane or plan: [{ role, label, total }] for build, review and other (hidden CodeArts sessions).
+  var ROLE_LABEL = { build: 'Builder', review: 'Reviewer', other: 'Hidden sessions' };
+  function tokenSplit(by) {
+    by = by || {};
+    return ['build', 'review', 'other'].map(function (r) { return { role: r, label: ROLE_LABEL[r], total: tokenTotal(by[r]), t: by[r] || {} }; });
+  }
+
+  // ---------- lane controls ----------
+  // The server lists the allowed action ids per lane (laneView.actions) and one suggested id (laneView.suggest).
+  // Pages render buttons from this table; control() sends them. danger: needs a confirm(). note: optional text box.
+  var ACTIONS = {
+    'skip-wait': { label: 'Retry now', title: 'Skip the backoff wait and retry the model at once', path: 'kick', body: { mode: 'now' } },
+    kick: { label: 'Retry turn', title: 'Abort the current turn and continue in the same session (context kept)', path: 'kick', body: { mode: 'turn' }, note: true },
+    fresh: { label: 'Fresh session', title: 'Abort and continue in a new session with a continuation brief (context dropped)', path: 'kick', body: { mode: 'fresh' }, danger: 'Start a fresh session? The worker loses its conversation context; commits stay.', note: true },
+    'restart-server': { label: 'Restart server', title: 'Restart the private codearts server (connection problems), then resume the same session', path: 'kick', body: { mode: 'server' }, danger: 'Restart the codearts server of this lane? The session resumes after the restart.' },
+    resume: { label: 'Resume', title: 'Continue this lane in place: same id, commits kept, optional note for the worker', path: 'resume', note: true },
+    stop: { label: 'Stop', title: 'Abort the session and end the lane (resumable later)', path: 'stop', danger: 'Stop this lane? You can resume it later.' },
+    attach: { label: 'Open TUI', title: 'Open the CodeArts TUI on the live session in a new window', path: 'attach' },
+  };
+  // Ready-made steering messages for one-click steering.
+  var QUICK_STEERS = [
+    { label: 'Continue', text: 'Continue with the next unfinished step of the brief. Commit after each step that works.' },
+    { label: 'Commit and go on', text: 'Commit what already works now with the right "step N:" subject, then continue with the next step.' },
+    { label: 'Stop planning', text: 'Stop planning. Make the next concrete edit now, run the check, and read its output.' },
+    { label: 'Run the checks', text: 'Run every CHECK line from the brief now, fix what fails, and commit the fixes.' },
+    { label: 'Wrap up', text: 'Wrap up: finish the current step, commit it, run the checks, and reply with the steps and commit hashes.' },
+  ];
+  // control('lane-id', 'resume', { note: '...' }) or control(id, 'kick', { text }) -> Promise<{ ok, message } | { error }>
+  function control(laneId, action, extra) {
+    var a = ACTIONS[action];
+    if (!a) return Promise.resolve({ error: 'unknown action ' + action });
+    var body = Object.assign({}, a.body || {}, extra || {});
+    return fetch('/api/lane/' + encodeURIComponent(laneId) + '/' + a.path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return r.ok ? Object.assign({ ok: true }, j) : { error: j.error || ('HTTP ' + r.status) }; }); })
+      .catch(function (e) { return { error: String(e && e.message || e) }; });
+  }
+
+  window.CAUI = { status: status, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); },
+    tokenTotal: tokenTotal, fmtTokens: fmtTokens, tokenDetail: tokenDetail, tokenSplit: tokenSplit, ACTIONS: ACTIONS, QUICK_STEERS: QUICK_STEERS, control: control };
 })();
