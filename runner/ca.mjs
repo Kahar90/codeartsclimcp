@@ -32,6 +32,9 @@
 //        ca steer <lane> <message>         queue a message into the running session
 //        ca attach <lane>                  open the CodeArts TUI on the live session (watch + type)
 //        ca stop <lane>                    abort the session and end the lane
+//        ca resume <lane> [--note "<text>"] [--dry-run]  continue a paused, failed, stopped or DEAD
+//                                  lane in place (same id, tokens and history; the note waits in
+//                                  the lane folder; --dry-run prints the argv without spawning)
 //        ca dash [port]                    local web dashboard of all lanes (default 4777)
 //        ca gc                             forget lanes finished more than 3 days ago
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
@@ -647,11 +650,15 @@ async function runLane(repoArg, task, opts = {}) {
     let first = brief;
     if (resumed) {
       const done = git(repo, 'log', '--reverse', '--format=%h %s', `${START}..HEAD`);
-      const nf = path.join(repo, 'tasks', `${task}.resume.md`); const notes = fs.existsSync(nf) ? fs.readFileSync(nf, 'utf8').trim() : '';
+      const nf = path.join(repo, 'tasks', `${task}.resume.md`); let notes = fs.existsSync(nf) ? fs.readFileSync(nf, 'utf8').trim() : '';
+      const rnf = path.join(dir, 'resume-note.txt'); const rn = fs.existsSync(rnf) ? fs.readFileSync(rnf, 'utf8').trim() : '';
+      if (rn) { try { fs.rmSync(rnf, { force: true }); } catch {} notes = `${rn}\n${notes}`.trim(); }
+      S.resumedBy = process.env.CA_RESUMED_BY || '';
       first += `\n\n---\nRESUMED RUN ${S.resumes + 1}. The previous run ended ${resultOf(resumed)}${resumed.reason ? ' (' + resumed.reason + ')' : ''}. These commits are already in the repo; do not redo them:\n${done || '(none)'}\n`
         + (notes ? `\nNotes from the lead (apply these first, commit each as "fix: <summary>"):\n${notes}\n` : '')
         + 'Then continue with the first numbered step that has no "step N:" commit, keeping the same commit subjects.';
-      say(`resuming run ${S.resumes + 1} from ${START.slice(0, 7)} (${done ? done.split(/\r?\n/).length : 0} commits kept${notes ? ', lead notes from ' + path.basename(nf) : ''})`);
+      say(`resuming run ${S.resumes + 1} from ${START.slice(0, 7)} (${done ? done.split(/\r?\n/).length : 0} commits kept${notes ? ', lead notes' : ''})`);
+      if (S.resumedBy) say(`resumed by ${S.resumedBy}`);
     }
     await send(sid, first, BUILD);
     for (;;) {
@@ -860,6 +867,52 @@ function cmdStop(args) {
   fs.writeFileSync(path.join(l.dir, 'STOP'), String(now()));
   if (!alive(l.s.pid)) { killTree(l.s.server?.pid); const s = l.s; s.result = s.result || 'stopped'; s.phase = 'finished'; s.finishedAt = s.finishedAt || now(); s.activity = 'stopped (supervisor had died)'; fs.writeFileSync(path.join(l.dir, 'state.json'), JSON.stringify(s, null, 2)); console.log(`supervisor was gone; killed its server and marked ${l.id} stopped`); return; }
   console.log(`stop requested for ${l.id}; the supervisor aborts the session and writes the summary within a few seconds`);
+}
+// A resume logged on the plan that owns the lane, so the lead sees who continued what.
+function noteResume(l, by, note) {
+  for (const r of plans()) {
+    const p = readJSON(r.file) || {};
+    const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+    if (!(p.lanes || []).some((pl) => laneId(path.resolve(base, pl.repo || '.'), pl.task) === l.id)) continue;
+    (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Resumed ${l.id} from the ${by}${note ? ': ' + note : ''}` });
+    try { fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n'); } catch {}
+    return r.id;
+  }
+  return null;
+}
+// Resume a paused, failed, stopped or DEAD lane from anywhere (CLI, dashboard, MCP).
+// CA_RESUME_DRY=1 answers with the argv without spawning (checks, cautious leads).
+function resumeLane(l, { note = '', by = 'ca resume' } = {}) {
+  const s = l.s;
+  if (s.result === 'done') return { error: `lane ${l.id} is done; nothing to resume`, code: 409 };
+  if (!s.result && alive(s.pid)) return { error: `lane ${l.id} is still running (pid ${s.pid}); steer or stop it instead`, code: 409 };
+  if (!fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`))) return { error: `brief missing: tasks/${l.task}.md in ${l.repo}`, code: 409 };
+  if (!s.result && !alive(s.pid)) {
+    // DEAD supervisor: kill its server and close the old run before starting a new one.
+    killTree(s.server?.pid);
+    s.result = s.result || 'stopped'; s.phase = 'finished'; s.finishedAt = s.finishedAt || now(); s.activity = 'stopped (supervisor had died)';
+    try { fs.writeFileSync(path.join(l.dir, 'state.json'), JSON.stringify(s, null, 2)); } catch {}
+  }
+  if (note) { try { fs.mkdirSync(l.dir, { recursive: true }); fs.appendFileSync(path.join(l.dir, 'resume-note.txt'), `[${new Date().toISOString()} ${by}] ${note}\n`); } catch {} }
+  noteResume(l, by, note);
+  const argv = [fileURLToPath(import.meta.url), 'lane', l.repo, l.task, '--resume'];
+  if (process.env.CA_RESUME_DRY === '1') return { ok: true, dry: true, argv, message: `would resume ${l.id} with: ${argv.join(' ')}` };
+  const logFile = path.join(l.repo, 'tasks', `${l.task}.lane.log`);
+  const out = fs.openSync(logFile, 'a');
+  const child = spawn(process.execPath, argv, { detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, CA_RESUMED_BY: by } });
+  child.unref();
+  return { ok: true, dry: false, argv, message: `resumed ${l.id} (pid ${child.pid}); log: ${logFile}` };
+}
+function cmdResume(args) {
+  const ni = args.indexOf('--note');
+  const note = ni >= 0 ? args.slice(ni + 1).filter((a) => a !== '--dry-run').join(' ').trim() : '';
+  const q = args.slice(0, ni >= 0 ? ni : args.length).find((a) => !a.startsWith('--'));
+  if (!q) die('usage: ca resume <lane> [--note "<text>"] [--dry-run]', 2);
+  if (args.includes('--dry-run')) process.env.CA_RESUME_DRY = '1';
+  const l = findLane(q);
+  const r = resumeLane(l, { note, by: 'ca resume' });
+  if (r.error) die(r.error, 2);
+  console.log(`CA_RESUME ${JSON.stringify({ lane: l.id, ok: true, dry: !!r.dry, argv: r.argv, message: r.message })}`);
 }
 function cmdGc() {
   for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); fs.rmSync(path.join(REG, 'final', `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
@@ -1271,7 +1324,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), resume: () => cmdResume(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
 await table[cmd]();
