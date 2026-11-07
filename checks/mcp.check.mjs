@@ -37,7 +37,7 @@ try {
   srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   m = await rpc('ping', {}); check('ping', m.result && !m.error);
   m = await rpc('tools/list', {}); const tools = m.result?.tools || [];
-  const want = ['ca_doctor', 'ca_init', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_plan', 'ca_note'];
+  const want = ['ca_doctor', 'ca_init', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_kick', 'ca_resume', 'ca_plan', 'ca_note'];
   check('tools/list has every tool', want.every((w) => tools.some((x) => x.name === w)), tools.map((x) => x.name).join(','));
   check('tools have descriptions and object schemas', tools.length && tools.every((x) => x.description && x.description.length > 15 && x.inputSchema?.type === 'object'));
   check('required args declared', tools.find((x) => x.name === 'ca_steer')?.inputSchema?.required?.includes('lane'));
@@ -52,6 +52,12 @@ try {
   check('ca_wait timeout says still running, not an error', !m.result?.isError && j && j.exit === 124 && j.timedOut === true && Date.now() - t0 < 20000, text(m).slice(0, 200));
   m = await call('ca_steer', { lane: 'good', message: 'x' }); check('ca_steer on a finished lane is a tool error', m.result?.isError === true, text(m).slice(0, 120));
   m = await call('ca_summary', { lane: 'nope' }); check('unknown lane is a tool error with the CLI message', m.result?.isError === true && /no lane matches/.test(text(m)), text(m).slice(0, 120));
+  m = await call('ca_kick', { lane: 'slow', mode: 'fresh', message: 'start clean' });
+  const kf = path.join(repo, 'tasks', 'slow.lane', 'KICK'); let kick = null; try { kick = JSON.parse(fs.readFileSync(kf, 'utf8')); } catch {}
+  check('ca_kick queues a kick on a running lane', !m.result?.isError && kick?.mode === 'fresh' && kick?.text === 'start clean', text(m).slice(0, 120) + ' ' + JSON.stringify(kick));
+  fs.rmSync(kf, { force: true });
+  m = await call('ca_kick', { lane: 'good' }); check('ca_kick on a finished lane is a tool error', m.result?.isError === true, text(m).slice(0, 120));
+  m = await call('ca_resume', { lane: 'good' }); check('ca_resume on a done lane is a tool error', m.result?.isError === true, text(m).slice(0, 120));
   m = await call('ca_init', { repo, task: 'feat', goal: 'Do the feature' });
   check('ca_init writes the brief', !m.result?.isError && fs.existsSync(path.join(repo, 'tasks', 'feat.md')), text(m).slice(0, 120));
   m = await call('ca_nope', {}); check('unknown tool gives a JSON-RPC error or tool error', !!m.error || m.result?.isError === true);

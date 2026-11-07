@@ -56,7 +56,7 @@ const INSTRUCTIONS = [
   'Run ca_doctor first and fix every fail row, write one brief per lane with ca_init, then start it with ca_lane_start.',
   'Block on ca_wait instead of polling ca_status; exit 124 means still running, call it again.',
   'When a lane ends, read ca_summary, judge the reviewer findings against the brief and verify the work yourself by running the repo checks on the branch.',
-  'Steer a running lane with ca_steer, stop it with ca_stop.',
+  'Steer a running lane with ca_steer, kick a stuck turn with ca_kick, stop it with ca_stop, and continue a paused, failed, stopped or DEAD lane with ca_resume.',
   'The human watches the dashboard at http://127.0.0.1:4777 (Office view at /office).',
 ].join(' ');
 
@@ -235,6 +235,42 @@ const TOOLS = [
     ok: [0],
     timeout: 60000,
     build: (a) => ['stop', needStr(a.lane, 'lane')],
+  },
+  {
+    name: 'ca_kick',
+    description: 'Kick a stuck lane turn (ca kick): turn (default) aborts and resumes the current turn, fresh starts a clean session, server restarts the codearts server, now retries at once and skips a backoff wait. The supervisor applies it within 2 s. Refused while checks run (gate phase) or after the lane ended: use ca_resume there.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', description: 'lane id or task name; the lane must still be running' },
+        mode: { type: 'string', enum: ['turn', 'fresh', 'server', 'now'], description: 'turn: retry the current turn (default); fresh: clean session; server: restart the codearts server; now: retry now, skipping a backoff' },
+        message: { type: 'string', description: 'why the kick was given; the worker sees it with the resume' },
+      },
+      required: ['lane'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => {
+      const mode = a.mode === undefined || a.mode === null || a.mode === '' ? 'turn' : String(a.mode);
+      if (!['turn', 'fresh', 'server', 'now'].includes(mode)) throw new ArgError('mode');
+      return ['kick', needStr(a.lane, 'lane'), ...({ fresh: ['--fresh'], server: ['--server'], now: ['--now'] }[mode] || []),
+        ...(a.message !== undefined && a.message !== null ? [needStr(a.message, 'message')] : [])];
+    },
+  },
+  {
+    name: 'ca_resume',
+    description: 'Continue a paused, failed, stopped or DEAD lane in place (ca resume): it keeps the commits and state and runs with --resume, applying the optional note first. Refused on a done lane or one still running (steer or stop those instead).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', description: 'lane id or task name' },
+        note: { type: 'string', description: 'lead note for the resumed run; the worker applies it before continuing' },
+      },
+      required: ['lane'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['resume', needStr(a.lane, 'lane'), ...(a.note !== undefined && a.note !== null ? ['--note', needStr(a.note, 'note')] : [])],
   },
   {
     name: 'ca_plan',
