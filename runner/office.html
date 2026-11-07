@@ -669,7 +669,9 @@ let k = 1, ox = 0, oy = 0, narrow = false;
 
 function sizeStage() {
   const wrap = $("stagewrap"), stage = $("stage");
-  narrow = (wrap.clientWidth || 1) < 700;
+  // Narrow layout (room on top, station list below) on phones and on portrait tablets, where a
+  // letterboxed room would leave large empty bands above and below it.
+  narrow = (wrap.clientWidth || 1) < 700 || (window.innerWidth < 1100 && window.innerHeight > window.innerWidth * 1.15);
   document.body.classList.toggle("narrow", narrow);
   document.documentElement.classList.toggle("narrow", narrow);
   const w = wrap.clientWidth || 1;

@@ -100,7 +100,10 @@ try {
       await wait(400);
       const r = await ev(RECT('#win'));
       if (!r) continue; // not every opener opens the window (e.g. the +N pill toggles its list)
-      if (!inView(r) && !(r.oy !== 'visible' && r.sh > r.ch && r.y >= M - 1 && r.b <= r.vh - M + 1)) outside.push(`${t.id}: ${fmt(r)}`);
+      // a phone/tablet bottom sheet is docked flush to the bottom and sides: inside the viewport is enough there
+      const sheet = await ev(`!!(window.__office.state().win || {}).sheet`);
+      const okSheet = sheet && r.x >= -1 && r.r <= r.vw + 1 && r.y >= 0 && Math.abs(r.b - r.vh) <= 1 && r.h <= r.vh * 0.9;
+      if (!okSheet && !inView(r) && !(r.oy !== 'visible' && r.sh > r.ch && r.y >= M - 1 && r.b <= r.vh - M + 1)) outside.push(`${t.id}: ${fmt(r)}`);
       if (!/^anim:/.test(anim)) noAnim.push(`${t.id}: ${anim}`);
       if (!shotDone) { await shot(`office-${v.name}-window`); shotDone = true; }
       await key('Escape'); await wait(350);
