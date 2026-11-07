@@ -129,21 +129,124 @@ export async function uninstall(args) {
 
 // The install command: CA_UPDATE_CMD when set (a shell command line, used by the checks); else a
 // git pull when the package root is a checkout, else a fresh global install from GitHub.
-function installCommand() {
+export function installCommand() {
   if (process.env.CA_UPDATE_CMD) return process.env.CA_UPDATE_CMD;
   const root = path.resolve(HERE, '..');
   if (fs.existsSync(path.join(root, '.git'))) return `git -C ${root} pull --ff-only`;
   return 'npm install -g github:Kahar90/codeartsclimcp';
 }
 
-// `ca update [--dry-run]`: reinstall the latest version, then rerun `ca setup <h> --user` for every
-// recorded harness so each config is refreshed. A failing install command changes nothing.
+// Compare two x.y.z versions (optional leading "v", missing parts are 0): -1, 0 or 1.
+export function compareVersions(a, b) {
+  const parts = (v) => String(v == null ? '' : v).trim().replace(/^v/i, '').split('.')
+    .map((x) => { const n = parseInt(x, 10); return Number.isFinite(n) ? n : 0; });
+  const pa = parts(a); const pb = parts(b);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const x = pa[i] || 0; const y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+// Parse a CHANGELOG.md into sections "## 1.2.3 (YYYY-MM-DD)", newest first. Items are the "- "
+// bullets; a wrapped bullet continues on following indented lines (joined with one space); plain
+// sub-heading lines inside a section are skipped.
+export function parseChangelog(text) {
+  const sections = [];
+  let cur = null; let item = -1;
+  for (const raw of String(text == null ? '' : text).split(/\r?\n/)) {
+    const head = raw.match(/^##\s+(\S+)\s+\((\d{4}-\d{2}-\d{2})\)\s*$/);
+    if (head) { cur = { version: head[1], date: head[2], items: [] }; sections.push(cur); item = -1; continue; }
+    if (!cur) continue;
+    if (!raw.trim()) { item = -1; continue; }
+    const bullet = raw.match(/^\s*-\s+(.*)$/);
+    if (bullet) { cur.items.push(bullet[1].trim()); item = cur.items.length - 1; continue; }
+    if (/^\s+\S/.test(raw)) { if (item >= 0) cur.items[item] = `${cur.items[item]} ${raw.trim()}`.trim(); continue; }
+    item = -1; // a plain sub-heading line: skip it
+  }
+  return sections.sort((a, b) => compareVersions(b.version, a.version));
+}
+
+// The update check: is a newer release published? Reads package.json and CHANGELOG.md from the
+// release base URL (CA_UPDATE_URL overrides it, used by the checks), caches the result and never throws.
+const PKG_FILE = path.resolve(HERE, '..', 'package.json');
+const UPDATE_FILE = path.join(STATE_DIR, 'update.json');
+// How long a cached result is trusted before a refresh: 24 h, CA_UPDATE_TTL_H hours overrides it.
+export const UPDATE_TTL_MS = (() => { const h = Number(process.env.CA_UPDATE_TTL_H); return (Number.isFinite(h) && h > 0 ? h : 24) * 3600 * 1000; })();
+
+export function currentVersion() { try { return String(JSON.parse(fs.readFileSync(PKG_FILE, 'utf8')).version || '0.0.0'); } catch { return '0.0.0'; } }
+function updateBaseUrl() { const u = process.env.CA_UPDATE_URL || 'https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/'; return u.endsWith('/') ? u : `${u}/`; }
+
+// null when the cache is missing or unreadable.
+export function readUpdateCache() {
+  try { const v = JSON.parse(fs.readFileSync(UPDATE_FILE, 'utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+}
+// Atomic: write a temp file, then rename it over the cache (retry briefly: a Windows reader can hold it).
+function writeUpdateCache(obj) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    const tmp = `${UPDATE_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
+    for (let i = 0; i < 5; i++) { try { fs.renameSync(tmp, UPDATE_FILE); return; } catch { const t = Date.now() + 15; while (Date.now() < t); } }
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  } catch {}
+}
+
+// Is a newer release published? Result { current, latest, available, notes, cmd, checkedAt, error? }.
+// Every successful result is cached in STATE_DIR/update.json; a failure never overwrites a good cache.
+export async function checkUpdate({ force = false, timeoutMs = 5000 } = {}) {
+  const cmd = installCommand();
+  const current = currentVersion();
+  if (!force) {
+    const c = readUpdateCache();
+    if (c && typeof c.checkedAt === 'number' && Date.now() - c.checkedAt < UPDATE_TTL_MS) return c;
+  }
+  const base = updateBaseUrl();
+  try {
+    const res = await fetch(`${base}package.json`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) throw new Error(`package.json HTTP ${res.status}`);
+    const pkg = await res.json();
+    const latest = String((pkg && pkg.version) || '').trim();
+    if (!latest) throw new Error('remote package.json has no version');
+    const available = compareVersions(latest, current) > 0;
+    let notes = [];
+    if (available) {
+      const cr = await fetch(`${base}CHANGELOG.md`, { signal: AbortSignal.timeout(timeoutMs) });
+      if (cr.ok) notes = parseChangelog(await cr.text()).filter((s) => compareVersions(s.version, current) > 0 && compareVersions(s.version, latest) <= 0);
+    }
+    const result = { current, latest, available, notes, cmd, checkedAt: Date.now() };
+    writeUpdateCache(result);
+    return result;
+  } catch (e) {
+    return { current, latest: null, available: false, notes: [], cmd, checkedAt: Date.now(), error: String((e && e.message) || e) };
+  }
+}
+
+// `ca update [--check] [--json] [--dry-run]`: with --check just report whether a newer release
+// exists (and what is new); otherwise reinstall the latest version, then rerun `ca setup <h> --user`
+// for every recorded harness so each config is refreshed. A failing install command changes nothing.
 export async function update(args) {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const dry = flags.has('--dry-run');
   const asJson = flags.has('--json');
   const cmd = installCommand();
   const harnesses = Object.keys(readManifest().harnesses);
+
+  if (flags.has('--check')) {
+    const r = await checkUpdate({ force: true });
+    if (asJson) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); return 0; }
+    if (r.error) { process.stdout.write(`could not check for updates: ${r.error}\n`); process.exitCode = 1; return 1; }
+    if (!r.available) { process.stdout.write(`codearts-lanes ${r.current} is up to date\n`); return 0; }
+    process.stdout.write(`Update available: ${r.current} -> ${r.latest}\n`);
+    for (const n of r.notes) {
+      process.stdout.write(`\n${n.version} (${n.date})\n`);
+      for (const item of n.items) process.stdout.write(`  - ${item}\n`);
+    }
+    process.stdout.write('\nRun: ca update\n');
+    return 0;
+  }
 
   if (dry) {
     process.stdout.write(`would run: ${cmd}\n`);
@@ -164,10 +267,15 @@ export async function update(args) {
     const acted = (s.stdout || '').split(/\r?\n/).filter((l) => /^(wrote|updated) /.test(l));
     refreshed.push(`${h}: ${acted.length ? acted.join(', ') : 'unchanged'}`);
   }
-  if (asJson) process.stdout.write(JSON.stringify({ cmd, refreshed }, null, 2) + '\n');
+  // No update is pending after a successful install: cache the version now installed so the passive
+  // notice turns off at once instead of after the old cache expires.
+  const installed = currentVersion();
+  writeUpdateCache({ current: installed, latest: installed, available: false, notes: [], cmd, checkedAt: Date.now() });
+  if (asJson) process.stdout.write(JSON.stringify({ cmd, refreshed, restart: true }, null, 2) + '\n');
   else {
     process.stdout.write(`updated via: ${cmd}\n`);
     for (const line of refreshed) process.stdout.write(line + '\n');
+    process.stdout.write('Restart your agent (or its MCP server) and any open dashboard so they load the new version.\n');
   }
   return 0;
 }
@@ -193,8 +301,10 @@ function serverArg0(harness) {
 }
 
 // Doctor rows for the install lifecycle: every recorded harness config still points at this ca.mjs,
-// and the installed CodeArts version matches the one that last passed the smoke test.
-export function lifecycleRows({ version = null } = {}) {
+// the installed CodeArts version matches the one that last passed the smoke test, and a newer
+// release of codearts-lanes is flagged. The update row reads the cache and only does one short
+// blocking check when the cache is missing or stale (CA_NO_UPDATE_CHECK=1 turns that off).
+export async function lifecycleRows({ version = null } = {}) {
   const rows = [];
   const recorded = Object.keys(readManifest().harnesses);
   if (!recorded.length) rows.push({ name: 'harness config', status: 'ok', detail: 'no machine-wide setup recorded', fix: '' });
@@ -216,6 +326,19 @@ export function lifecycleRows({ version = null } = {}) {
     if (!smoke || !smoke.version) rows.push({ name: 'codearts version', status: 'warn', detail: 'no smoke test recorded yet', fix: 'ca onboard --yes --smoke' });
     else if (String(smoke.version) === installed) rows.push({ name: 'codearts version', status: 'ok', detail: `${installed} matches the last smoke test`, fix: '' });
     else rows.push({ name: 'codearts version', status: 'warn', detail: `${installed} was never smoke-tested (last passed: ${smoke.version})`, fix: 'ca onboard --yes --smoke' });
+  }
+
+  // ca version row: is a newer codearts-lanes published? Uses the cache; refreshes once (short
+  // timeout) only when the cache is missing or stale, and never when the check is turned off.
+  const cur = currentVersion();
+  if (process.env.CA_NO_UPDATE_CHECK === '1') rows.push({ name: 'ca version', status: 'ok', detail: `${cur} (update check off)`, fix: '' });
+  else {
+    let cache = readUpdateCache();
+    const stale = !cache || typeof cache.checkedAt !== 'number' || Date.now() - cache.checkedAt >= UPDATE_TTL_MS;
+    if (stale) { try { cache = await checkUpdate({ force: true, timeoutMs: 4000 }); } catch {} }
+    if (cache && cache.error) rows.push({ name: 'ca version', status: 'ok', detail: `${cur} (could not check: ${cache.error})`, fix: '' });
+    else if (cache && cache.available && cache.latest) rows.push({ name: 'ca version', status: 'warn', detail: `${cur} installed, ${cache.latest} available`, fix: 'ca update' });
+    else rows.push({ name: 'ca version', status: 'ok', detail: `${cur} (latest)`, fix: '' });
   }
   return rows;
 }

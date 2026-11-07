@@ -89,6 +89,10 @@ and lanes that have waited more than 2 days collect in an **Older than 2 days** 
 
 - `ca --version` shows what you have; `ca update` installs the latest and refreshes your
   agent's config; `ca doctor` checks everything (each problem comes with the command that fixes it).
+- When a newer release is out, commands like `ca status` print a one-line notice on stderr, the
+  dashboard shows an update pill, and `ca doctor` warns; `ca update --check` prints the version and
+  what is new, and `ca update` installs it (restart your agent and any open dashboard after).
+  Set `CA_NO_UPDATE_CHECK=1` to turn the check off (no notice, no network).
 - `ca uninstall` removes exactly what setup added to your agents' config and nothing else
   (`--keys` also deletes your saved keys). See the [changelog](CHANGELOG.md).
 

@@ -25,7 +25,8 @@
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
 //        ca setup <harness> [repo] [--user]   write MCP + rules config for claude|kiro|cursor|codex|vscode|opencode
 //        ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]   guided first-run setup
-//        ca update [--dry-run]   reinstall the latest version and refresh every harness config
+//        ca update [--check] [--json] [--dry-run]   reinstall the latest version and refresh every
+//                                  harness config; --check only reports whether a newer one exists
 //        ca uninstall [--harness h] [--keys] [--dry-run]   remove exactly what setup added (and the keys with --keys)
 //        ca auth [--wait [--timeout S]] [--status] [--stdin] [--no-open] [--json]   keys via a local browser form, never through chat
 //        ca workflow                       print the lead workflow (docs/workflow.md)
@@ -1092,6 +1093,26 @@ function printRows(rows) {
   console.log(cols.map((c, i) => c.toUpperCase().padEnd(w[i])).join('  '));
   for (const r of rows) console.log(cols.map((c, i) => String(r[c]).padEnd(w[i])).join('  '));
 }
+// One line on stderr when a newer release is known and the cache is fresh; when the cache is missing
+// or stale, start a detached background refresh (ca update --check --json) and never wait for it.
+// CA_NO_UPDATE_CHECK=1 turns it off; --json output never carries it; a non-TTY stderr stays quiet
+// unless CA_UPDATE_NOTICE=1. Wrapped so the notice can never slow or fail the command.
+async function updateNotice(args) {
+  try {
+    if (process.env.CA_NO_UPDATE_CHECK === '1') return;
+    if (args.some((a) => a === '--json')) return;
+    if (!(process.stderr.isTTY || process.env.CA_UPDATE_NOTICE === '1')) return;
+    const { readUpdateCache, compareVersions, UPDATE_TTL_MS } = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href);
+    const cache = readUpdateCache();
+    if (cache && cache.available && cache.latest && compareVersions(cache.latest, cache.current || '0.0.0') > 0) {
+      process.stderr.write(`Update available: ${cache.current} -> ${cache.latest}. What's new: ca update --check. Install: ca update\n`);
+    }
+    const fresh = cache && typeof cache.checkedAt === 'number' && (Date.now() - cache.checkedAt) < UPDATE_TTL_MS;
+    if (!fresh) {
+      try { spawn(process.execPath, [fileURLToPath(import.meta.url), 'update', '--check', '--json'], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch {}
+    }
+  } catch {}
+}
 function cmdStatus(args) {
   // Control room order: what needs a human first (attention), then running, done, ended.
   const rank = { attention: 0, running: 1, done: 2, ended: 3 };
@@ -1425,7 +1446,7 @@ async function doctorData(repoArg) {
   // CodeArts version vs the last smoke-tested one. A broken lifecycle.mjs must never break doctor.
   try {
     const { lifecycleRows } = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href);
-    for (const row of lifecycleRows({ version: caVersion })) rows.push(row);
+    for (const row of await lifecycleRows({ version: caVersion })) rows.push(row);
   } catch {}
 
   const fails = rows.filter((r) => r.status === 'fail').length;
@@ -1875,6 +1896,34 @@ function cmdDash(args) {
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
+      if (u.pathname === '/api/update') {
+        // The update pill: the cached check plus the running dash pid. A stale cache refreshes in
+        // the background; ?refresh=1 waits for a fresh check. POST runs `ca update` and then
+        // restarts this same dashboard on the same port (after the response is sent).
+        const { readUpdateCache, checkUpdate, installCommand, currentVersion, UPDATE_TTL_MS } = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href);
+        const view = (c) => ({ current: (c && c.current) || currentVersion(), latest: (c && c.latest) || null, available: !!(c && c.available), notes: (c && Array.isArray(c.notes)) ? c.notes : [], cmd: (c && c.cmd) || installCommand(), checkedAt: (c && c.checkedAt) || 0, error: (c && c.error) || undefined, pid: process.pid });
+        if (req.method === 'POST') {
+          const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'update', '--json'], { encoding: 'utf8', env: caEnv(), windowsHide: true });
+          let out = ''; child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
+          const code = await new Promise((res) => { const to = setTimeout(() => { try { child.kill(); } catch {} res(-1); }, 600000); child.on('close', (c) => { clearTimeout(to); res(c); }); child.on('error', () => { clearTimeout(to); res(-1); }); });
+          if (code !== 0) {
+            const tail = out.trim().split(/\r?\n/).slice(-4).join(' ').slice(0, 300);
+            return json({ ok: false, error: `${tail} (exit ${code})` }, 500);
+          }
+          json({ ok: true, restarting: true, output: out.trim().slice(0, 2000) });
+          res.on('finish', () => {
+            try { srv.close(); } catch {}
+            try { spawn(process.execPath, [fileURLToPath(import.meta.url), 'dash', String(port)], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env }).unref(); } catch {}
+            setTimeout(() => process.exit(0), 50);
+          });
+          return;
+        }
+        let cache = readUpdateCache();
+        const stale = !cache || typeof cache.checkedAt !== 'number' || Date.now() - cache.checkedAt >= UPDATE_TTL_MS;
+        if (u.searchParams.get('refresh') === '1') { try { cache = await checkUpdate({ force: true, timeoutMs: 5000 }); } catch {} }
+        else if (stale) { try { spawn(process.execPath, [fileURLToPath(import.meta.url), 'update', '--check', '--json'], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch {} }
+        return json(view(cache));
+      }
       if (u.pathname === '/api/auth') {
         // Start the local key form (runner/auth.mjs) for the Connect keys button and hand back its
         // URL. The child prints JSON only; key values never reach this process, the page or the logs.
@@ -1936,9 +1985,18 @@ function cmdDash(args) {
       json({ error: 'not found' }, 404);
     } catch (err) { json({ error: String(err.message || err) }, 500); }
   });
-  srv.on('error', (e) => { if (e.code === 'EADDRINUSE') { console.log(`ca dash is already running: http://127.0.0.1:${port}`); process.exit(0); } throw e; });
   // Loopback by default (the dashboard drives lanes); CA_DASH_HOST only moves it within the machine.
-  srv.listen(port, process.env.CA_DASH_HOST || '127.0.0.1', () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
+  const dashHost = process.env.CA_DASH_HOST || '127.0.0.1';
+  const listenStarted = Date.now();
+  const listenDash = () => srv.listen(port, dashHost, () => console.log(`ca dash: http://127.0.0.1:${port}  (ctrl+c to stop)`));
+  srv.on('error', (e) => {
+    if (e.code !== 'EADDRINUSE') throw e;
+    // A POST /api/update restart spawns a fresh dash that must reclaim the same port once the old
+    // process releases it: retry for up to 10 s (the port is briefly busy), then give up.
+    if (Date.now() - listenStarted < 10000) { setTimeout(listenDash, 250); return; }
+    console.log(`ca dash is already running: http://127.0.0.1:${port}`); process.exit(0);
+  });
+  listenDash();
 }
 
 function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(code); }
@@ -1947,10 +2005,12 @@ const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
 const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
-if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); process.exit(0); }
+if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); await updateNotice(args); process.exit(0); }
 if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
   let v = '0.0.0'; try { v = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version || v; } catch {}
-  process.stdout.write(`codearts-lanes ${v} (${path.join(HERE, 'ca.mjs')})\n`); process.exit(0);
+  process.stdout.write(`codearts-lanes ${v} (${path.join(HERE, 'ca.mjs')})\n`); await updateNotice(args); process.exit(0);
 }
 if (!table[cmd]) { process.stderr.write(usageText() + '\n'); process.exit(2); }
+if (cmd === 'lane') await updateNotice(args);
 await table[cmd]();
+if (cmd === 'status' || cmd === 'doctor' || cmd === 'plan') await updateNotice(args);
