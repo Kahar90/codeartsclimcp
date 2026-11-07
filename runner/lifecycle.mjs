@@ -224,14 +224,29 @@ export async function checkUpdate({ force = false, timeoutMs = 5000 } = {}) {
   }
 }
 
-// `ca update [--dry-run]`: reinstall the latest version, then rerun `ca setup <h> --user` for every
-// recorded harness so each config is refreshed. A failing install command changes nothing.
+// `ca update [--check] [--json] [--dry-run]`: with --check just report whether a newer release
+// exists (and what is new); otherwise reinstall the latest version, then rerun `ca setup <h> --user`
+// for every recorded harness so each config is refreshed. A failing install command changes nothing.
 export async function update(args) {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const dry = flags.has('--dry-run');
   const asJson = flags.has('--json');
   const cmd = installCommand();
   const harnesses = Object.keys(readManifest().harnesses);
+
+  if (flags.has('--check')) {
+    const r = await checkUpdate({ force: true });
+    if (asJson) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); return 0; }
+    if (r.error) { process.stdout.write(`could not check for updates: ${r.error}\n`); process.exitCode = 1; return 1; }
+    if (!r.available) { process.stdout.write(`codearts-lanes ${r.current} is up to date\n`); return 0; }
+    process.stdout.write(`Update available: ${r.current} -> ${r.latest}\n`);
+    for (const n of r.notes) {
+      process.stdout.write(`\n${n.version} (${n.date})\n`);
+      for (const item of n.items) process.stdout.write(`  - ${item}\n`);
+    }
+    process.stdout.write('\nRun: ca update\n');
+    return 0;
+  }
 
   if (dry) {
     process.stdout.write(`would run: ${cmd}\n`);
@@ -252,10 +267,15 @@ export async function update(args) {
     const acted = (s.stdout || '').split(/\r?\n/).filter((l) => /^(wrote|updated) /.test(l));
     refreshed.push(`${h}: ${acted.length ? acted.join(', ') : 'unchanged'}`);
   }
-  if (asJson) process.stdout.write(JSON.stringify({ cmd, refreshed }, null, 2) + '\n');
+  // No update is pending after a successful install: cache the version now installed so the passive
+  // notice turns off at once instead of after the old cache expires.
+  const installed = currentVersion();
+  writeUpdateCache({ current: installed, latest: installed, available: false, notes: [], cmd, checkedAt: Date.now() });
+  if (asJson) process.stdout.write(JSON.stringify({ cmd, refreshed, restart: true }, null, 2) + '\n');
   else {
     process.stdout.write(`updated via: ${cmd}\n`);
     for (const line of refreshed) process.stdout.write(line + '\n');
+    process.stdout.write('Restart your agent (or its MCP server) and any open dashboard so they load the new version.\n');
   }
   return 0;
 }
