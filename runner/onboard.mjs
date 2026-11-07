@@ -283,7 +283,7 @@ export default async function onboard(args) {
       else {
         const laneId = `${path.basename(dir)}--probe`;
         const t0 = Date.now();
-        const r = run(process.execPath, [CA_MJS, 'lane', dir, 'probe'], { timeout: 180000, env: { ...process.env, NO_REVIEW: '1' } });
+        const r = run(process.execPath, [CA_MJS, 'lane', dir, 'probe'], { timeout: 180000, env: { ...process.env, NO_REVIEW: '1', CA_NO_PLAN: '1' } });
         const took = dur(Date.now() - t0);
         if (r.status === 0) {
           run(process.execPath, [CA_MJS, 'ack', laneId, '--note', 'onboard smoke test'], { timeout: 30000 });

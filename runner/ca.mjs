@@ -283,6 +283,12 @@ async function runLane(repoArg, task, opts = {}) {
   if (opts.resume && !(prev && prev.result && prev.result !== 'done')) die(`nothing to resume: lane ${id} has no paused, stopped or failed run`, 2);
   // Request errors first (they need no CodeArts), then the install.
   if (!fs.existsSync(EXE)) die(`codearts not found at ${EXE}; ca onboard --yes installs it`, 2);
+  // Bind the lane to the repo's plan before it is registered (create, append or un-archive it). A resume
+  // of a lane the plan already lists is left alone; a failure here only warns, it never stops the lane.
+  if (!(opts.resume && laneAlreadyPlanned(repo, task))) {
+    try { ensurePlan(repo, task, briefEarly); }
+    catch (e) { process.stderr.write(`[${task}] plan warning: ${oneLine(String((e && e.message) || e), 200)}\n`); }
+  }
   if (!resumed) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
   fs.rmSync(path.join(dir, 'KICK'), { force: true }); // a stale kick must not fire at once on resume
@@ -1449,6 +1455,107 @@ async function cmdMcp() {
 // Lane repo paths are relative to the plan's repo (the folder that holds tasks/).
 const PLANS = path.join(REG, 'plans');
 const planId = (file) => path.basename(path.dirname(path.dirname(path.resolve(file)))).replace(/[^\w.-]+/g, '_');
+// A plan with status done or closed is closed (never appended to, only archived and replaced).
+const planClosed = (p) => !!(p && /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || ''));
+// A lane is in a plan when a lane entry has the same task and its repo resolves to the lane's repo.
+const planListsLane = (plan, main, repo, task) => !!(plan && (plan.lanes || []).some((l) => l && l.task === task && path.resolve(main, l.repo || '.') === path.resolve(repo)));
+// Register a plan file under <REG>/plans/<planId>.json (what `ca plan <file>` writes; idempotent).
+function registerPlan(file) {
+  const f = path.resolve(file); const id = planId(f);
+  fs.mkdirSync(PLANS, { recursive: true });
+  fs.writeFileSync(path.join(PLANS, `${id}.json`), JSON.stringify({ id, file: f }, null, 2));
+  return id;
+}
+// The title/goal a runner-created plan takes from the brief: after "Goal:" up to the first period,
+// else the brief's first sentence, else "Lane <task>".
+function planGoal(text, task) {
+  const s = String(text || '');
+  const gi = s.search(/Goal:/i);
+  if (gi >= 0) {
+    let rest = s.slice(gi + 'Goal:'.length).replace(/\s+/g, ' ').trim();
+    const dot = rest.indexOf('.');
+    if (dot >= 0) rest = rest.slice(0, dot).trim();
+    if (rest) return rest;
+  }
+  const first = s.replace(/\s+/g, ' ').trim();
+  const dot = first.indexOf('.');
+  if (dot > 0) return oneLine(first.slice(0, dot), 120);
+  return first ? oneLine(first, 120) : `Lane ${task}`;
+}
+// The plan file is shared: two lanes starting at once must not lose each other's edit. The lock is a
+// `wx` create at <planFile>.lock; a 5 s retry window, removed in finally even when fn throws.
+function withPlanLock(planFile, fn) {
+  const lock = `${planFile}.lock`; fs.mkdirSync(path.dirname(lock), { recursive: true });
+  let fd = null; const t0 = now();
+  while (fd === null && now() - t0 < 5000) {
+    try { fd = fs.openSync(lock, 'wx'); } catch (e) { if (e.code !== 'EEXIST') throw e; const t = now() + 50; while (now() < t); }
+  }
+  try { return fn(); }
+  finally { if (fd !== null) { try { fs.closeSync(fd); } catch {} try { fs.rmSync(lock, { force: true }); } catch {} } }
+}
+const planStamp = (d = new Date()) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
+// Bind a lane `ca lane` is starting to its repo's plan. CA_NO_PLAN=1 (smoke lanes) is left alone.
+// A plan the lead wrote is only ever appended to; a lane already listed is not added twice.
+function ensurePlan(repo, task, briefText) {
+  if (process.env.CA_NO_PLAN === '1') return null;
+  const main = projectOf(repo).key;
+  const planFile = path.join(main, 'tasks', 'plan.json');
+  const rel = (path.relative(main, repo) || '.').split(path.sep).join('/') || '.';
+  const goal = planGoal(briefText, task);
+  // A file that exists but cannot be parsed is left untouched (never overwritten): warn, do not stop the lane.
+  if (fs.existsSync(planFile) && readJSON(planFile) === null) throw new Error(`tasks/plan.json is not valid JSON; the lane runs without a plan`);
+  const existing = readJSON(planFile);
+  if (existing && !planClosed(existing) && planListsLane(existing, main, repo, task)) { registerPlan(planFile); return planFile; }
+  return withPlanLock(planFile, () => {
+    const cur = readJSON(planFile);
+    if (cur && !planClosed(cur)) {
+      if (!planListsLane(cur, main, repo, task)) {
+        cur.lanes = Array.isArray(cur.lanes) ? cur.lanes : [];
+        cur.lanes.push({ task, repo: rel, why: goal, added: 'runner' });
+        let waves = Array.isArray(cur.waves) ? cur.waves : [];
+        let wave = waves.find((w) => w && w.name === 'Added while running');
+        if (!wave) { wave = { name: 'Added while running', lanes: [] }; waves.push(wave); }
+        wave.lanes = Array.isArray(wave.lanes) ? wave.lanes : [];
+        if (!wave.lanes.includes(task)) wave.lanes.push(task);
+        cur.waves = waves;
+        cur.decisions = Array.isArray(cur.decisions) ? cur.decisions : [];
+        cur.decisions.push({ at: new Date().toISOString(), text: `Lane ${task} added by the runner (it was not in the plan)` });
+        writeAtomic(planFile, JSON.stringify(cur, null, 2) + '\n');
+      }
+      registerPlan(planFile);
+      return planFile;
+    }
+    // No plan file, or a closed one: archive the closed plan (it stays listed as closed) and create a
+    // fresh open plan from the brief, so the new lane always has a plan.
+    if (cur && planClosed(cur)) {
+      const stamp = planStamp();
+      const archiveDir = path.join(main, 'tasks', 'plans'); fs.mkdirSync(archiveDir, { recursive: true });
+      const dest = path.join(archiveDir, `${stamp}.json`);
+      let moved = false;
+      try { fs.renameSync(planFile, dest); moved = true; } catch {}
+      if (!moved) { try { fs.copyFileSync(planFile, dest); fs.rmSync(planFile, { force: true }); } catch {} }
+      if (fs.existsSync(dest)) {
+        const oldId = planId(planFile); const newId = `${oldId}~${stamp}`;
+        try { fs.rmSync(path.join(PLANS, `${oldId}.json`), { force: true }); } catch {}
+        fs.mkdirSync(PLANS, { recursive: true });
+        fs.writeFileSync(path.join(PLANS, `${newId}.json`), JSON.stringify({ id: newId, file: dest }, null, 2));
+      }
+    }
+    const plan = { title: goal, goal, lead: process.env.CA_LEAD || 'lead', status: 'running', now: '',
+      waves: [{ name: 'Lanes', lanes: [task] }], lanes: [{ task, repo: rel, why: goal }],
+      decisions: [{ at: new Date().toISOString(), text: `Plan created by the runner: lane ${task} started without an open plan.` }],
+      next: [], risks: [] };
+    fs.mkdirSync(path.dirname(planFile), { recursive: true });
+    writeAtomic(planFile, JSON.stringify(plan, null, 2) + '\n');
+    registerPlan(planFile);
+    return planFile;
+  });
+}
+// True when the lane is already listed in its repo's open plan (a resume must not rewrite that plan).
+function laneAlreadyPlanned(repo, task) {
+  try { const main = projectOf(repo).key; const p = readJSON(path.join(main, 'tasks', 'plan.json')); return !!(p && !planClosed(p) && planListsLane(p, main, repo, task)); }
+  catch { return false; }
+}
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
   return files.map((f) => readJSON(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
