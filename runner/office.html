@@ -1570,7 +1570,8 @@ function positionWin() {
   const win = $("win"), stage = $("stage"), tail = $("winTail");
   if (narrow) { win.style.left = ""; win.style.top = ""; win.style.maxHeight = ""; return; }
   const R = winRegion();
-  win.style.maxHeight = Math.max(140, Math.round(R.h)) + "px";
+  const mh = Math.max(140, Math.round(R.h)) + "px";
+  if (win.style.maxHeight !== mh) win.style.maxHeight = mh;
   const sw = stage.clientWidth, sh = stage.clientHeight;
   const sr = R.sr, rl = R.x, rt = R.y, rr = R.x + R.w, rb = R.y + R.h;
   const w = win.offsetWidth, h = win.offsetHeight;
@@ -1628,6 +1629,13 @@ function positionWin() {
     tail.style.top = (pick.side === "below" ? -T / 2 - 1 : h - T / 2 - 1) + "px";
     tail.style.left = Math.min(Math.max(a.cx - pick.x - T / 2, 6), Math.max(6, w - T - 6)) + "px";
   }
+}
+// Keep the window on screen when the viewport or the page/stage scrolls, or when its own content changes
+// (every poll re-renders the body). Throttle with requestAnimationFrame so a burst of events is one pass.
+let posRaf = 0;
+function schedulePositionWin() {
+  if (posRaf) return;
+  posRaf = requestAnimationFrame(() => { posRaf = 0; if (!$("win").hidden) positionWin(); });
 }
 function openWin(id, anchor, kb) {
   clearTimeout(winCloseTimer);
@@ -1943,7 +1951,9 @@ $("planMenu").addEventListener("keydown", (e) => {
   const a = $("planMenu").querySelector(".active"); if (a) a.scrollIntoView({ block: "nearest" });
 });
 document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#planMenu, #planBtn")) closePlanMenu(); });
-window.addEventListener("resize", () => { closePlanMenu(); hideHoverCard(); });
+window.addEventListener("resize", () => { closePlanMenu(); hideHoverCard(); schedulePositionWin(); });
+window.addEventListener("scroll", schedulePositionWin, { passive: true });
+document.addEventListener("scroll", schedulePositionWin, { passive: true, capture: true });
 for (const id of ["tokenChip", "statusBadge"]) {
   $(id).addEventListener("mouseenter", () => showHoverCard(id));
   $(id).addEventListener("mouseleave", hideHoverCard);
@@ -1953,6 +1963,7 @@ for (const id of ["tokenChip", "statusBadge"]) {
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; planUserPicked = true; render(); });
 new ResizeObserver(() => { sizeStage(); layoutStations(); renderNarrowList(); }).observe($("stagewrap"));
+new ResizeObserver(() => { if (!$("win").hidden) schedulePositionWin(); }).observe($("win"));
 (async () => {
   await loadScene();
   STAGE_W = SCENE.stage[0]; STAGE_H = SCENE.stage[1];
