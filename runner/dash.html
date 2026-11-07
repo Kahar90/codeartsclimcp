@@ -870,6 +870,7 @@ function renderControl() {
   for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; crOpen.has(k) ? crOpen.delete(k) : crOpen.add(k); lsSet('ca-cr-open', [...crOpen].join(',')); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crold]')) h.onclick = () => { crOldOpen = !crOldOpen; lsSet('ca-cr-old', crOldOpen ? '1' : ''); renderControl(); };
+  for (const x of $('view').querySelectorAll('[data-ack-stale]')) x.onclick = () => markAllStale();
   for (const g of $('view').querySelectorAll('[data-crgroup]')) g.onclick = () => { crGroup = g.dataset.crgroup; lsSet('ca-cr-group', crGroup); renderControl(); };
   for (const p of $('view').querySelectorAll('[data-crproj]')) p.onclick = () => { crProject = crProject === p.dataset.crproj ? '' : p.dataset.crproj; lsSet('ca-cr-project', crProject); renderControl(); };
   for (const x of $('view').querySelectorAll('[data-ack-id]')) x.onclick = () => { let note = ''; if (x.dataset.ackNote) { note = window.prompt('Mark handled. Note (optional), for example "merged by the lead":', ''); if (note === null) return; } setSeen(x.dataset.ackId, x.dataset.ackMark === '1', note); };
@@ -879,6 +880,26 @@ async function setSeen(id, seen, note = '') {
   try { await api(`/api/lane/${encodeURIComponent(id)}/ack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seen, note }) }); } catch {}
   const l = lanes.find((x) => x.id === id); if (l) l.seen = seen;
   renderControl(); refresh(true);
+}
+// Control room bulk action: mark every finished Needs-you lane in the old group handled at once. One prompt,
+// then the same ack POST the per-row Mark handled button makes, once per lane. An error on one lane never
+// stops the others; failures are listed in the toast.
+async function markAllStale() {
+  const old = lanes.filter((l) => laneBucket(l) === 'attention' && crIsOld(l));
+  if (!old.length) return;
+  const note = window.prompt(`Mark all ${old.length} lanes older than 2 days handled. Note (optional):`, '');
+  if (note === null) return;
+  const failed = [];
+  for (const l of old) {
+    try {
+      const r = await api(`/api/lane/${encodeURIComponent(l.id)}/ack`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seen: true, note }) });
+      if (r && r.error) failed.push(`${l.task}: ${r.error}`);
+      else { const x = lanes.find((y) => y.id === l.id); if (x) x.seen = true; }
+    } catch (e) { failed.push(`${l.task}: ${(e && e.message) || e}`); }
+  }
+  renderControl(); refresh(true);
+  const n = old.length - failed.length;
+  toast(failed.length ? `${n} lanes marked handled; failed: ${failed.join('; ')}` : `${n} lanes marked handled`, failed.length > 0);
 }
 
 // ---------- plan-home state that survives the 2.5 s polls ----------
