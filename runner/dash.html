@@ -711,10 +711,7 @@ const ctlNotes = new Map(); // laneId -> { action, text } while an inline note b
 const tget = (id) => { let s = tstate.get(id); if (!s) { s = { html: '', pos: 0, rendered: 0, follow: true, top: 0, atBottom: true }; tstate.set(id, s); } return s; };
 
 function toast(msg, err) {
-  const el = document.createElement('div');
-  el.id = 'toast'; el.className = err ? 'err' : ''; el.setAttribute('role', 'status'); el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
+  CAUI.toast(msg, { tone: err ? 'bad' : 'info' });
 }
 async function sendControl(laneId, action, extra) {
   if (inFlight && inFlight.laneId === laneId) return; // one control per lane at a time: a double click never sends twice
@@ -733,7 +730,7 @@ function rerenderLane(laneId) {
 function runControl(action, laneId) {
   const A = CAUI.ACTIONS[action]; if (!A || !laneId) return;
   if (A.danger && !confirm(A.danger)) return;
-  if (A.note) { ctlNotes.set(laneId, { action, text: ctlNotes.get(laneId)?.text || '' }); rerenderLane(laneId); return; }
+  if (A.note) { ctlNotes.set(laneId, { action, text: ctlNotes.get(laneId)?.text || '' }); rerenderLane(laneId); toast(`${A.label}: add an optional note, then Send`); return; }
   sendControl(laneId, action, {});
 }
 const CTL_ORDER = ['skip-wait', 'kick', 'fresh', 'restart-server', 'resume', 'attach', 'stop'];

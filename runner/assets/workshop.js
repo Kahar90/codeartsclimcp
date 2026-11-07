@@ -205,6 +205,71 @@
       .catch(function (e) { return { error: String(e && e.message || e) }; });
   }
 
+  // ---------- floating surfaces ----------
+  // place(el, anchor, { side = 'bottom', align = 'start', gap = 8, margin = 8 }): keep a fixed element
+  // next to its anchor, flipping sides when it will not fit and clamping inside the viewport with margin.
+  // The element should have overflow: auto so a tall body scrolls instead of leaving the screen.
+  function place(el, anchor, opts) {
+    opts = opts || {};
+    var side = opts.side || 'bottom', align = opts.align || 'start';
+    var gap = opts.gap == null ? 8 : opts.gap, margin = opts.margin == null ? 8 : opts.margin;
+    if (!el || !anchor || !anchor.getBoundingClientRect) return;
+    var a = anchor.getBoundingClientRect();
+    var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    var ew = el.offsetWidth || 0, eh = el.offsetHeight || 0;
+    var roomBelow = vh - a.bottom - gap - margin, roomAbove = a.top - gap - margin;
+    if (side === 'top') { if (roomAbove < Math.min(eh || 64, 120) && roomBelow > roomAbove) side = 'bottom'; }
+    else { if (roomBelow < Math.min(eh || 64, 120) && roomAbove > roomBelow) side = 'top'; }
+    var avail = side === 'top' ? roomAbove : roomBelow;
+    if (avail < 64) avail = Math.max(64, Math.min(eh || 64, vh - 2 * margin));
+    var h = Math.min(eh || avail, avail);
+    var top = side === 'top' ? (a.top - gap - h) : (a.bottom + gap);
+    var left;
+    if (align === 'end') left = a.right - ew; else if (align === 'center') left = a.left + (a.width - ew) / 2; else left = a.left;
+    if (left + ew > vw - margin) left = vw - margin - ew;
+    if (left < margin) left = margin;
+    if (top < margin) top = margin;
+    if (top + h > vh - margin) top = Math.max(margin, vh - margin - h);
+    el.style.position = 'fixed';
+    el.style.left = Math.round(left) + 'px';
+    el.style.top = Math.round(top) + 'px';
+    el.style.maxHeight = Math.round(avail) + 'px';
+  }
+  // track(el, anchor, opts): place now and on window resize and scroll (capture). Returns a stop function.
+  function track(el, anchor, opts) {
+    function run() { place(el, anchor, opts); }
+    run();
+    window.addEventListener('resize', run);
+    window.addEventListener('scroll', run, true);
+    return function stop() {
+      window.removeEventListener('resize', run);
+      window.removeEventListener('scroll', run, true);
+    };
+  }
+  // toast(msg, { tone = 'info' | 'bad', ms = 3200 }): one status toast at the bottom centre.
+  // It animates in, animates out before removal, and a new toast replaces the old one.
+  var toastEl = null, toastTimer = 0;
+  function toast(msg, opts) {
+    opts = opts || {};
+    var ms = opts.ms == null ? 3200 : opts.ms;
+    if (toastEl) { clearTimeout(toastTimer); try { toastEl.remove(); } catch (e) {} toastEl = null; }
+    var el = document.createElement('div');
+    el.className = 'ca-toast' + (opts.tone === 'bad' ? ' bad' : '');
+    el.setAttribute('role', 'status');
+    el.textContent = String(msg == null ? '' : msg);
+    document.body.appendChild(el);
+    toastEl = el;
+    var drop = function () { if (el.isConnected) el.remove(); if (toastEl === el) toastEl = null; };
+    toastTimer = setTimeout(function () {
+      el.style.animation = 'ca-pop-out var(--dur-2) var(--ease-out) forwards';
+      el.addEventListener('animationend', drop, { once: true });
+      setTimeout(drop, 400);
+    }, ms);
+    return el;
+  }
+
   window.CAUI = { status: status, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); },
-    tokenTotal: tokenTotal, fmtTokens: fmtTokens, tokenDetail: tokenDetail, tokenSplit: tokenSplit, ACTIONS: ACTIONS, QUICK_STEERS: QUICK_STEERS, control: control };
+    tokenTotal: tokenTotal, fmtTokens: fmtTokens, tokenDetail: tokenDetail, tokenSplit: tokenSplit, ACTIONS: ACTIONS, QUICK_STEERS: QUICK_STEERS, control: control,
+    place: place, track: track, toast: toast };
 })();

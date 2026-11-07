@@ -81,6 +81,10 @@ a { color: var(--sel-ink); }
 
 .px-sprite { image-rendering: pixelated; background-repeat: no-repeat; pointer-events: none; }
 
+/* Shared status toast (CAUI.toast): one at a time, bottom centre, replaces the old one. */
+.ca-toast { position: fixed; left: 0; right: 0; bottom: 24px; margin: 0 auto; width: fit-content; max-width: min(420px, 100vw - 32px); z-index: 80; background: var(--panel); border: 1.5px solid var(--sel); color: var(--fg); border-radius: var(--radius-sm); padding: 9px 15px; font: 13px var(--font); box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4); animation: ca-pop-in var(--dur-2) var(--ease-out); }
+.ca-toast.bad { border-color: var(--bad); color: var(--bad); }
+
 @media (max-width: 640px) {
   .ca-top { padding: 0 12px; gap: 10px; min-height: 52px; }
   .ca-brand { font-size: 17px; }
