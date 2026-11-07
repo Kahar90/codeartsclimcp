@@ -184,7 +184,7 @@ const TOOLS = [
   },
   {
     name: 'ca_wait',
-    description: 'Block until every given lane has a result or timeout_s passes (default 300, max 3000). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed or stopped, 3 missing credentials, 4 needs review) and timedOut. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    description: 'Block until every given lane has a result or timeout_s passes (default 300, max 3000). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed or stopped, 3 keys missing or rejected (run ca auth), 4 needs review, 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
     inputSchema: {
       type: 'object',
       properties: {
