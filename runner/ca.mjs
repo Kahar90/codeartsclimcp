@@ -53,6 +53,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
+import { emptyTokens, addStepTokens } from './tokens.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -261,12 +262,15 @@ async function runLane(repoArg, task, opts = {}) {
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
     lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
     config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes },
-    tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, steps: 0 }, commits: 0, steps: stepCount, checks,
+    tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() },
+    commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
+    const by = (r) => ({ ...emptyTokens(), ...(resumed.tokensBy?.[r] || {}) });
     Object.assign(S, { startedAt: resumed.startedAt || T0, runStartedAt: T0, runs, resumes: runs.length, tokens: { ...S.tokens, ...(resumed.tokens || {}) },
+      tokensBy: { build: by('build'), review: by('review'), other: by('other') },
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }] });
   }
@@ -291,6 +295,9 @@ async function runLane(repoArg, task, opts = {}) {
   // ---- event tracking ----
   const sess = {}; // sid -> { busy, sawBusy, lastAct, tools: Map, error, aborting }
   const sx = (sid) => (sess[sid] ||= { busy: false, sawBusy: false, lastAct: now(), tools: new Map(), error: null, aborting: false });
+  const builderSessions = new Set(); // every session that ran the brief (build or fix): tokens bill as build
+  const countedSteps = new Set();    // step-finish part ids already billed (a reconnect replays events)
+  const roleOf = (sid) => (sid === S.reviewSession ? 'review' : builderSessions.has(sid) ? 'build' : 'other');
   const roles = new Map();       // messageID -> role
   const parts = new Map();       // partID -> { type, text, logged }
   const sent = new Set();        // texts we sent (to tell TUI-typed steering apart)
@@ -371,7 +378,11 @@ async function runLane(repoArg, task, opts = {}) {
           if (sid === S.activeSession && s) { const t = [...s.tools.values()][0]; S.activity = t ? `tool ${t.tool}: ${oneLine(t.input, 80)}` : 'thinking'; S.tools = [...s.tools.values()].map((x) => ({ tool: x.tool, input: oneLine(x.input, 120), since: x.since })); }
         } else if (part.type === 'step-finish') {
           for (const k of parts.keys()) flushPart(k);
-          const tk = part.tokens || {}; S.tokens.input += tk.input || 0; S.tokens.output += tk.output || 0; S.tokens.reasoning += tk.reasoning || 0; S.tokens.cacheRead += tk.cache?.read || 0; S.tokens.steps++;
+          if (part.id && !countedSteps.has(part.id)) {
+            countedSteps.add(part.id);
+            addStepTokens(S.tokens, part.tokens);
+            addStepTokens(S.tokensBy[roleOf(sid)], part.tokens);
+          }
         }
         break;
       }
@@ -490,6 +501,7 @@ async function runLane(repoArg, task, opts = {}) {
   // Drive a phase until its turn ends cleanly; resume interrupted turns in the same session.
   async function drive(sid, model, agent, label, resumeText, freshSession) {
     curModel = model; curAgent = agent;
+    if (label === 'build' || label === 'fix') builderSessions.add(sid);
     let interruptions = 0, sameSessionFails = 0;
     for (;;) {
       const o = await waitTurn(sid);
@@ -514,6 +526,7 @@ async function runLane(repoArg, task, opts = {}) {
         await send(sid, o.nudge, model, agent);
       } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
+        if (label === 'build' || label === 'fix') builderSessions.add(sid);
         say(`switching to a fresh session ${sid}`); await send(sid, freshSession(cls, what), model, agent);
       } else {
         await send(sid, resumeText(cls, what), model, agent);
@@ -565,7 +578,7 @@ async function runLane(repoArg, task, opts = {}) {
     if (PRE_DIRTY.size) { S.preDirty = [...PRE_DIRTY].slice(0, 20); say(`note: ${PRE_DIRTY.size} file(s) were already dirty before the lane (excluded from the git gate): ${S.preDirty.slice(0, 5).join(', ')}`); }
 
     // BUILD
-    let sid = await newSession(`${task} build`); S.buildSession = sid; S.attempt = 1;
+    let sid = await newSession(`${task} build`); S.buildSession = sid; builderSessions.add(sid); S.attempt = 1;
     phase('build', 'sending brief'); L(`== build (${BUILD}) session ${sid}; ${checks.length} CHECK lines, ${stepCount} steps`);
     let first = brief;
     if (resumed) {
