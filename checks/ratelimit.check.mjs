@@ -40,6 +40,9 @@ r = lane('rate-forever', ['rate'], { MAX_RETRIES: '0', RATE_WAIT_S: '3' });
 check('past RATE_WAIT_S the rate limit counts as an interruption and the lane fails', r.code === 1 && r.st?.result === 'failed' && /gave up|interruptions/.test(r.st?.reason || r.out), `${r.code} ${r.st?.result} ${r.st?.reason}`);
 check('it did not loop forever (under 60 s)', r.ms < 60000, `${r.ms} ms`);
 
+r = lane('net-then-ok', ['net', 'ok'], { MAX_RETRIES: '0' });
+check('a network error waits for the network and resumes without using a retry (MAX_RETRIES 0, lane DONE)', r.code === 0 && r.st?.result === 'done' && r.turns.length === 2, `${r.code} ${r.st?.result} ${r.turns.join(',')} ${r.out.split(/\r?\n/).filter((l) => /network|===/.test(l)).slice(-3).join(' | ')}`);
+
 r = lane('bad-keys', ['auth']);
 check('a sign-in error in the server log ends the lane with exit 3 and names the AK/SK', r.code === 3 && /AK\/SK/.test(r.out), `${r.code} ${r.out.split('\n').filter((l) => /===|keys|AK/.test(l)).slice(-3).join(' | ')}`);
 

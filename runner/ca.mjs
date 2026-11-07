@@ -53,6 +53,9 @@
 //        STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
 //        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
 //        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
+//        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
+//        CA_MAX_LANES_PER_MODEL=maas/glm-5.3=2,default=4 (cap lanes per build model; glm 3,
+//        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
 //        lane, 3 missing credentials, 4 needs review, 5 paused at LANE_TIMEOUT (resume with --resume),
 //        124 wait timeout.
@@ -69,6 +72,7 @@ import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './
 import { laneActions, laneBucket, laneKind } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
+import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.resolve(HERE, '..');
@@ -100,6 +104,7 @@ const CFG = {
   fixes: num('MAX_FIXES', 3),          // gate failures fed back to the builder
   laneTimeout: num('LANE_TIMEOUT', 5400),
   checkTimeout: num('CHECK_TIMEOUT', 900),
+  netWait: num('NET_WAIT_S', 1800),    // a network error waits up to this long for the network (no retry spent)
   noReview: process.env.NO_REVIEW === '1',
 };
 
@@ -534,9 +539,21 @@ async function runLane(repoArg, task, opts = {}) {
 
   // Wait for one turn: idle, error, stall (watchdog), server death, stop or timeout.
   async function waitTurn(sid) {
-    const s = sx(sid); let lastPoll = 0, lastCommitCheck = 0;
+    const s = sx(sid); let lastPoll = 0, lastCommitCheck = 0; let prevTick = now();
     for (;;) {
       await sleep(2000);
+      const tickMs = now();
+      // A gap far longer than the tick is the machine sleeping, not the model stalling: the silence
+      // was the sleep. Reset every watchdog timer and reconnect SSE, so nothing aborts on wake.
+      if (detectSleep(prevTick, tickMs, 2000)) {
+        L(`  ! woke from sleep after ${dur(tickMs - prevTick)}`);
+        s.lastAct = tickMs; S.lastEventAt = tickMs;
+        S.turnStartAt = tickMs; S.lastToolAt = tickMs; S.lastTextAt = tickMs;
+        for (const t of s.tools.values()) t.since = tickMs;
+        if (server.alive) { try { await server.api('GET', '/global/health', null, 3000); } catch {} try { server.ac?.abort(); } catch {} }
+        save(true);
+      }
+      prevTick = tickMs;
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
       const k = takeKick();
       if (k) {
@@ -637,8 +654,12 @@ async function runLane(repoArg, task, opts = {}) {
         if (label === 'build' || label === 'fix') S.buildSession = sid;
         continue;
       }
-      const cls = o.kind === 'error' ? classify(o.error) : o.kind;
+      const rawCls = o.kind === 'error' ? classify(o.error) : o.kind;
       const what = o.kind === 'error' ? `${o.error.name || 'error'}: ${oneLine(o.error.data?.message || o.error.message || '', 200)}` : (o.what || o.kind);
+      // The transport itself is down (DNS, connect, reset, unreachable, fetch failed): wait for the
+      // network instead of spending a retry. Auth problems are handled separately below.
+      const netErr = o.kind === 'error' && rawCls !== 'auth' && isNetworkError(what);
+      const cls = netErr ? 'transport' : rawCls;
       S.interruptions.push({ at: now(), phase: label, kind: cls, what }); save(true);
       // A rejected key can look like a plain 503 (AK/SK) or a maas/ authorization error: the classifier
       // reads the server log, so catch it here even when the error class is not 'auth'. End at once.
@@ -647,6 +668,29 @@ async function runLane(repoArg, task, opts = {}) {
         if (ap) { L(`  ! ${ap.message}`); S.keysMessage = ap.message; return { ok: false, sid, reason: 'auth', exit: 3, what: ap.message, keys: ap.message }; }
       }
       if (cls === 'auth') return { ok: false, sid, reason: 'auth', exit: 3, what };
+      if (netErr) {
+        const netWaitS = CFG.netWait > 0 ? CFG.netWait : 1800;
+        let netLoggedAt = 0;
+        const onWait = ({ tries, waitedMs }) => {
+          S.activity = `offline: waiting for the network (${dur(waitedMs)})`;
+          // The silence is the outage, not the model: keep ca status from reading STALLED while we wait.
+          S.lastEventAt = now(); S.turnStartAt = now(); S.lastToolAt = now(); S.lastTextAt = now();
+          if (now() - netLoggedAt >= 60000) { netLoggedAt = now(); L(`  ! network down, waiting (try ${tries})`); }
+          save();
+        };
+        onWait({ tries: 0, waitedMs: 0 });
+        say(`network down (${oneLine(what, 140)}); waiting up to ${netWaitS}s (no retry used)`);
+        const net = await waitOnline({ timeoutMs: netWaitS * 1000, onWait, shouldStop: () => fs.existsSync(stopFile) });
+        if (net.stopped) return { ok: false, sid, reason: 'stopped' };
+        if (net.online) {
+          say(`network is back after ${dur(net.waitedMs)}; resuming the same session (no retry used)`);
+          phase(label, 'resuming after network returned');
+          await send(sid, resumeText('transport', `the network was down (${what})`), model, agent);
+          if (label === 'build' || label === 'fix') S.buildSession = sid;
+          continue;
+        }
+        L(`  ! still offline after ${dur(net.waitedMs)}; ending the phase as a transport failure`);
+      }
       if (cls === 'other' && o.kind === 'error' && /Abort/i.test(o.error.name || '')) { /* user aborted in TUI: resume */ }
       // Rate limits are not failures: own budget (RATE_WAIT_S, default 1800 s), jittered backoff, no retry count.
       if (cls === 'rate' && rateWaited < CFG.rateWait) {
@@ -686,11 +730,14 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       } else if (kick) {
         await send(sid, resumeText('kick', `${kick.mode} kick from ${kick.by}`) + extra, model, agent);
       } else if (o.kind === 'think') {
+        let switched = false;
         if (++thinkStalls >= 2 && (label === 'build' || label === 'fix') && FALLBACK && FALLBACK !== 'none' && FALLBACK !== model) {
           say(`thinking stalled ${thinkStalls} times on ${model}: switching the builder to ${FALLBACK} (same session, context kept)`);
           S.modelSwitches = [...(S.modelSwitches || []), { at: now(), from: model, to: FALLBACK, why: `${thinkStalls} thinking stalls` }];
           model = FALLBACK; curModel = model; buildModel = model; S.models.build = model; thinkStalls = 0; interruptions = 0; save(true);
+          switched = true;
         }
+        if (switched) await waitForSlot(model);
         await send(sid, o.nudge, model, agent);
       } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
@@ -734,6 +781,29 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.`;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
 
+  // Model slots: before a build session starts (and after a fallback model switch), wait until
+  // fewer than the model's cap of the OTHER running lanes use it. A crowded model must not get
+  // another session. While queued the lane shows it in its activity and ca stop still works.
+  let queuedTotal = 0;
+  const waitForSlot = async (model) => {
+    const limits = parseLimits(process.env.CA_MAX_LANES_PER_MODEL || '');
+    const t0 = now(); let logged = false;
+    for (;;) {
+      // Only lanes that are alive and working hold a slot: queued lanes (or every lane over the limit
+      // would wait forever) and DEAD lanes (supervisor gone) do not.
+      const running = lanes().filter((l) => !l.s.result && l.id !== id && alive(l.s.pid) && !/^queued/.test(l.s.activity || '')).map((l) => (l.s.models && l.s.models.build) || '').filter(Boolean);
+      const slot = laneSlots({ model, running, limits });
+      if (slot.ok) break;
+      if (!logged) { logged = true; say(`queued: ${slot.reason}`); L(`  ! queued: ${slot.reason}`); }
+      S.activity = `queued: ${slot.reason}`; S.queuedMs = queuedTotal + (now() - t0);
+      // Waiting for a slot is not a stall: keep ca status from reading STALLED while we queue.
+      S.lastEventAt = now(); S.turnStartAt = now(); S.lastToolAt = now(); S.lastTextAt = now(); save();
+      if (fs.existsSync(stopFile)) { const e = new Error('stopped'); e.caStop = true; throw e; }
+      await sleep(20000);
+    }
+    if (logged) { queuedTotal += now() - t0; S.queuedMs = queuedTotal; say(`slot free for ${model} after ${dur(now() - t0)}`); save(true); }
+  };
+
   // ---- run ----
   let exitCode = 1, reason = '', review = null;
   server.events(onEvent, (up) => { S.sse = up; }).catch(() => {});
@@ -751,7 +821,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     for (let i = 0; i < 30 && !startKeys; i++) { startKeys = keyProblem(buildModel, ''); if (!startKeys) await sleep(100); }
     if (startKeys) { L(`  ! ${startKeys.message}`); S.keysMessage = startKeys.message; throw Object.assign(new Error('auth'), { caAuth: true }); }
 
-    // BUILD
+    // BUILD (first wait for a free slot on the build model: a crowded model must not start a session)
+    await waitForSlot(buildModel);
     let sid = await newSession(`${task} build`); S.buildSession = sid; builderSessions.add(sid); S.attempt = 1;
     phase('build', 'sending brief'); L(`== build (${BUILD}) session ${sid}; ${checks.length} CHECK lines, ${stepCount} steps`);
     let first = brief;
@@ -810,6 +881,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     }
   } catch (err) {
     if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
+    else if (err && err.caStop) { reason = 'stopped'; exitCode = 1; L('== stopped while queued for a model slot'); }
     else { reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`); }
   }
 
@@ -831,7 +903,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
-    `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}`,
+    `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}${S.queuedMs ? ` (queued ${dur(S.queuedMs)} for a model slot)` : ''}`,
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
     ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
     `steering: ${S.steers.length ? S.steers.map((x) => `[${x.by}] ${oneLine(x.text, 160)}`).join(' / ') : 'none'}`,
