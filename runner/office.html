@@ -215,6 +215,20 @@ body.narrow::-webkit-scrollbar { display: none; }
 html.narrow { scrollbar-width: none; }
 html.narrow::-webkit-scrollbar { display: none; }
 body.narrow #stagewrap { flex: none; min-height: 0; }
+/* states: hover, press and the open-trigger highlight */
+.plate { transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+#plates .plate:hover { transform: translate(-50%, calc(-50% - 1px)); border-color: var(--sel); }
+#plates .plate:active { transform: translate(-50%, -50%); }
+#plates .plate[aria-expanded="true"] { border-color: var(--sel); box-shadow: 0 0 0 3px var(--sel-bg), 0 3px 10px rgba(0, 0, 0, 0.4); }
+@keyframes badge-pulse { 0%, 100% { box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55), 0 0 0 0 rgba(255, 170, 80, 0.45); } 50% { box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55), 0 0 0 4px rgba(255, 170, 80, 0); } }
+.plate .p-badge:not([hidden]) { animation: badge-pulse 2.4s ease-in-out infinite; }
+body.no-motion .p-badge { animation: none; }
+.ov-row:hover, .ov-pill:hover, #planBtn:hover, .ctl-btn:hover, .qchip:hover, #winX:hover { background: var(--raise); }
+.ov-row:active, .ov-pill:active, #planBtn:active, .ctl-btn:active, .qchip:active, #winX:active, #winSend:active { transform: translateY(1px); }
+body.narrow .needs-pill { height: 32px; }
+body.narrow #planBtn { height: 32px; }
+body.narrow #win button, body.narrow #win a { min-height: 32px; }
+body.narrow #win a { display: inline-flex; align-items: center; }
 </style>
 </head>
 <body>
