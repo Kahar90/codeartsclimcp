@@ -247,6 +247,7 @@ const q = new URLSearchParams(location.search);
 const demoBig = q.get("demo") === "big";
 const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const demoStuck = q.get("demo") === "stuck";
+const demoCrowd = q.get("demo") === "crowd";
 const mode = q.has("demo") ? "demo" : "live";
 let STAGE_W = 1280, STAGE_H = 720;
 const HOTDESKS = [
@@ -349,7 +350,40 @@ const DEMO_BIG_BASE = {
     texts: ["Welcome panel copy", "Doctor rows per harness", "Onboard command snippet", "First-lane list", "Links to the docs", "Dismiss and remember", "Onboard check", "Screenshots for the README"],
     init: { dn: 0, cur: 0, health: "planned", running: false, result: "", verdict: "" } },
 };
-const DEMO_SET = demoBig ? DEMO_BIG_BASE : DEMO_BASE;
+const DEMO_CROWD_BASE = {
+  "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 46, by: { build: [12100, 21400, 4800, 680000, 4], review: [2100, 900, 200, 12000, 1], other: [400, 150, 0, 2000, 1] },
+    texts: ["Routes in ca.mjs", "Page shell with the goal box", "Data layer with demo mode", "Scene, cards and completion"],
+    init: { dn: 3, cur: 4, health: "running", running: true, result: "", verdict: "" } },
+  "office-sprites": { phase: "build", model: "maas/glm-5.3", dur: 32, by: { build: [3900, 7100, 1400, 280000, 3], review: [1500, 700, 150, 9000, 1], other: [300, 120, 0, 1500, 1] },
+    texts: ["Sprite contract check", "Draw the five roles", "Polish the animations"],
+    init: { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" } },
+  "office-review": { phase: "review", model: "maas/glm-5.3", dur: 8, by: { build: [500, 200, 50, 3000, 1], review: [1700, 3200, 700, 190000, 4], other: [250, 100, 0, 1200, 1] },
+    texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"],
+    init: { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" } },
+  "cli-dx": { phase: "build", model: "maas/qwen3-coder", dur: 41, by: { build: [8600, 12300, 2600, 240000, 8], review: [1800, 800, 150, 8000, 1], other: [350, 130, 0, 1400, 1] },
+    texts: ["Split ca.mjs commands", "Harness-neutral arg parsing", "Help text for every command", "Exit codes and stderr", "Shell completion stubs", "Version and doctor output", "Man page snippet", "CLI contract check"],
+    runs: 2, continues: [{ id: "cli-dx-v2", task: "cli-dx-v2", reason: "paused for the arg parser rewrite", commits: "4/8", progress: { done: 4, total: 8 }, elapsed: "52m" }],
+    init: { dn: 4, cur: 5, health: "STALLED", running: true, result: "", verdict: "" } },
+  "mcp": { phase: "build", model: "maas/glm-5.3", dur: 37, by: { build: [6400, 9800, 1900, 210000, 8], review: [1600, 750, 140, 7000, 1], other: [300, 110, 0, 1300, 1] },
+    texts: ["MCP server skeleton", "Tool schemas", "stdio transport", "Auth from the user env", "List and read tools", "Error shapes", "Logging without secrets", "MCP check green"],
+    init: { dn: 5, cur: 6, health: "failed", running: false, result: "failed", verdict: "" } },
+  "setup": { phase: "build", model: "maas/qwen3-max", dur: 29, by: { build: [5200, 8100, 1200, 150000, 8], review: [1400, 650, 120, 6000, 1], other: [280, 100, 0, 1200, 1] },
+    texts: ["Detect installed harnesses", "Per-harness setup notes", "Doctor rows", "Copyable onboard command", "First-lane quick start", "Trust the worktree folder", "Windows path quirks", "Re-run the setup check"],
+    init: { dn: 6, cur: 7, health: "running", running: true, result: "", verdict: "" } },
+  "onboard": { phase: "build", model: "maas/glm-5.3", dur: 25, by: { build: [4300, 6900, 1100, 90000, 8], review: [1300, 600, 110, 5000, 1], other: [260, 95, 0, 1100, 1] },
+    texts: ["Welcome panel copy", "Doctor rows per harness", "Onboard command snippet", "First-lane list", "Links to the docs", "Dismiss and remember", "Onboard check", "Screenshots for the README"],
+    init: { dn: 2, cur: 3, health: "running", running: true, result: "", verdict: "" } },
+  "office-motion": { phase: "build", model: "maas/glm-5.3", dur: 34, by: { build: [7300, 10600, 2200, 190000, 8], review: [1500, 700, 130, 6500, 1], other: [290, 105, 0, 1250, 1] },
+    texts: ["Motion brief", "Intro tilt", "Hover lift", "Working bob", "Packet trails", "Done burst", "Reduced motion fades", "Motion check green"],
+    init: { dn: 7, cur: 8, health: "running", running: true, result: "", verdict: "" } },
+  "docs-site": { phase: "build", model: "maas/glm-5.3", dur: 22, by: { build: [3800, 5900, 900, 80000, 8], review: [1200, 550, 100, 4500, 1], other: [240, 90, 0, 1000, 1] },
+    texts: ["Docs landing page", "Quick start guide", "Lead workflow page", "Run a lane page", "Troubleshooting page", "Search index", "Link check", "Publish the docs"],
+    init: { dn: 5, cur: 6, health: "running", running: true, result: "", verdict: "" } },
+  "perf-pass": { phase: "build", model: "maas/glm-5.3", dur: 18, by: { build: [3100, 4600, 700, 60000, 8], review: [1000, 480, 90, 4000, 1], other: [220, 85, 0, 950, 1] },
+    texts: ["Profile the render loop", "Trim the sprite atlas", "Cache the scene JSON", "Debounce the resize", "Verdict and notes", "Perf check green"],
+    init: { dn: 6, cur: 0, health: "done", running: false, result: "done", verdict: "ready" } },
+};
+const DEMO_SET = demoBig ? DEMO_BIG_BASE : demoCrowd ? DEMO_CROWD_BASE : DEMO_BASE;
 const DEMO_STUCK_INIT = {
   "office-scene": { dn: 2, cur: 3, health: "STALLED", running: true, result: "", verdict: "" },
   "office-sprites": { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" },
@@ -418,7 +452,7 @@ function demoApply(ev) {
 
 const DEMO_LEAD = 1000;
 function scheduleDemoEvents() {
-  if (mode !== "demo" || demoBig || demoDone || demoStuck || q.get("still") === "1") return;
+  if (mode !== "demo" || demoBig || demoDone || demoStuck || demoCrowd || q.get("still") === "1") return;
   for (const ev of (SCENE.fixture && SCENE.fixture.events) || []) {
     setTimeout(() => { if (mode === "demo") demoApply(ev); }, (ev.atMs || 0) + DEMO_LEAD);
   }
@@ -467,6 +501,31 @@ function demoModel() {
         { name: "Wave 2", lanes: [byId["office-review"], byId["cli-dx"]] },
         { name: "Wave 3", lanes: [byId["mcp"], byId["setup"], byId["office-motion"]] },
         { name: "Wave 4", lanes: [byId["onboard"]] },
+      ],
+    };
+  }
+  if (demoCrowd) {
+    const lanes = Object.keys(DEMO_CROWD_BASE).map(mk);
+    const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
+    const pt = planTokenSums(lanes);
+    return {
+      plan: {
+        id: "demo-crowd", title: "Ten lanes, eight seats", goal: "Seat a crowded plan: three stations, five hot desks, the rest in the +N list",
+        lead: "Claude Opus 5.5", status: "running",
+        tokens: pt.tokens, tokensBy: pt.tokensBy,
+        now: "Two lanes need a hand, the other running lanes share the desks, and the finished lanes wait in the +N list.",
+        next: [{ text: "Kick the stalled CLI lane and resume the failed MCP lane", done: false }, { text: "Give the first freed desk to the waiting running lane", done: false }, { text: "Merge the finished perf pass into main", done: true }],
+        decisions: [
+          { at: at(64), text: "The stalled CLI lane and the failed MCP lane take the first hot desks; both need the lead." },
+          { at: at(38), text: "A finished lane always releases its desk to a running lane that has none." },
+          { at: at(14), text: "Anything past eight seats drops into the +N list, needs-you first." },
+        ],
+      },
+      lanes,
+      waves: [
+        { name: "Wave 1", lanes: [byId["office-scene"], byId["office-sprites"], byId["office-review"]] },
+        { name: "Wave 2", lanes: [byId["cli-dx"], byId["mcp"], byId["setup"]] },
+        { name: "Wave 3", lanes: [byId["onboard"], byId["office-motion"], byId["docs-site"], byId["perf-pass"]] },
       ],
     };
   }
