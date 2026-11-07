@@ -71,19 +71,30 @@ const isUnder = (list, p) => {
   const a = path.resolve(p).toLowerCase();
   return list.some((f) => { const b = path.resolve(f).toLowerCase(); return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep); });
 };
-// Base dir for the throwaway smoke repo: prefer ~/.t3/scratch, else the first trusted
-// folder that exists and is writable, else the OS temp dir when it is trusted.
-function pickSmokeBase() {
-  const { obj } = loadSettings();
-  const trusted = trustedList(obj);
-  const writable = (d) => { try { fs.accessSync(d, fs.constants.W_OK); return true; } catch { return false; } };
-  const scratch = path.join(os.homedir(), '.t3', 'scratch');
-  if (fs.existsSync(scratch) && writable(scratch)) return scratch;
-  for (const t of trusted) { const p = path.resolve(t); if (fs.existsSync(p) && writable(p)) return p; }
-  const tmp = os.tmpdir();
-  if (isUnder(trusted, tmp)) return tmp;
-  return null;
+// Add a folder to security.trustedFolders (idempotent), keeping every other setting.
+function addTrusted(folder) {
+  const re = loadSettings();
+  if (re.err) return false;
+  const obj = re.obj;
+  obj.security = obj.security && typeof obj.security === 'object' && !Array.isArray(obj.security) ? obj.security : {};
+  if (!Array.isArray(obj.security.trustedFolders)) obj.security.trustedFolders = [];
+  if (!isUnder(obj.security.trustedFolders.map(String).filter(Boolean), folder)) obj.security.trustedFolders.push(folder);
+  fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
+  fs.writeFileSync(SETTINGS, JSON.stringify(obj, null, 2) + '\n');
+  return true;
 }
+
+const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+// First summary line mentioning AK/SK, MaaS or auth (a smoke run rejected the keys).
+const authReason = (file) => (readFileSafe(file).split(/\r?\n/).find((l) => l.trim() && /AK\/SK|MaaS|auth/i.test(l)) || '').trim();
+// The "== finished:" reason from the live log (never the CA_RESULT line).
+const finishedReason = (file) => {
+  const hit = readFileSafe(file).split(/\r?\n/).find((l) => l.startsWith('== finished:'));
+  return hit ? hit.replace(/^== finished:\s*/, '').trim() || hit.trim() : 'see the lane log';
+};
+// Base dir for the throwaway smoke repo: CA_SMOKE_DIR or ~/.codeartsdoer/ca-smoke. Never the
+// repo, one of its parents or ~/.t3/scratch.
+const smokeBaseDir = () => process.env.CA_SMOKE_DIR || path.join(CA_HOME, 'ca-smoke');
 
 export default async function onboard(args) {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
@@ -214,34 +225,55 @@ export default async function onboard(args) {
   }
 
   // ---- 4. smoke test: only with --smoke, never by default ----
+  const smokeBase = smokeBaseDir();
   if (!smoke) add(smokeRows, 'smoke test', 'skipped', 'not requested; ca onboard --smoke runs a throwaway probe lane');
-  else if (dry) add(smokeRows, 'smoke test', 'skipped', 'dry run: no lane started');
+  else if (dry) add(smokeRows, 'smoke test', 'planned', `dry run: would run a probe lane in ${smokeBase}`, 'ca onboard --smoke --yes');
   else {
-    const base = pickSmokeBase();
-    if (!base) add(smokeRows, 'smoke test', 'warn', 'no writable trusted folder for a throwaway repo (tried ~/.t3/scratch, security.trustedFolders, the temp dir)', 'add a trusted folder (ca onboard --yes) and rerun with --smoke');
+    let err = '';
+    try {
+      fs.mkdirSync(smokeBase, { recursive: true });
+      // Keep only the 3 newest smoke dirs (only ca-smoke-<digits> names are ours to remove).
+      const olds = fs.readdirSync(smokeBase).filter((n) => /^ca-smoke-\d+$/.test(n))
+        .map((n) => ({ n, t: Number(n.slice('ca-smoke-'.length)) })).sort((a, b) => b.t - a.t);
+      for (const x of olds.slice(3)) fs.rmSync(path.join(smokeBase, x.n), { recursive: true, force: true });
+    } catch (e) { err = e.message; }
+    if (err) add(smokeRows, 'smoke test', 'fail', `could not prepare ${smokeBase}: ${err}`, '');
     else {
-      const dir = path.join(base, `ca-smoke-${Math.floor(Date.now() / 1000)}`);
-      let err = '';
+      // The base must be trusted, like the repo; --yes (or the y/N prompt) adds it.
+      let doTrust = yes;
+      if (!doTrust && interactive) doTrust = await confirm(`Add ${smokeBase} to the CodeArts trusted folders?`);
+      if (doTrust && !addTrusted(smokeBase)) doTrust = false;
+      const dir = path.join(smokeBase, `ca-smoke-${Math.floor(Date.now() / 1000)}`);
+      let perr = '';
       try {
         fs.mkdirSync(dir, { recursive: true });
-        if (git(dir, 'init').status !== 0) err = 'git init failed';
-        if (!err) {
+        if (git(dir, 'init').status !== 0) perr = 'git init failed';
+        if (!perr) {
           let c = git(dir, 'commit', '--allow-empty', '-m', 'init');
           if (c.status !== 0) c = git(dir, '-c', 'user.email=ca@localhost', '-c', 'user.name=ca', 'commit', '--allow-empty', '-m', 'init');
-          if (c.status !== 0) err = oneLine(c.stderr, 140);
+          if (c.status !== 0) perr = String(c.stderr || '').trim();
         }
-        if (!err) {
+        if (!perr) {
           fs.mkdirSync(path.join(dir, 'tasks'), { recursive: true });
           fs.writeFileSync(path.join(dir, 'tasks', 'probe.md'), 'Run `git log --oneline -1` with your bash tool once, reply with its output.\n');
         }
-      } catch (e) { err = e.message; }
-      if (err) add(smokeRows, 'smoke test', 'fail', `could not prepare ${dir}: ${err}`);
+      } catch (e) { perr = e.message; }
+      if (perr) add(smokeRows, 'smoke test', 'fail', `could not prepare ${dir}: ${perr}`, '');
       else {
+        const laneId = `${path.basename(dir)}--probe`;
         const t0 = Date.now();
         const r = run(process.execPath, [CA_MJS, 'lane', dir, 'probe'], { timeout: 180000, env: { ...process.env, NO_REVIEW: '1' } });
         const took = dur(Date.now() - t0);
-        if (r.status === 0) add(smokeRows, 'smoke test', 'ok', `probe lane done in ${took} (${dir})`);
-        else add(smokeRows, 'smoke test', 'fail', `probe lane failed (exit ${r.status ?? '?'}) in ${took}: ${oneLine((r.stdout || '').split(/\r?\n/).filter(Boolean).slice(-3).join(' | '), 180)}`, `see ${path.join(dir, 'tasks', 'probe.lane')}`);
+        if (r.status === 0) {
+          run(process.execPath, [CA_MJS, 'ack', laneId, '--note', 'onboard smoke test'], { timeout: 30000 });
+          add(smokeRows, 'smoke test', 'ok', `probe lane done in ${took} (${dir})`);
+        } else if (r.status === 3) {
+          const reason = authReason(path.join(dir, 'tasks', 'probe.lane', 'summary.md')) || finishedReason(path.join(dir, 'tasks', 'probe.lane', 'live.log'));
+          add(smokeRows, 'smoke test', 'fail', `keys rejected: ${reason}`, 'ca auth --force (re-enter the keys), then ca onboard --smoke');
+        } else {
+          const reason = finishedReason(path.join(dir, 'tasks', 'probe.lane', 'live.log'));
+          add(smokeRows, 'smoke test', 'fail', reason, `ca tail ${laneId}`);
+        }
       }
     }
   }
