@@ -63,10 +63,12 @@ const claudeHome = path.join(tmp, 'claude-home');
 r = spawnSync(process.execPath, [CA, 'setup', 'claude', repo, '--user'], { env: { ...env, CLAUDE_CONFIG_DIR: claudeHome }, encoding: 'utf8' });
 check('claude --user: also installs the skill in the user skills dir and prints claude mcp add', /name: codearts-build/.test(rd(path.join(claudeHome, 'skills', 'codearts-build', 'SKILL.md')) || '') && /claude mcp add/.test(r.stdout), r.stdout + r.stderr);
 
-// codex: print by default, --write appends once
+// codex: config.toml is always written (machine-wide), once
 r = ca(['setup', 'codex', repo]);
-check('codex: prints a TOML snippet without writing', r.code === 0 && /\[mcp_servers\.codearts\]/.test(r.out) && !fs.existsSync(path.join(codexHome, 'config.toml')), r.out);
-check('codex: read-only tools pre-approved, start/steer/stop not', ['ca_status', 'ca_summary', 'ca_wait'].every((t) => new RegExp(`\\[mcp_servers\\.codearts\\.tools\\.${t}\\]\\s*\\napproval_mode = "approve"`).test(r.out)) && !/tools\.ca_(lane_start|steer|stop)\]/.test(r.out), r.out.slice(0, 300));
+const t0 = rd(path.join(codexHome, 'config.toml')) || '';
+check('codex: writes the MCP server to config.toml', r.code === 0 && /\[mcp_servers\.codearts\]/.test(t0), r.out);
+check('codex: read-only tools pre-approved, start/steer/stop not', ['ca_status', 'ca_summary', 'ca_wait'].every((t) => new RegExp(`\\[mcp_servers\\.codearts\\.tools\\.${t}\\]\\s*\\napproval_mode = "approve"`).test(t0)) && !/tools\.ca_(lane_start|steer|stop)\]/.test(t0), t0.slice(0, 300));
+fs.rmSync(path.join(codexHome, 'config.toml'));
 fs.writeFileSync(path.join(codexHome, 'config.toml'), 'model = "x"\n');
 r = ca(['setup', 'codex', repo, '--write']); ca(['setup', 'codex', repo, '--write']);
 const toml = rd(path.join(codexHome, 'config.toml')) || '';
