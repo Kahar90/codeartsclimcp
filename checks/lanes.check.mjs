@@ -44,14 +44,60 @@ try {
   };
   await send('Runtime.enable');
 
-  await size(1280, 800); await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1800);
+  // ---------- Control room (the default route): what needs me, what runs, finished, ended ----------
+  await size(1280, 800);
+  await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1000);
+  await ev('try{["ca-cr-filter","ca-cr-project","ca-cr-group","ca-cr-open","ca-cr-seen"].forEach((k)=>localStorage.removeItem(k))}catch{}');
+  await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1600);
+  check('the default route is the Control room', (await ev('location.hash')) === '' && (await ev('!!document.querySelector(".cr-head h1")')) === true, String(await ev('location.hash')));
+  let cr = await st();
+  check('overview counts the buckets', !!cr?.overview?.counts && cr.overview.counts.attention === 4 && cr.overview.counts.running === 2 && cr.overview.counts.done === 2 && cr.overview.counts.ended === 1, JSON.stringify(cr?.overview?.counts));
+  check('Needs you comes first and holds the stuck and failed lanes', (() => { const s0 = cr?.overview?.sections?.[0]; return !!s0 && s0.bucket === 'attention' && s0.ids.includes('demo-repo--stuck') && s0.ids.includes('demo-repo--stall'); })(), JSON.stringify(cr?.overview?.sections));
+  check('the tab title carries the Needs you count', /^\(4\) Needs you . Lanes$/.test(cr?.overview?.title || ''), cr?.overview?.title);
+  check('no stale banner while polls succeed', cr?.overview?.banner === false, String(cr?.overview?.banner));
+  await shot('lanes-control-room');
+  check('a bucket tile is a filter toggle', await clickSel('[data-cr="running"]'));
+  await wait(400);
+  cr = await st();
+  check('tile filter shows only that bucket', cr?.overview?.filter === 'running' && cr.overview.sections.length === 1 && cr.overview.sections[0].bucket === 'running' && cr.overview.sections[0].ids.length === 2, JSON.stringify(cr?.overview));
+  await clickSel('[data-cr="running"]'); await wait(300);
+  check('the project toggle is clickable', await clickSel('[data-crgroup="project"]'));
+  await wait(400);
+  cr = await st();
+  check('By project groups by key', cr?.overview?.group === 'project' && Array.isArray(cr.overview.projects) && cr.overview.projects.length === 2 && cr.overview.projects.includes('demo-repo') && cr.overview.projects.includes('sandbox'), JSON.stringify(cr?.overview?.projects));
+  await clickSel('[data-crgroup="status"]'); await wait(300);
+  await clickSel('[data-crsec="done"]'); await wait(300);
+  cr = await st();
+  check('Done lists the unseen done lanes', ((cr?.overview?.sections?.find((s) => s.bucket === 'done')?.ids) || []).includes('demo-repo--cli-dx'), JSON.stringify(cr?.overview?.sections));
+  const ackSel = '[data-ack-id="demo-repo--cli-dx"][data-ack-mark="1"]';
+  check('an unseen done row offers Mark seen', await clickSel(ackSel));
+  await wait(700);
+  cr = await st();
+  const seenBlock = await ev('!!document.querySelector(".cr-seen")');
+  check('Mark seen moves the row behind Seen earlier', seenBlock === true && !((cr?.overview?.sections?.find((s) => s.bucket === 'done')?.ids) || []).includes('demo-repo--cli-dx'), JSON.stringify(cr?.overview?.sections));
+  await clickSel('[data-crseen="1"]'); await wait(300);
+  cr = await st();
+  const doneIds = (cr?.overview?.sections?.find((s) => s.bucket === 'done')?.ids) || [];
+  check('Seen earlier holds the marked lane', doneIds.includes('demo-repo--cli-dx') && doneIds.includes('demo-repo--path-join'), JSON.stringify(doneIds));
+  await ev('window.__lanes.fail(true)');
+  let banner = false; for (let i = 0; i < 25 && !banner; i++) { await wait(600); cr = await st(); banner = cr?.overview?.banner === true; }
+  check('a simulated API failure shows the stale banner', banner, JSON.stringify(cr?.overview?.banner));
+  check('the banner names the runner', /cannot reach the runner/.test(await ev('document.getElementById("stale")?.textContent || ""')), String(await ev('document.getElementById("stale")?.textContent || ""')));
+  await ev('window.__lanes.fail(false)');
+  await size(390, 844); await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1600);
+  cr = await st();
+  check('no horizontal overflow in the Control room at 390 px', cr?.overview != null && (await ev('document.documentElement.scrollWidth <= document.documentElement.clientWidth')) === true, JSON.stringify({ overflowX: cr?.overflowX }));
+  await shot('lanes-control-room-phone');
+
+  // ---------- plan home (explicit route now that #/ is the Control room) ----------
+  await size(1280, 800); await send('Page.navigate', { url: base + '/?demo=1#/plan/office-polish' }); await wait(1800);
   const text = await ev('document.body.innerText');
   check('demo fixture renders the first plan', /Office view polish: sprites and layout/.test(text || ''));
   check('demo counts render', /2 plans/.test(text || ''), (text || '').split('\n')[0]);
   const counts = await ev('(function(){const r=document.getElementById("counts").getBoundingClientRect();return {left:Math.round(r.left),right:Math.round(r.right),w:window.innerWidth};})()');
   check('top bar counts inside the viewport at 1280x800', !!counts && counts.left >= 0 && counts.right <= counts.w, JSON.stringify(counts));
-  const railJ = JSON.parse(await ev('(function(){return JSON.stringify({plans:document.querySelectorAll("#railBody .rail-card").length,fin:document.querySelectorAll("#railBody .rail-fin").length});})()') || '{}');
-  check('rail lists 2 plans and 5 finished lanes', railJ.plans === 2 && railJ.fin === 5, JSON.stringify(railJ));
+  const railJ = JSON.parse(await ev('(function(){return JSON.stringify({plans:document.querySelectorAll("#railBody .rail-card:not(.cr)").length,fin:document.querySelectorAll("#railBody .rail-fin").length});})()') || '{}');
+  check('rail lists 2 plans and 6 finished lanes', railJ.plans === 2 && railJ.fin === 6, JSON.stringify(railJ));
   const laneHref = await ev('document.querySelector(".lane-name")?.getAttribute("href")');
   check('lane card links to the lane route', laneHref === '#/lane/demo-repo--office-layout', String(laneHref));
   check('plan home renders one wave', (await ev('document.querySelectorAll(".wave").length')) === 1);
@@ -168,7 +214,7 @@ try {
   s = await st();
   check('steer on a finished lane shows the inline error and keeps the text', !!steer && steer.err === 'lane not running' && steer.msg === 'steer a finished lane' && s?.lane?.draft === 'steer a finished lane', JSON.stringify(steer));
   // phone width: counts fit, no overflow, both routes
-  await size(390, 844); await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1600);
+  await size(390, 844); await send('Page.navigate', { url: base + '/?demo=1#/plan/office-polish' }); await wait(1600);
   const pc = await ev('(function(){const r=document.getElementById("counts").getBoundingClientRect();return {left:Math.round(r.left),right:Math.round(r.right),w:window.innerWidth};})()');
   s = await st();
   check('top bar counts inside the viewport at 390x844', !!pc && pc.left >= 0 && pc.right <= pc.w, JSON.stringify(pc));
