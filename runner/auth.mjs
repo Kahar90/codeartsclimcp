@@ -26,11 +26,112 @@ export const KEYS = ['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK', 'MAAS_API_KEY'];
 const REQUIRED = ['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK'];
 const PORTAL = 'https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth';
 
-export function readCreds() {
+// ---- keys at rest ----------------------------------------------------------
+// On Windows the credentials file holds DPAPI-encrypted values (CurrentUser scope, through
+// PowerShell), so the plain keys never sit on disk. Values travel through the environment, never
+// the command line. On other platforms the file stays plain JSON with mode 0600.
+const PROTECT_PS = [
+  "$ErrorActionPreference = 'Stop'",
+  '$names = ConvertFrom-Json $env:CA_VAULT_NAMES',
+  '$n = @($names).Count',
+  '$o = [ordered]@{}',
+  'for ($i = 0; $i -lt $n; $i++) {',
+  '  $val = [Environment]::GetEnvironmentVariable("CA_VAULT_$i")',
+  '  $sec = ConvertTo-SecureString $val -AsPlainText -Force',
+  '  $o[[string]$i] = ConvertFrom-SecureString $sec',
+  '}',
+  'ConvertTo-Json $o -Compress',
+].join('\n');
+const UNPROTECT_PS = [
+  "$ErrorActionPreference = 'Stop'",
+  '$names = ConvertFrom-Json $env:CA_VAULT_NAMES',
+  '$n = @($names).Count',
+  '$o = [ordered]@{}',
+  'for ($i = 0; $i -lt $n; $i++) {',
+  '  $blob = [Environment]::GetEnvironmentVariable("CA_VAULT_$i")',
+  '  $sec = ConvertTo-SecureString $blob',
+  '  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)',
+  '  $o[[string]$i] = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)',
+  '  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)',
+  '}',
+  'ConvertTo-Json $o -Compress',
+].join('\n');
+
+function psResult(names, r) {
+  if (!r || r.status !== 0) return null;
+  let j; try { j = JSON.parse(r.stdout); } catch { return null; }
+  const out = {};
+  for (let i = 0; i < names.length; i++) {
+    if (typeof j[String(i)] !== 'string') return null;
+    out[names[i]] = j[String(i)];
+  }
+  return out;
+}
+
+// One PowerShell call for the whole map: values go in CA_VAULT_0, CA_VAULT_1, ... (never the
+// command line), and the encrypted map comes back as JSON on stdout. null on any failure.
+function protect(map) {
+  const names = Object.keys(map);
+  const env = { ...process.env, CA_VAULT_NAMES: JSON.stringify(names) };
+  names.forEach((n, i) => { env[`CA_VAULT_${i}`] = map[n]; });
+  const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', PROTECT_PS], { encoding: 'utf8', windowsHide: true, env });
+  return psResult(names, r);
+}
+function unprotect(map) {
+  const names = Object.keys(map);
+  const env = { ...process.env, CA_VAULT_NAMES: JSON.stringify(names) };
+  names.forEach((n, i) => { env[`CA_VAULT_${i}`] = map[n]; });
+  const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', UNPROTECT_PS], { encoding: 'utf8', windowsHide: true, env });
+  return psResult(names, r);
+}
+
+let cacheKey = '';
+let cacheCreds = {};
+let problem = '';
+
+export function credsProblem() { return problem; }
+function cacheStore(key, creds, why) { cacheKey = key; cacheCreds = creds; problem = why; return creds; }
+
+// Rewrite a plain v1 file as the encrypted v2 form, once, on Windows.
+function migrate(plain) {
   try {
-    const v = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8').replace(/^﻿/, ''));
-    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-  } catch { return {}; }
+    const enc = protect(plain);
+    if (!enc) return;
+    fs.mkdirSync(path.dirname(CRED_FILE), { recursive: true });
+    fs.writeFileSync(CRED_FILE, JSON.stringify({ v: 2, protection: 'dpapi', keys: enc }, null, 2) + '\n', { mode: 0o600 });
+    try { fs.chmodSync(CRED_FILE, 0o600); } catch {}
+    try { const st = fs.statSync(CRED_FILE); cacheKey = `${st.mtimeMs}:${st.size}`; cacheCreds = plain; } catch {}
+  } catch {}
+}
+
+export function readCreds() {
+  let st;
+  try { st = fs.statSync(CRED_FILE); } catch { return cacheStore('', {}, ''); }
+  const key = `${st.mtimeMs}:${st.size}`;
+  if (key === cacheKey) return cacheCreds;
+  let v;
+  try {
+    v = JSON.parse(fs.readFileSync(CRED_FILE, 'utf8').replace(/^﻿/, ''));
+  } catch { return cacheStore(key, {}, 'the file is not valid JSON'); }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return cacheStore(key, {}, 'the file is not a key file');
+  if (v.v === 2 && v.protection === 'dpapi' && v.keys && typeof v.keys === 'object') {
+    const dec = unprotect(v.keys);
+    if (!dec) return cacheStore(key, {}, 'the file could not be decrypted (another user or machine, or a damaged blob)');
+    return cacheStore(key, dec, '');
+  }
+  cacheStore(key, v, '');
+  if (process.platform === 'win32') migrate(v);
+  return v;
+}
+
+// Read the keys from one file, with no cache and no migration, for checks and tools that hold an
+// explicit path. v2 (dpapi) is decrypted, anything else is returned as is, unreadable gives {}.
+export function readCredsAt(file) {
+  let v;
+  try { v = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch { return {}; }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  if (v.v === 2 && v.protection === 'dpapi' && v.keys && typeof v.keys === 'object') return unprotect(v.keys) || {};
+  return v;
 }
 
 function saveCreds(values) {
@@ -41,8 +142,16 @@ function saveCreds(values) {
     if (v) { cur[k] = v; saved.push(k); }
   }
   fs.mkdirSync(path.dirname(CRED_FILE), { recursive: true });
-  fs.writeFileSync(CRED_FILE, JSON.stringify(cur, null, 2) + '\n', { mode: 0o600 });
+  let enc = null;
+  if (process.platform === 'win32') {
+    // Never write a vault that lost keys: if DPAPI did not return a blob for every key, keep the old file.
+    enc = protect(cur);
+    if (!enc || Object.keys(cur).some((k) => typeof enc[k] !== 'string' || !enc[k])) throw new Error('could not encrypt the keys with Windows DPAPI; nothing was saved (the old keys file is unchanged)');
+  }
+  const body = enc ? JSON.stringify({ v: 2, protection: 'dpapi', keys: enc }, null, 2) : JSON.stringify(cur, null, 2);
+  fs.writeFileSync(CRED_FILE, body + '\n', { mode: 0o600 });
   try { fs.chmodSync(CRED_FILE, 0o600); } catch {}
+  try { const st = fs.statSync(CRED_FILE); cacheStore(`${st.mtimeMs}:${st.size}`, cur, ''); } catch { cacheStore('', {}, ''); }
   return saved;
 }
 
@@ -70,7 +179,7 @@ function isSet(k) {
   if (process.env.CA_CREDENTIALS_ONLY === '1') return !!readCreds()[k];
   if (process.env[k] || readCreds()[k]) return true;
   if (process.platform !== 'win32') return false;
-  const r = spawnSync('powershell', ['-NoProfile', '-Command', `[bool][Environment]::GetEnvironmentVariable('${k}','User')`], { encoding: 'utf8', windowsHide: true });
+  const r = process.platform === 'win32' && spawnSync('powershell', ['-NoProfile', '-Command', `[bool][Environment]::GetEnvironmentVariable('${k}','User')`], { encoding: 'utf8', windowsHide: true });
   return /true/i.test(r.stdout || '');
 }
 const status = () => Object.fromEntries(KEYS.map((k) => [k, isSet(k)]));
@@ -141,7 +250,7 @@ function serve(portFile) {
           if (!vr.ok) { delete v.MAAS_API_KEY; rejected = `MaaS API key rejected by ModelArts MaaS (HTTP ${vr.status})`; }
           else if (vr.warn) warning = `could not verify the MaaS API key (${vr.warn}); saved anyway`;
         }
-        saveCreds(v); // AK/SK (and a MaaS key that was not rejected) are saved; the form stays on a rejection
+        try { saveCreds(v); } catch (e) { return j(200, { ok: false, error: e.message }); } // AK/SK (and a MaaS key that was not rejected) are saved; the form stays on a rejection
         if (rejected) return j(200, { ok: false, error: rejected });
         j(200, { ok: true, warning });
         setTimeout(() => process.exit(0), 300);
@@ -163,7 +272,12 @@ export default async function auth(args) {
 
   if (flags.has('--status')) {
     const s = status();
-    return out({ ready: ready(s), keys: s, file: CRED_FILE }, `${KEYS.map((k) => `${k}: ${s[k] ? 'set' : 'not set'}`).join('\n')}\n${ready(s) ? 'auth: ready' : 'auth: missing keys, run: ca auth'}`);
+    const p = credsProblem();
+    const note = p ? `the keys file could not be read (${p}); run ca auth --force to enter the keys again` : '';
+    const lines = KEYS.map((k) => `${k}: ${s[k] ? 'set' : 'not set'}`);
+    if (note) lines.push(note);
+    lines.push(ready(s) ? 'auth: ready' : 'auth: missing keys, run: ca auth');
+    return out({ ready: ready(s), keys: s, file: CRED_FILE, problem: note || undefined }, lines.join('\n'));
   }
 
   if (flags.has('--stdin')) {
@@ -180,7 +294,8 @@ export default async function auth(args) {
       else if (vr.warn) msgs.push(`could not verify the MaaS API key (${vr.warn}); saved anyway`);
       else msgs.push('MAAS_API_KEY verified');
     }
-    const saved = saveCreds(v);
+    let saved;
+    try { saved = saveCreds(v); } catch (e) { out({ saved: [], ready: false, error: e.message }, `auth: ${e.message}`); process.exitCode = 1; return; }
     const s = status();
     out({ saved, ready: ready(s), maasRejected }, [`saved: ${saved.join(', ') || 'nothing'}`, ...msgs, ready(s) ? 'auth: ready' : 'auth: AK and SK still missing'].join('\n'));
     process.exitCode = maasRejected ? 1 : (ready(s) ? 0 : 3);
