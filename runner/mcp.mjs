@@ -412,7 +412,14 @@ async function cliResult(tool, cliArgs) {
   return { content: [{ type: 'text', text }], isError: !ok };
 }
 
-methods['tools/list'] = () => ({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+// MCP annotations per tool: read-only tools are safe to auto-approve; the two that end work
+// (ca_stop, ca_plan_close) are destructive; every other tool changes state without destroying it.
+const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list']);
+const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close']);
+const annotationsFor = (name) => (READ_ONLY_TOOLS.has(name)
+  ? { readOnlyHint: true }
+  : { readOnlyHint: false, destructiveHint: DESTRUCTIVE_TOOLS.has(name) });
+methods['tools/list'] = () => ({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: annotationsFor(t.name) })) });
 methods['tools/call'] = async (params) => {
   const tool = TOOLS.find((t) => t.name === params.name);
   if (!tool) throw new RpcError(-32602, `Unknown tool: ${params.name}`);
