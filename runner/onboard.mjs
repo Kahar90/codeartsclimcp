@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // runner/onboard.mjs: guided first-run setup for the CodeArts lanes runner, called by
-// `ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]`.
+// `ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json] [--repo-only]`.
 // It walks the environment (doctor rows), the repo (git, trusted folder), the harness
 // (marker detection + `ca setup`) and, only with --smoke, a throwaway probe lane.
+// The default scope is machine-wide (`ca setup <h> <repo> --user`); --repo-only keeps the old
+// repo-level setup (`ca setup <h> <repo>`).
 // Every step is {name, status: ok|warn|fail|fixed|skipped|planned, detail, fix};
 // --json prints {harness, repo, ready, steps, next} only. Exit 0 when ready (no fail
 // row), 1 otherwise. --yes applies the fixes, --dry-run only plans them; with a TTY
@@ -37,13 +39,22 @@ const HARNESS_NEXT = {
   vscode: 'In VS Code chat (agent mode): use the codearts MCP tools',
   opencode: 'In opencode: ask it to follow the CodeArts lanes section of AGENTS.md (codearts MCP tools)',
 };
+// Machine-wide scope: the MCP server and rules are installed once, so these work in any repo.
+const HARNESS_NEXT_USER = {
+  kiro: 'Restart Kiro, then in any repo type: #codearts-lanes <goal>',
+  cursor: 'Restart Cursor, then in any repo ask: use CodeArts lanes to <goal>',
+  claude: 'Restart Claude Code (or run /mcp), then in any repo type: /codearts-build <goal>',
+  codex: 'Restart Codex, then in any repo ask: use CodeArts lanes to <goal>',
+  vscode: 'Restart VS Code, then in any repo ask: use CodeArts lanes to <goal>',
+  opencode: 'Restart opencode, then in any repo ask: use CodeArts lanes to <goal>',
+};
 const PORTAL = 'https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth';
 const DASH = 'http://127.0.0.1:4777';
 const oneLine = (s, n = 200) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const dur = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h`; };
 const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, input: '', ...opts });
 const git = (cwd, ...args) => run('git', args, { cwd });
-const usage = (msg) => { process.stderr.write(`${msg}\nusage: ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]\n`); process.exit(2); };
+const usage = (msg) => { process.stderr.write(`${msg}\nusage: ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json] [--repo-only]\n`); process.exit(2); };
 
 // settings.json (security.trustedFolders): BOM and CRLF tolerant; a file we cannot parse
 // as a JSON object is reported and never overwritten.
@@ -84,6 +95,7 @@ export default async function onboard(args) {
   const pos = args.filter((a, i) => !a.startsWith('--') && i !== ri + 1 && i !== hi + 1);
   const repo = path.resolve((ri >= 0 ? args[ri + 1] : '') || pos[0] || process.cwd());
   const yes = flags.has('--yes'), dry = flags.has('--dry-run'), asJson = flags.has('--json'), smoke = flags.has('--smoke');
+  const scope = flags.has('--repo-only') ? 'repo' : 'user';
   const interactive = !yes && !asJson && !dry && !!(process.stdin.isTTY && process.stdout.isTTY);
   const envRows = [], repoRows = [], harnessRows = [], smokeRows = [];
   const add = (rows, name, status, detail, fix = '') => rows.push({ name, status, detail: oneLine(detail), fix });
@@ -165,7 +177,7 @@ export default async function onboard(args) {
     add(harnessRows, 'harness', 'warn', 'no harness detected (no .kiro, .cursor, .claude or CLAUDE.md, .codex or AGENTS.md, .vscode, opencode.json)', `ca onboard --harness <${HARNESSES.join('|')}>`);
   } else {
     add(harnessRows, 'harness', 'ok', `${harness} (${via})`);
-    const setupArgs = [CA_MJS, 'setup', harness, repo, ...(dry ? ['--dry-run'] : [])];
+    const setupArgs = [CA_MJS, 'setup', harness, repo, ...(dry ? ['--dry-run'] : []), ...(scope === 'repo' ? [] : ['--user'])];
     if (dry) {
       const r = run(process.execPath, setupArgs, { timeout: 30000 });
       if (r.status !== 0) add(harnessRows, 'harness setup', 'fail', `ca setup ${harness} --dry-run exited ${r.status ?? '?'}: ${oneLine(r.stderr || r.stdout, 180)}`, `run node ca.mjs setup ${harness} ${repo}`);
@@ -232,16 +244,17 @@ export default async function onboard(args) {
   const ready = fails === 0;
   const next = [];
   if (!harness) next.push(`ca onboard --harness <${HARNESSES.join('|')}>`);
-  else next.push(HARNESS_NEXT[harness]);
+  else next.push(scope === 'repo' ? HARNESS_NEXT[harness] : HARNESS_NEXT_USER[harness]);
   next.push(`Dashboard: ${DASH}`);
 
-  if (asJson) console.log(JSON.stringify({ harness, repo, ready, steps, next }, null, 2));
+  if (asJson) console.log(JSON.stringify({ harness, repo, scope, ready, steps, next }, null, 2));
   else {
     const L = (s) => process.stdout.write(s + '\n');
     const W = 7;
     const show = { ok: 'ok', warn: 'warn', fail: 'FAIL', fixed: 'fixed', planned: 'planned', skipped: 'skipped' };
     L('CodeArts lanes onboarding');
     L(`repo: ${repo}${harness ? `  harness: ${harness}` : ''}`);
+    L(`scope: ${scope === 'repo' ? 'this repo' : 'machine-wide'}`);
     const section = (n, title, rows) => {
       L('');
       L(`${n}. ${title}`);
