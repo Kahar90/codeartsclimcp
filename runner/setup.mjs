@@ -46,7 +46,8 @@ export function userPaths(harness) {
     blocks: [path.join(home(), '.config', 'opencode', 'AGENTS.md')],
   };
   if (harness === 'claude') return {
-    json: [{ file: path.join(claudeDir(), '.claude.json'), mapKey: 'mcpServers', serverKey: 'codearts' }],
+    // Claude Code keeps user MCP servers in <CLAUDE_CONFIG_DIR>/.claude.json, or ~/.claude.json (home, not ~/.claude).
+    json: [{ file: process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(home(), '.claude.json'), mapKey: 'mcpServers', serverKey: 'codearts' }],
     allow: [path.join(claudeDir(), 'settings.json')],
     skillDir: path.join(claudeDir(), 'skills', 'codearts-build'),
   };

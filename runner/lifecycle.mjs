@@ -104,7 +104,7 @@ export async function uninstall(args) {
     const d = userPaths(h);
     if (!d) { process.stdout.write(`unknown harness: ${h}\n`); continue; }
     // Claude: let the CLI drop its own registration first, then make sure the key is gone.
-    if (h === 'claude' && process.env.CA_CLAUDE_CLI !== 'none') {
+    if (h === 'claude' && !dry && process.env.CA_CLAUDE_CLI !== 'none') {
       try { spawnSync('claude', ['mcp', 'remove', '-s', 'user', 'codearts'], { shell: process.platform === 'win32', stdio: 'ignore', timeout: 30000, windowsHide: true }); } catch {}
     }
     for (const j of d.json || []) dropJsonKey(j.file, j.mapKey, j.serverKey, dry, changes);

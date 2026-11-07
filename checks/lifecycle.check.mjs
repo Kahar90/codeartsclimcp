@@ -98,6 +98,22 @@ check('uninstall never deletes a user-edited skill', /my own/.test(rd(path.join(
 fs.writeFileSync(env.CA_CREDENTIALS, '{"CODEARTS_CLI_AK":"x"}');
 ca(['uninstall']); check('uninstall keeps the keys file by default', fs.existsSync(env.CA_CREDENTIALS));
 r = ca(['uninstall', '--keys']); check('uninstall --keys also deletes the keys file', !fs.existsSync(env.CA_CREDENTIALS), r.out.slice(0, 160));
+// default Claude location: without CLAUDE_CONFIG_DIR the user server lives in ~/.claude.json (home, not ~/.claude)
+const noDir = { CLAUDE_CONFIG_DIR: '' };
+fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ numStartups: 9, mcpServers: { other: { type: 'stdio', command: 'x', args: [] } } }));
+ca(['setup', 'claude', tmp, '--user'], noDir);
+check('default Claude dir: setup writes the server into ~/.claude.json', !!js(path.join(home, '.claude.json'))?.mcpServers?.codearts);
+r = ca(['doctor', '--json'], noDir); try { d = JSON.parse(r.out); } catch { d = null; }
+check('default Claude dir: doctor harness config row is ok (reads ~/.claude.json)', hrow(d)?.status === 'ok', JSON.stringify(hrow(d)));
+// a fake `claude` first on PATH: it only leaves a marker file, so a regression can never touch a real config
+const fakeBin = path.join(tmp, 'fakebin'); fs.mkdirSync(fakeBin, { recursive: true }); const marker = path.join(tmp, 'claude-cli-ran');
+fs.writeFileSync(path.join(fakeBin, 'claude.cmd'), `@echo off\r\necho ran> "${marker}"\r\n`);
+fs.writeFileSync(path.join(fakeBin, 'claude'), `#!/bin/sh\necho ran > "${marker}"\n`, { mode: 0o755 });
+r = ca(['uninstall', '--harness', 'claude', '--dry-run'], { ...noDir, CA_CLAUDE_CLI: '', PATH: fakeBin + path.delimiter + process.env.PATH, Path: fakeBin + path.delimiter + (process.env.Path || process.env.PATH) });
+check('uninstall --dry-run never runs the claude CLI or edits ~/.claude.json', !!js(path.join(home, '.claude.json'))?.mcpServers?.codearts && !fs.existsSync(marker));
+ca(['uninstall', '--harness', 'claude'], noDir);
+const hj = js(path.join(home, '.claude.json'));
+check('default Claude dir: uninstall removes the server from ~/.claude.json, keeps the rest', hj && !hj.mcpServers?.codearts && hj.mcpServers?.other && hj.numStartups === 9, JSON.stringify(hj));
 r = ca(['help']); check('help lists ca update and ca uninstall', /ca update/.test(r.out) && /ca uninstall/.test(r.out));
 
 fs.rmSync(tmp, { recursive: true, force: true });
