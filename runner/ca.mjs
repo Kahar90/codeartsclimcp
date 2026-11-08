@@ -1298,6 +1298,47 @@ function cmdGc() {
   for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); fs.rmSync(path.join(REG, 'final', `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
 }
 
+// ---------- remove lanes and plans ----------
+// Delete a lane for good: stop its supervisor and its codearts server (only the pids this lane
+// recorded, never by name), unregister it, drop its lane logs and mark it removed in every plan
+// that listed it. The brief tasks/<task>.md and any git worktree or branch are never touched.
+async function removeLane(l, { purge = true, by = 'ca rm' } = {}) {
+  if (!l || !l.id) return { error: 'no lane given', code: 400 };
+  const id = l.id; const s = l.s || {};
+  const killed = []; const stop = [];
+  try {
+    if (s.pid && alive(s.pid)) {
+      try { fs.mkdirSync(l.dir, { recursive: true }); fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); } catch {}
+      killTree(s.pid); killed.push(s.pid); stop.push(s.pid);
+    }
+    if (s.server?.pid && alive(s.server.pid)) { killTree(s.server.pid); killed.push(s.server.pid); stop.push(s.server.pid); }
+    const t0 = now();
+    while (now() - t0 < 5000 && stop.some((p) => alive(p))) await sleep(100);
+    const removed = [];
+    const drop = (f) => { try { if (f && fs.existsSync(f)) { fs.rmSync(f, { force: true }); removed.push(f); } } catch {} };
+    drop(path.join(REG, `${id}.json`));
+    drop(path.join(REG, 'final', `${id}.json`));
+    const acks = readAcks();
+    if (Object.prototype.hasOwnProperty.call(acks, id)) { const next = { ...acks }; delete next[id]; writeAcks(next); }
+    if (purge) {
+      try { if (l.dir && fs.existsSync(l.dir)) { fs.rmSync(l.dir, { recursive: true, force: true }); removed.push(l.dir); } } catch {}
+      if (l.repo && l.task) drop(path.join(l.repo, 'tasks', `${l.task}.lane.log`));
+    }
+    for (const r of plans()) {
+      const p = readJSON(r.file) || {};
+      const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+      let changed = false;
+      for (const pl of (p.lanes || [])) {
+        if (pl && laneId(path.resolve(base, pl.repo || '.'), pl.task) === id) { pl.removed = true; changed = true; }
+      }
+      if (!changed) continue;
+      (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Lane ${l.task} deleted from the ${by}` });
+      try { fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n'); } catch {}
+    }
+    return { ok: true, id, killed, removed };
+  } catch (err) { return { error: String((err && err.message) || err), code: 500 }; }
+}
+
 // ---------- engineer workflow: setup, wait, summary, init, doctor ----------
 async function cmdSetup(args) {
   const f = path.join(HERE, 'setup.mjs');
@@ -1757,7 +1798,8 @@ function leadView(p) {
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
-  const planned = (p.lanes || []).map((pl) => {
+  // A lane entry marked removed: true was deleted with its lane or plan: it must never come back as "planned".
+  const planned = (p.lanes || []).filter((pl) => pl && !pl.removed).map((pl) => {
     const repo = path.resolve(base, pl.repo || '.'); const id = laneId(repo, pl.task); const l = reg.get(id);
     let bf = path.join(repo, 'tasks', `${pl.task}.md`);
     if (!fs.existsSync(bf)) bf = path.join(base, 'tasks', `${pl.task}.md`);
@@ -1771,7 +1813,7 @@ function planView(r) {
   });
   const byTask = new Map(planned.map((x) => [x.task, x]));
   // "continues": "<task>" in a plan lane: the older lane was picked up by this one, so it reads as continued, not failed.
-  for (const pl of p.lanes || []) {
+  for (const pl of (p.lanes || []).filter((x) => x && !x.removed)) {
     const old = pl.continues && byTask.get(pl.continues), nu = byTask.get(pl.task);
     if (old && nu && old.result && old.result !== 'done') {
       Object.assign(old, { health: 'continued', result: 'continued', continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
