@@ -1,0 +1,21 @@
+{
+  "title": "One truthful status: fit the Office, align every status, trustworthy checks",
+  "goal": "From across the room the whole Office is visible, every status agrees with the sign, each agent says plainly whether it needs you, and every check exits truthfully.",
+  "lead": "Claude Opus 5.5",
+  "status": "running",
+  "phase": "building",
+  "now": "Wave 1: server status model, Office fit and labels, Lanes labels.",
+  "waves": [
+    { "name": "Wave 1 - One truth", "lanes": ["status-truth", "office-fit", "lanes-truth"] },
+    { "name": "Wave 2 - Trustworthy checks", "lanes": ["checks-health"] }
+  ],
+  "lanes": [
+    { "task": "status-truth", "repo": "../codeartsclimcp-wt-status-truth", "why": "Lane attention/steps/glyph, plan badge from glance, ack handles any ended lane, --patch-file, no sleep-polling", "files": ["runner/controls.mjs", "runner/ca.mjs", "templates/brief.md"] },
+    { "task": "office-fit", "repo": "../codeartsclimcp-wt-office-fit", "why": "Whole room visible, smaller agents, sign never covers an agent, labels from the status model", "files": ["runner/office.html"] },
+    { "task": "lanes-truth", "repo": "../codeartsclimcp-wt-lanes-truth", "why": "Plan pill from badge, step bars only when meaningful, Needs you count from attention", "files": ["runner/dash.html"] },
+    { "task": "checks-health", "repo": "../codeartsclimcp-wt-checks-health", "why": "Clean exits under Node 26 and fix or explain the three stale failing checks", "files": ["checks/"] }
+  ],
+  "next": ["Run wave 1 and merge", "Run checks-health on merged main", "Release 0.5.0, install-local, push"],
+  "decisions": [{ "at": "2026-11-08", "text": "Server owns every status word (lane.status, plan.badge); views only render it, so the sign and pills cannot disagree." }],
+  "risks": ["Contain-fit leaves bands on very wide screens; filled with a blended backdrop"]
+}
