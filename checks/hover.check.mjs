@@ -99,6 +99,17 @@ try {
     }
   }
 
+  // ---------- Office: the running lane's current step shows the CSS spinner (Bug C) ----------
+  await send('Page.navigate', { url: base + '/office?demo=1&still=1' }); await wait(1500);
+  await waitFor(() => ev('!!(window.__office && window.__office.state)'));
+  await ev('window.__office.press("office-review")'); await wait(400);
+  const spinAnim = await ev('(function(){var e=document.querySelector("#winSteps .st-current .st-spin");return e?getComputedStyle(e).animationName:null;})()');
+  check('the running lane shows a spinner on its current step', String(spinAnim || '').indexOf('spin') >= 0, String(spinAnim));
+  await ev('window.__office.press("office-scene")'); await wait(300);
+  const staticMark = await ev('(function(){var e=document.querySelector("#winSteps .st-current .mark");if(!e)return null;return e.querySelector(".st-spin")?"spin":e.textContent;})()');
+  check('a non-running lane keeps a static current-step mark', staticMark === '\u25cf', JSON.stringify(staticMark));
+  await shot('hover-office-spinner');
+
   // ---------- Lanes: a plan-home token chip survives the 2.5 s poll ----------
   await send('Page.navigate', { url: base + '/?demo=1#/plan/office-polish' }); await wait(1800);
   const lanesReady = await waitFor(() => ev('!!(window.__lanes && window.__lanes.renders && document.querySelector(".plan-tok"))'));

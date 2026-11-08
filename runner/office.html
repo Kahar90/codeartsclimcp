@@ -157,6 +157,12 @@ body.narrow #winTail { display: none; }
 #winSteps .st-done .mark { color: var(--run); }
 #winSteps .st-current { font-weight: 700; }
 #winSteps .st-current .mark { color: var(--sel); }
+/* Bug C: the running lane's current step shows a CSS-only spinning ring where its dot sat, so the row
+   looks alive; a paused/failed/stopped lane keeps the static dot, and reduced motion freezes the ring. */
+#winSteps .st-spin { display: inline-block; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--sel); border-top-color: transparent; vertical-align: middle; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+body.no-motion #winSteps .st-spin { animation: none; }
+@media (prefers-reduced-motion: reduce) { #winSteps .st-spin { animation: none; } }
 #winSteps .st-pending .mark { color: var(--faint); }
 #winLink { font-size: 14.5px; }
 #winForm { display: flex; gap: 8px; padding: 0 18px 16px; flex: none; }
@@ -1532,10 +1538,10 @@ let winFor = null, winAnchor = null, winCloseTimer = 0, sendInFlight = false;
 
 function winInstant() { return !PixelSprites.motion(); }
 function setTriggerAria(el, on) { if (el && el.setAttribute) el.setAttribute("aria-expanded", on ? "true" : "false"); }
-function renderChecklist(steps) {
+function renderChecklist(steps, running) {
   const html = (steps || []).map((s) => {
     const st = s.state || "pending";
-    const mark = st === "done" ? "\u2713" : st === "current" ? "\u25cf" : "\u25cb";
+    const mark = st === "done" ? "\u2713" : st === "current" ? (running ? '<span class="st-spin" aria-hidden="true"></span>' : "\u25cf") : "\u25cb";
     // Brief steps are paragraphs: show the step title (text before the first ": " or ". "), the full text on hover.
     const full = String(s.text || "");
     const m = full.match(/^(.{4,80}?)(?::\s|\.\s|$)/);
@@ -1676,7 +1682,7 @@ function renderWinContent(keepInput) {
     $("winGoal").textContent = p.goal || "";
     $("winNow").hidden = !p.now;
     $("winNow").textContent = p.now ? "Now: " + p.now : "";
-    renderChecklist((p.next || []).map((x) => ({ text: x.text, state: x.done ? "done" : "pending" })));
+    renderChecklist((p.next || []).map((x) => ({ text: x.text, state: x.done ? "done" : "pending" })), false);
     $("winLink").hidden = true;
     $("winForm").hidden = true;
     $("winErr").hidden = true;
@@ -1709,7 +1715,7 @@ function renderWinContent(keepInput) {
   if (!keepInput) $("winInput").value = drafts.get(l.id) || "";
   syncComposer(l);
   const c = detailCache.get(l.id);
-  renderChecklist(mode === "demo" ? (l.steps || []) : ((c && c.v && c.v.steps) || (l.steps || [])));
+  renderChecklist(mode === "demo" ? (l.steps || []) : ((c && c.v && c.v.steps) || (l.steps || [])), !!l.running);
 }
 async function fetchDetail(id) {
   const c = detailCache.get(id);
