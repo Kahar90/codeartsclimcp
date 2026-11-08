@@ -404,6 +404,9 @@ const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const demoStuck = q.get("demo") === "stuck";
 const demoCrowd = q.get("demo") === "crowd";
 const demoStatus = q.get("demo") === "status";
+const demoNeeds = q.get("demo") === "needs";
+const demoFailed = q.get("demo") === "failed";
+const demoQuiet = q.get("demo") === "quiet";
 const mode = q.has("demo") ? "demo" : "live";
 let STAGE_W = 1280, STAGE_H = 720;
 const HOTDESKS = [
@@ -653,7 +656,7 @@ function demoApply(ev) {
 
 const DEMO_LEAD = 1000;
 function scheduleDemoEvents() {
-  if (mode !== "demo" || demoBig || demoDone || demoStuck || demoCrowd || q.get("still") === "1") return;
+  if (mode !== "demo" || demoBig || demoDone || demoStuck || demoCrowd || demoNeeds || demoFailed || demoQuiet || q.get("still") === "1") return;
   for (const ev of (SCENE.fixture && SCENE.fixture.events) || []) {
     setTimeout(() => { if (mode === "demo") demoApply(ev); }, (ev.atMs || 0) + DEMO_LEAD);
   }
@@ -662,6 +665,16 @@ function scheduleDemoEvents() {
 const DEMO_PLAN_ID = demoBig ? "demo-big" : demoCrowd ? "demo-crowd" : "demo";
 function demoModel() {
   if (demoRemoved.has(DEMO_PLAN_ID)) return { plan: { id: "", title: "", goal: "", lead: "", status: "", now: "", next: [], decisions: [], tokens: {}, tokensBy: {} }, lanes: [], waves: [] };
+  // Step 3: the fixed glance per demo URL, or working with the live running counts. needs, failed and quiet
+  // reuse the default fixture and pin the state so a screenshot always shows the same scene.
+  const liveCount = (ls) => ls.filter((l) => l.running).length;
+  const glanceFor = (ls) => {
+    if (demoNeeds) return { state: "needs-you", word: "Needs you", detail: "Claude is asking: merge the three lanes now?", at: null };
+    if (demoFailed) return { state: "failed", word: "Failed", detail: "rm-core failed: checks failing", at: null };
+    if (demoQuiet) return { state: "quiet", word: "Check Claude", detail: "No lead update for 18m; Claude may be waiting on you", at: null };
+    if (demoDone) return { state: "done", word: "Done", detail: "All " + ls.length + " lanes finished", at: null };
+    return { state: "working", word: "Working", detail: liveCount(ls) + " of " + ls.length + " lanes running", at: null };
+  };
   const mkSteps = (texts, dn, cur) => texts.map((tx, i) => ({ text: tx, state: i < dn ? "done" : cur === i + 1 ? "current" : "pending" }));
   const mk = (id) => {
     const b = DEMO_SET[id], st = demoState[id];
@@ -691,6 +704,7 @@ function demoModel() {
       plan: {
         id: "demo-big", title: "CLI and Office view", goal: "Ship the harness-neutral CLI and Office view",
         lead: "Claude Opus 5.5", status: demoDone ? "done" : "running",
+        glance: glanceFor(lanes),
         tokens: pt.tokens, tokensBy: pt.tokensBy,
         now: demoDone ? "All eight lanes finished; every check is green." : "Wave 1 is still building; the CLI lane waits for review.",
         next: [{ text: "Merge the sprites worktree into main", done: true }, { text: "Review the CLI help output", done: false }, { text: "Run every check on main", done: false }],
@@ -718,6 +732,7 @@ function demoModel() {
       plan: {
         id: "demo-crowd", title: "Ten lanes, eight seats", goal: "Seat a crowded plan: three stations, five hot desks, the rest in the +N list",
         lead: "Claude Opus 5.5", status: "running",
+        glance: glanceFor(lanes),
         tokens: pt.tokens, tokensBy: pt.tokensBy,
         now: "Two lanes need a hand, the other running lanes share the desks, and the finished lanes wait in the +N list.",
         next: [{ text: "Kick the stalled CLI lane and resume the failed MCP lane", done: false }, { text: "Give the first freed desk to the waiting running lane", done: false }, { text: "Merge the finished perf pass into main", done: true }],
@@ -741,7 +756,8 @@ function demoModel() {
   return {
     plan: {
       id: DEMO_PLAN_ID, title: "Office view for codearts-build", goal: "Build the Office view for codearts-build lanes",
-      lead: "Claude Opus 5.5", status: demoDone ? "done" : "running",
+      lead: demoNeeds ? { phase: "asking" } : "Claude Opus 5.5", leadName: demoNeeds ? "Claude Opus 5.5" : undefined, status: demoDone ? "done" : "running",
+      glance: glanceFor(lanes),
       tokens: pt.tokens, tokensBy: pt.tokensBy,
       now: demoDone ? "All lanes finished; reviewing the screenshots." : demoStuck ? "The builder stalled mid-turn and the reviewer gave up; the artist is still drawing." : "Waiting for the scene and sprites lanes to finish.",
       next: [{ text: "Merge the sprites worktree into main", done: true }, { text: "Run both checks on main and look at the screenshots", done: false }, { text: "Copy the office files into the live skill runner", done: false }],
