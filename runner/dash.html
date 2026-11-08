@@ -321,6 +321,7 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .cr-old-inner { min-height: 0; overflow: hidden }
 .ca-badge.buk { gap: 5px }
 .ca-badge.buk .buk-ico { width: 13px; height: 13px }
+.ca-badge .gb { font-size: 11px; line-height: 1; margin-right: 5px }
 button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .cr-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px }
 .cr-group { display: inline-flex; border: 1px solid var(--border-2); border-radius: var(--radius-sm); overflow: hidden }
@@ -539,6 +540,18 @@ const glanceOf = (p) => { const g = p && p.glance; return (g && GLANCE[g.state])
 const glanceWord = (g) => (g && g.word) || glanceMeta(g && g.state).word;
 const glanceGlyph = (state) => glanceMeta(state).glyph;
 const glanceColor = (state) => glanceMeta(state).color;
+// The plan badge tone per glance state (status-contract part 2: working run, needs-you warn, failed bad,
+// done done, quiet warn, idle idle). Used only for the missing-field fallback and the demo fixture.
+const GLANCE_TONE = { working: 'run', 'needs-you': 'warn', failed: 'bad', done: 'done', quiet: 'warn', idle: 'idle' };
+function badgeFromGlance(g) { return g ? { word: glanceWord(g), tone: GLANCE_TONE[g.state] || 'idle', glyph: glanceGlyph(g.state) } : null; }
+// One plan badge for every plan surface. The server's plan.badge { word, tone, glyph } wins; an older
+// server or the fixture falls back to the plan's own glance, so the pill never disagrees with the banner.
+function planBadge(p) {
+  const b = (p && p.badge && p.badge.word) ? p.badge : badgeFromGlance(glanceOf(p));
+  if (!b) return CAUI.badge(CAUI.status(planState(p)));
+  const g = b.glyph ? `<span class="gb" aria-hidden="true">${esc(b.glyph)}</span>` : '';
+  return `<span class="ca-badge s-${esc(b.tone || 'idle')}" title="${esc(b.word)}">${g}${esc(b.word)}</span>`;
+}
 // Worst glance over the open plans (closed plans are skipped) by the contract priority.
 function worstOpenGlance() {
   let best = null;
@@ -753,7 +766,7 @@ function demoPlans() {
   }
   return list
     .filter((p) => !demoRemoved.has(p.id))
-    .map((p) => ({ ...p, waves: p.waves.map((w) => ({ ...w, lanes: w.lanes.filter(Boolean) })) }));
+    .map((p) => ({ ...p, badge: p.badge || badgeFromGlance(glanceOf(p)), waves: p.waves.map((w) => ({ ...w, lanes: w.lanes.filter(Boolean) })) }));
 }
 // The demo layer resolves lane ids exactly like the server: exact id, then task name, then substring.
 function demoResolve(id) {
@@ -1211,7 +1224,7 @@ function renderRail() {
   h += plans.length ? plans.map((p) => {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
-      <div class="rail-row">${p.glance ? glanceDot(p) : dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
+      <div class="rail-row">${p.glance ? glanceDot(p) : dot(st)}<span class="rail-title">${esc(p.title)}</span>${planBadge(p)}${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
@@ -1298,7 +1311,7 @@ function renderPlan(p) {
     ${glanceBannerHtml(glanceShown)}
     <div class="plan-head">
       <div class="plan-head-row"><h1>${esc(p.title)}</h1>${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
-      <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
+      <div class="plan-sub">${planBadge(p)} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
       ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
