@@ -353,7 +353,7 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .ca-notify.on { border-color: var(--sel); background: var(--sel-bg); color: var(--sel-ink) }
 .ca-notify .ca-ico { width: 15px; height: 15px }
 .ca-stale { display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255, 156, 156, 0.14); border-bottom: 1px solid var(--bad); color: var(--bad); font: 650 13px var(--font); padding: 8px 14px }
-@media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l { display: none } }
+@media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l, .ca-notify #glance-l { display: none } }
 
 /* ---------- glance: banner, rail dot, tab title and favicon ---------- */
 /* One state per plan (plan.glance), shown at a glance. Colours and breathing come from --glance,
@@ -458,7 +458,7 @@ button.btn:disabled, .crtile:disabled, .etab:disabled, .cr-gbtn:disabled, .cr-ch
     <a class="ca-tab" href="/office"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/></svg>Office</a>
     <a class="ca-tab" href="/" aria-current="page"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.5 16.5 5.5 9 9.5 1.5 5.5Z"/><path d="M1.5 9 9 13 16.5 9"/><path d="M1.5 12.5 9 16.5 16.5 12.5"/></svg>Lanes</a>
   </nav>
-  <span class="ca-top-fill"></span><span class="ca-fresh" id="fresh" aria-live="polite"></span><span class="ca-counts" id="counts">loading</span>
+  <span class="ca-top-fill"></span><span class="ca-fresh" id="fresh" aria-live="polite"></span><button type="button" class="ca-notify" id="glanceBtn" aria-pressed="true" title="Show the glance banner (press g to toggle)"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 9S4.2 4.2 9 4.2 16.4 9 16.4 9 13.8 13.8 9 13.8 1.6 9 1.6 9Z"/><circle cx="9" cy="9" r="2.1"/></svg><span id="glance-l">Glance</span></button><span class="ca-counts" id="counts">loading</span>
   <button type="button" class="ca-notify" id="notify" aria-pressed="false" title="Notify me when a lane needs me or finishes"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.2a4.3 4.3 0 0 0-4.3 4.3c0 3.1-1.2 4.2-1.2 4.2h11S13.3 9.6 13.3 6.5A4.3 4.3 0 0 0 9 2.2Z"/><path d="M7.4 14.2a1.7 1.7 0 0 0 3.2 0"/></svg><span id="notify-l">Notify off</span></button>
 </header>
 <div class="ca-stale" id="stale" role="alert" hidden></div>
@@ -619,7 +619,7 @@ function applyDocumentGlance(shown) {
 // The banner markup, shared by the plan home and the Control room. opts.link adds the plan title as a
 // link (Control room), and a working glance gets the thin done/total lanes bar.
 function glanceBannerHtml(shown, opts) {
-  if (!shown) return '';
+  if (!shown || !glanceOn) return '';
   const g = shown.glance, st = g.state;
   const word = glanceWord(g), glyph = glanceGlyph(st), col = glanceColor(st);
   let bar = '';
@@ -1788,7 +1788,7 @@ onboard: () => {
   const warns = rows.filter((r) => r.status === 'warn').length;
   return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
 }, // Glance snapshot for the check harness: the state, word and detail the current view shows, plus the tab title and the favicon URL.
-glance: () => { const s = shownGlance(); const l = document.querySelector('link[rel="icon"]'); return { state: s ? s.glance.state : null, word: s ? glanceWord(s.glance) : '', detail: s ? (s.glance.detail || '') : '', title: document.title, favicon: l ? l.href : '' }; },
+glance: () => { const s = shownGlance(); const l = document.querySelector('link[rel="icon"]'); return { state: s ? s.glance.state : null, word: s ? glanceWord(s.glance) : '', detail: s ? (s.glance.detail || '') : '', title: document.title, favicon: l ? l.href : '', glanceOn }; },
 fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; },
 // ids deleted in the fixture, for the check harness: a removed plan or lane never comes back
 removed: () => [...demoRemoved],
@@ -1832,6 +1832,16 @@ function toggleNotify() {
   const done = () => { notifyOn = Notification.permission === 'granted'; renderNotify(); if (!notifyOn) toast('Notifications are blocked in the browser', true); };
   if (Notification.permission === 'granted') done(); else { try { Notification.requestPermission().then(done).catch(done); } catch { done(); } }
 }
+// The Glance toggle: one switch that hides the glance banner on both routes (the plan pills, lane
+// statuses, tab title and favicon all stay). The choice lives in localStorage under ca.glance, the key
+// the Office page shares, so another open tab follows through the storage event.
+function renderGlanceBtn() {
+  const b = $('glanceBtn'); if (!b) return;
+  b.classList.toggle('on', glanceOn);
+  b.setAttribute('aria-pressed', String(glanceOn));
+  b.title = glanceOn ? 'Glance banner is on (press g to hide)' : 'Glance banner is hidden (press g to show)';
+}
+function toggleGlance() { glanceOn = !glanceOn; lsSet('ca.glance', glanceOn ? 'on' : 'off'); renderGlanceBtn(); viewSig = ''; refresh(true); }
 // Diff lane buckets between polls by lane id: a lane that enters attention or done once never notifies twice.
 function diffNotify() {
   if (!notifyPrimed) { notifyPrimed = true; notifyWas.clear(); for (const l of lanes) notifyWas.set(l.id, laneBucket(l)); return; }
@@ -1932,6 +1942,15 @@ document.addEventListener('input', (e) => {
 window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; entryRise = true; crPrevIds = new Set(); refresh(true); };
 syncRail();
 $('notify').onclick = toggleNotify; renderNotify(); updateFreshness();
+$('glanceBtn').onclick = toggleGlance; renderGlanceBtn();
+// The g key toggles Glance, unless the focus is in a text field so a typed g is never swallowed.
+document.addEventListener('keydown', (e) => {
+  if ((e.key !== 'g' && e.key !== 'G') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target, tag = t && t.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+  e.preventDefault(); toggleGlance();
+});
+window.addEventListener('storage', (e) => { if (e.key === 'ca.glance') { glanceOn = e.newValue !== 'off'; renderGlanceBtn(); viewSig = ''; refresh(true); } });
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
 </script>
 </body>
