@@ -1375,7 +1375,7 @@ async function cmdRm(args) {
   const l = findLane(q);
   const r = await removeLane(l, { purge: !keep, by: 'ca rm' });
   if (r.error) die(r.error, r.code || 1);
-  console.log(`removed ${r.id}; killed [${r.killed.join(', ') || '-'}]; removed ${r.removed.join(', ') || '(none)'}`);
+  console.log(`removed ${r.id}; killed [${r.killed.join(', ') || '-'}]; deleted [${r.removed.join(', ') || '(none)'}]`);
 }
 
 // ---------- engineer workflow: setup, wait, summary, init, doctor ----------
@@ -1695,7 +1695,7 @@ function openPlanFor(repo, task) {
     const p = readJSON(r.file) || {};
     if (planClosed(p) || p.removed) continue;
     const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
-    if ((p.lanes || []).some((pl) => pl && laneId(path.resolve(base, pl.repo || '.'), pl.task) === id)) return r;
+    if ((p.lanes || []).some((pl) => pl && !pl.removed && laneId(path.resolve(base, pl.repo || '.'), pl.task) === id)) return r;
   }
   return null;
 }
