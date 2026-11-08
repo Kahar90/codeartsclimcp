@@ -923,7 +923,7 @@ function sizeStage() {
     let boxX0 = 0, boxX1 = STAGE_W, boxY0 = 0, boxY1 = STAGE_H;
     if (Number.isFinite(minFootX)) {
       boxX0 = Math.max(0, minFootX - 130); boxX1 = Math.min(STAGE_W, maxFootX + 130);
-      boxY0 = Math.max(0, minFootY - 120); boxY1 = Math.min(STAGE_H, maxFootY + 80);
+      boxY0 = Math.max(0, minFootY - 110); boxY1 = Math.min(STAGE_H, maxFootY + 60);
     }
     const boxW = Math.max(1, boxX1 - boxX0), boxH = Math.max(1, boxY1 - boxY0);
     k = Math.max(kFit, Math.min(kCover, (w - 20) / boxW, (h - 20) / boxH));

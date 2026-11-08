@@ -58,22 +58,18 @@ try {
   await ev('localStorage.setItem("ca.glance","on")');
 
   // Step 1 + 2 + 3: the whole room and every station fit at each desktop size, and the sign clears them.
-  const sizes = [[1920, 945], [1536, 864], [1366, 768], [1280, 720], [2560, 1440]];
+  const sizes = [[1920, 945], [1536, 864], [1366, 768], [1280, 720], [2560, 1440], [2560, 1080]];
   for (const [w, h] of sizes) {
     await size(w, h);
     await nav(base + '/office?demo=1&still=1');
     const L = await layout();
     if (!L || !L.stage) { check(`${w}x${h}: layout hook`, false, JSON.stringify(L)); continue; }
     const covers = inside(L.stage, L.room);
-    if (w === 2560 && h === 1440) {
-      // 16:9 ultra-large: the room may still cover; if it cannot, the blurred #roomfill backs the leftover.
+    if (w / h > 2) {
+      // Ultra-wide: covering would push a station off the stage, so the blurred #roomfill backs the leftover.
       check(`${w}x${h}: room covers the stage or #roomfill shows`, covers || (await fillShown()), JSON.stringify({ room: L.room, stage: L.stage }));
-    } else if (covers) {
-      check(`${w}x${h}: room covers the stage`, true, JSON.stringify({ room: L.room, stage: L.stage }));
     } else {
-      // A stage wider than the room's 16:9 (for example 1920x945 once the header is subtracted) cannot be
-      // covered without scaling a station off the stage, so #roomfill backs the leftover, not a dark band.
-      check(`${w}x${h}: room covers the stage or #roomfill shows`, await fillShown(), JSON.stringify({ room: L.room, stage: L.stage }));
+      check(`${w}x${h}: room covers the stage (no band)`, covers, JSON.stringify({ room: L.room, stage: L.stage }));
     }
     let outCount = 0, badSprites = [], badLabels = [];
     for (const s of L.stations) {
