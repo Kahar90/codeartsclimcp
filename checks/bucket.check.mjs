@@ -8,7 +8,7 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { settle } from './lib/exit.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-bucket-'));
@@ -80,6 +80,7 @@ ca(['plan', plan]);
 // ---------- dashboard API ----------
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const dash = spawn(process.execPath, [CA, 'dash', String(port)], { stdio: 'ignore', env });
+guard({ children: [dash, sleeper] });
 const base = `http://127.0.0.1:${port}`;
 try {
   let lanes = null; for (let i = 0; i < 40 && !lanes; i++) { await new Promise((x) => setTimeout(x, 250)); try { lanes = await (await fetch(base + '/api/lanes')).json(); } catch {} }
@@ -102,5 +103,7 @@ try {
 console.log(results.join('\n'));
 const bad = results.filter((x) => x.startsWith('FAIL')).length;
 console.log(bad ? `${bad} FAILED` : `all ${results.length} passed`);
-fs.rmSync(tmp, { recursive: true, force: true });
 await settle({ children: [dash, sleeper], code: bad ? 1 : 0 });
+// Kill and await the children first: on Windows a live process still holding a file makes rmSync
+// throw EBUSY/EPERM, which is a cleanup nuisance, not a check failure.
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }
