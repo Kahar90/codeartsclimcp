@@ -205,12 +205,13 @@ const TOOLS = [
   },
   {
     name: 'ca_wait',
-    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). With any: true it returns as soon as one lane has a result (the finished lanes in lanes, the rest in running), so an early failure is seen at once when lanes run in parallel. Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
     inputSchema: {
       type: 'object',
       properties: {
         lanes: { type: 'array', items: { type: 'string' }, description: 'lane ids or task names to wait for (as in ca_status)' },
         timeout_s: { type: 'number', description: 'how long to block at most, seconds (default 45, max 55)' },
+        any: { type: 'boolean', description: 'true: return as soon as any one lane has a result (an early failure is seen at once when lanes run in parallel); the still-running lanes are listed in running' },
       },
       required: ['lanes'],
     },
@@ -487,7 +488,8 @@ async function waitResult(a) {
   const lanes = needLanes(a.lanes);
   // Capped below the ~60 s tool timeout of common MCP clients: a longer block comes back as a client error.
   const timeoutS = needCount(a.timeout_s, 'timeout_s', 45, 55);
-  const r = await runCli(['wait', ...lanes, '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
+  const any = a.any === true;
+  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
   if (![0, 1, 3, 4, 5, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();
