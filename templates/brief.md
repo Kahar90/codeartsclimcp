@@ -2,7 +2,8 @@ MODEL: maas/deepseek-v4.1-flash   (optional line: build model for this lane; REV
 You are working in a git repo (current directory). <one sentence goal, the files to touch, the stack>.
 Do the steps in order. After each step that works, run its checks, then
 `git add -A && git commit -m "step N: <summary>"` (N = the step number; the dashboard tracks
-progress from it). Do not ask questions; decide and keep going.
+progress from it). Do not ask questions; decide and keep going. Follow this brief directly; do not write another plan
+or restate the requirements. Read only relevant code and keep tool output focused.
 
 1. <step: exact behaviour, file names>. Commit.
 2. <step>. Commit.
