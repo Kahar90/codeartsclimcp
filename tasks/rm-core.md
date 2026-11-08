@@ -3,6 +3,8 @@ Goal: add a clean delete for lanes and plans. Deleting kills every process of th
 and codearts server), unregisters it and purges its lane logs, so nothing is left running or tracked.
 It must work from the CLI, the dashboard HTTP API and MCP. Another lane builds the UI buttons
 against the API contract in step 4; keep that contract exact.
+NOTE: runner/ca.mjs already holds an uncommitted draft of step 1 from an earlier run (see `git diff`).
+Review it, finish step 1 and commit it as step 1. Git works normally in this folder.
 Do the steps in order. After each step that works, run its checks, then
 `git add -A && git commit -m "step N: <summary>"` (N = the step number; the dashboard tracks
 progress from it). Do not ask questions; decide and keep going.
