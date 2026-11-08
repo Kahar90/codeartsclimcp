@@ -277,11 +277,11 @@ body.no-motion #glanceGlow[data-state="needs-you"], body.no-motion #glanceGlow[d
 #glanceSign[data-state="done"] { --gs: #6ee7a0; }
 #glanceSign[data-state="quiet"] { --gs: #ffb547; }
 #glanceSign[data-state="idle"] { --gs: #9a93a8; }
-#glanceSign .gs-board { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 26px 11px; background: linear-gradient(180deg, #4a3421, #2a1c11); border: 3px solid #140d07; border-radius: 3px; box-shadow: inset 0 0 0 2px #6b4b2b, 0 8px 20px rgba(0, 0, 0, .55); }
+#glanceSign .gs-board { position: relative; box-sizing: border-box; max-width: min(600px, 76vw); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 26px 11px; background: linear-gradient(180deg, #4a3421, #2a1c11); border: 3px solid #140d07; border-radius: 3px; box-shadow: inset 0 0 0 2px #6b4b2b, 0 8px 20px rgba(0, 0, 0, .55); }
 #glanceSign .gs-board::before, #glanceSign .gs-board::after { content: ""; position: absolute; top: -14px; width: 4px; height: 14px; background: #6b4b2b; }
 #glanceSign .gs-board::before { left: 24px; }
 #glanceSign .gs-board::after { right: 24px; }
-#glanceSign .gs-main { display: flex; align-items: center; gap: 12px; line-height: 1; font-size: var(--gs-word, 44px); }
+#glanceSign .gs-main { display: flex; align-items: center; gap: 12px; line-height: 1; font-size: var(--gs-word, 44px); white-space: nowrap; }
 #glanceSign .gs-glyph, #glanceSign .gs-word { color: var(--gs); text-shadow: 0 0 6px var(--gs), 0 0 16px var(--gs); }
 #glanceSign .gs-glyph { font-weight: 800; }
 #glanceSign .gs-word { font-weight: 800; font-family: var(--font-display); letter-spacing: .01em; }
