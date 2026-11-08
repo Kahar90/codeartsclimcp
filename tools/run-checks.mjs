@@ -14,6 +14,15 @@ const files = fs.readdirSync(path.join(ROOT, 'checks'))
 const onCI = process.env.GITHUB_ACTIONS === 'true';
 const failed = [];
 
+if (!files.length) {
+  const msg = filter
+    ? `checks: no check files match "${filter}"`
+    : 'checks: no checks/*.check.mjs files discovered';
+  console.log(msg);
+  if (onCI) console.log(`::error title=run-checks::${msg}`);
+  process.exit(1);
+}
+
 for (const file of files) {
   console.log(`== ${file}`);
   const r = spawnSync(process.execPath, [path.join('checks', file)], { cwd: ROOT, env: process.env, encoding: 'utf8' });

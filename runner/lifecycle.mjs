@@ -127,13 +127,19 @@ export async function uninstall(args) {
   return 0;
 }
 
-// The install command: CA_UPDATE_CMD when set (a shell command line, used by the checks); else a
-// git pull when the package root is a checkout, else a fresh global install from GitHub.
-export function installCommand() {
-  if (process.env.CA_UPDATE_CMD) return process.env.CA_UPDATE_CMD;
-  const root = path.resolve(HERE, '..');
-  if (fs.existsSync(path.join(root, '.git'))) return `git -C ${root} pull --ff-only`;
-  return 'npm install -g github:Kahar90/codeartsclimcp';
+// The install command line, for display only (the dashboard pill and the update cache): CA_UPDATE_CMD
+// when set, else a git pull when the package root is a checkout, else a fresh global install.
+export function installCommand() { return updateInvocation().cmd; }
+
+// How to actually run the install. A git checkout runs as a structured argv with shell:false so a
+// path with spaces or shell metacharacters is one literal argument to `git -C` (ca.mjs runs the same
+// way: args through an argv array, never a shell). CA_UPDATE_CMD stays a deliberate shell line (the
+// checks and users override with a whole command), and the npm fallback has no user path to inject.
+export function updateInvocation(root = path.resolve(HERE, '..')) {
+  if (process.env.CA_UPDATE_CMD) return { cmd: process.env.CA_UPDATE_CMD, file: process.env.CA_UPDATE_CMD, args: [], shell: true };
+  if (fs.existsSync(path.join(root, '.git'))) return { cmd: `git -C ${root} pull --ff-only`, file: 'git', args: ['-C', root, 'pull', '--ff-only'], shell: false };
+  const cmd = 'npm install -g github:Kahar90/codeartsclimcp';
+  return { cmd, file: cmd, args: [], shell: true };
 }
 
 // Compare two x.y.z versions (optional leading "v", missing parts are 0): -1, 0 or 1.
@@ -231,7 +237,8 @@ export async function update(args) {
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const dry = flags.has('--dry-run');
   const asJson = flags.has('--json');
-  const cmd = installCommand();
+  const inv = updateInvocation();
+  const cmd = inv.cmd;
   const harnesses = Object.keys(readManifest().harnesses);
 
   if (flags.has('--check')) {
@@ -254,7 +261,7 @@ export async function update(args) {
     return 0;
   }
 
-  const r = spawnSync(cmd, { shell: true, stdio: asJson ? ['ignore', 'pipe', 'pipe'] : 'inherit', encoding: 'utf8', windowsHide: true, timeout: 600000 });
+  const r = spawnSync(inv.file, inv.args, { shell: inv.shell, stdio: asJson ? ['ignore', 'pipe', 'pipe'] : 'inherit', encoding: 'utf8', windowsHide: true, timeout: 600000 });
   if (r.status !== 0) {
     process.stdout.write(`update failed: ${cmd} exited ${r.status ?? '?'}\n`);
     process.exitCode = 1;
@@ -262,8 +269,16 @@ export async function update(args) {
   }
 
   const refreshed = [];
+  const failed = [];
+  const firstLine = (t) => String(t || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0] || '';
   for (const h of harnesses) {
     const s = spawnSync(process.execPath, [CA_MJS, 'setup', h, STATE_DIR, '--user'], { encoding: 'utf8', windowsHide: true, timeout: 60000 });
+    if (s.error || s.status !== 0) {
+      const detail = (s.error && (s.error.message || String(s.error))) || firstLine(s.stderr) || firstLine(s.stdout) || `exited ${s.status == null ? 'unknown' : s.status}`;
+      failed.push({ harness: h, error: detail });
+      refreshed.push(`${h}: failed (${detail})`);
+      continue;
+    }
     const acted = (s.stdout || '').split(/\r?\n/).filter((l) => /^(wrote|updated) /.test(l));
     refreshed.push(`${h}: ${acted.length ? acted.join(', ') : 'unchanged'}`);
   }
@@ -271,12 +286,14 @@ export async function update(args) {
   // notice turns off at once instead of after the old cache expires.
   const installed = currentVersion();
   writeUpdateCache({ current: installed, latest: installed, available: false, notes: [], cmd, checkedAt: Date.now() });
-  if (asJson) process.stdout.write(JSON.stringify({ cmd, refreshed, restart: true }, null, 2) + '\n');
+  if (asJson) process.stdout.write(JSON.stringify({ cmd, refreshed, failed, restart: true }, null, 2) + '\n');
   else {
     process.stdout.write(`updated via: ${cmd}\n`);
     for (const line of refreshed) process.stdout.write(line + '\n');
+    for (const f of failed) process.stdout.write(`could not refresh harness ${f.harness}: ${f.error}\n`);
     process.stdout.write('Restart your agent (or its MCP server) and any open dashboard so they load the new version.\n');
   }
+  if (failed.length) { process.exitCode = 1; return 1; }
   return 0;
 }
 
