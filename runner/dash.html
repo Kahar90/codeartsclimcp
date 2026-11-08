@@ -1079,13 +1079,13 @@ function laneBadge(l) {
 function laneStepsCard(l) {
   const mode = laneStepsMode(l), p = l.progress || {}, n = p.total || 0;
   if (mode === 'hide') return '';
-  if (mode === 'complete') return `<div class="lane-steps"><span>${laneGlyphOf(l)} ${n}/${n} steps</span>${prog(p, l.result)}</div>`;
+  if (mode === 'complete') return `<div class="lane-steps"><span>${esc(laneGlyphOf(l))} ${n ? `${n}/${n} steps` : 'finished'}</span>${prog({ done: 1, total: 1 }, l.result)}</div>`;
   return `<div class="lane-steps"><span>${n ? `${p.done || 0}/${n} steps` : 'no numbered steps'}</span>${prog(p, l.result)}</div>`;
 }
 function laneStepsFoot(l) {
   const mode = laneStepsMode(l), p = l.progress || {}, n = p.total || 0;
   if (mode === 'hide') return '';
-  if (mode === 'complete') return `${prog(p, l.result)}<span class="cr-meta">${laneGlyphOf(l)} ${n}/${n} steps</span>`;
+  if (mode === 'complete') return `${prog({ done: 1, total: 1 }, l.result)}<span class="cr-meta">${esc(laneGlyphOf(l))} ${n ? `${n}/${n} steps` : 'finished'}</span>`;
   return `${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${n} steps</span>`;
 }
 // Small localStorage helpers: a remembered control room never throws on a locked-down browser.
@@ -1317,7 +1317,7 @@ function curBand(l) {
   if (l.health === 'planned') return `<div class="curband"><span class="lbl">${esc(CAUI.laneStatus(l).label)}</span><div class="t2">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>${chips}</div>`;
   const st = CAUI.laneStatus(l);
   const tail = [l.verdict ? 'review: ' + l.verdict : '', st.reason || l.reason].filter(Boolean).join(' · ');
-  return `<div class="curband"><span class="lbl">${esc(st.label)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
+  return `<div class="curband"><span class="lbl">${esc(laneGlyphOf(l))} ${esc(st.label)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
 }
 const stepIc = (s, running) => s.state === 'done' ? '&#10003;' : s.state === 'current' ? (running ? '<span class="step-spin" aria-hidden="true"></span>' : '&#9654;') : '&#9675;';
 const stepLi = (s, running) => `<li class="st-${s.state}"><span class="n">${s.n}</span><span class="ic">${stepIc(s, running)}</span><span class="txt">${md(s.text)}${s.commit ? ` <code>${esc(s.commit)}</code>` : ''}</span></li>`;
