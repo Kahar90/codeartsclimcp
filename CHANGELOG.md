@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2 (2026-11-08)
+
+Updates
+- Office uses a wider room (a panorama with more wall, windows and stairs at the sides), so wide
+  screens are filled edge to edge without zooming in: 1280x800, 1920x945 and 2560x1080 all show the
+  whole working area with no band. Stations, hot desks and the ceiling lamp glow were re-placed on the
+  new art; the lamp position now comes from scene.json.
+- Phones show a taller room: the narrow layout crops the outer walls to the stations instead of
+  shrinking the whole panorama into a thin strip.
+
 ## 0.5.1 (2026-11-08)
 
 Updates
