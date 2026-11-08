@@ -289,8 +289,12 @@ try {
   let up2 = false; for (let i = 0; i < 40 && !up2; i++) { await wait(250); try { up2 = (await fetch(`http://127.0.0.1:${dash2Port}/api/lanes`)).ok; } catch {} }
   await send('Page.navigate', { url: `http://127.0.0.1:${dash2Port}/` }); await wait(1800);
   check('/ without demo and an empty registry shows the onboarding panel', up2 && (await ev('!!document.getElementById("onboard")')) === true, `up=${up2}`);
-  // the first-run test hook: the panel state, the setup prompt and the manual command
-  const onb = await ev('window.__lanes.onboard && window.__lanes.onboard()');
+  // the first-run test hook: the panel state, the setup prompt and the manual command.
+  // The panel paints at once with "checking this machine..." and fills its rows in when
+  // /api/doctor answers (it runs `codearts --version` and a few probes), so poll for the rows
+  // instead of sampling once: a fixed wait races the doctor on a slower machine.
+  let onb = null;
+  for (let i = 0; i < 40; i++) { onb = await ev('window.__lanes.onboard && window.__lanes.onboard()'); if (onb && Array.isArray(onb.rows) && onb.rows.length >= 5) break; await wait(250); }
   check('the onboard hook reports the panel', !!onb && onb.shown === true, JSON.stringify(onb && { shown: onb.shown, fails: onb.fails, warns: onb.warns }));
   check('the onboard hook exposes the setup prompt with INSTALL.md', !!onb && typeof onb.prompt === 'string' && onb.prompt.includes('INSTALL.md'), onb && onb.prompt);
   check('the onboard hook lists every doctor row with a status', !!onb && Array.isArray(onb.rows) && onb.rows.length >= 5 && onb.rows.every((r) => r.name && ['ok', 'warn', 'fail'].includes(r.status)), JSON.stringify(onb && onb.rows));
