@@ -8,7 +8,7 @@ what runs is the global install at `npm root -g`/codearts-lanes, not this checko
 ## Ship every feature to ourselves (required)
 A feature is not finished until the installed copy runs it:
 1. Merge into main, run the checks below on main.
-2. Bump `package.json` version (patch) and add a `CHANGELOG.md` section, commit.
+2. `node tools/release.mjs <next version>`, fill the new `CHANGELOG.md` section, commit.
 3. With no lane running: `node scripts/install-local.mjs` (packs main, installs it globally, reruns
    `ca setup` for every harness, restarts the dashboard). Then reconnect the MCP server (`/mcp`).
 4. Push main to origin when the human has asked for it.

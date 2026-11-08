@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 (2026-11-08)
+
+Updates
+- Glance status: every plan has one state (Working, Needs you, Failed, Done, Check Claude) readable from
+  across the room. The Office view hangs a pixel sign over the back wall, lights the room edges in the
+  state color and gives the lead a speech bubble; the Lanes view shows a banner, rail dots and the
+  worst open plan on the Control room. Both set the tab title and favicon; Notify also fires on plan
+  Done, Needs you and Failed.
+- New lead phase `asking`: the lead posts it before ending a turn with a question, so the dashboard
+  shows Needs you. A plan with no lead update for 15 minutes and nothing running reads Check Claude.
+- `ca doctor` has a `repo writable` row: it writes a probe file and a git lock through the worker shell,
+  catching Windows Controlled Folder Access and sandbox ACLs before any lane starts.
+- A lane whose repo cannot be written fails at once (`repo not writable`) instead of spending fix rounds.
+- `ca wait --any` (MCP `any: true`) returns when the first lane ends.
+- `scripts/install-local.mjs` installs this checkout's committed code globally and restarts the dashboard.
+
 ## 0.3.0 (2026-11-08)
 
 Updates
