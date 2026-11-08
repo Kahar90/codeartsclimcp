@@ -494,7 +494,7 @@ const D_HASHES = ['e3f1c2a', 'b7d94ce', 'c5a83f1', 'd9274ab', 'a6b5e90'];
 function dTok(input, output, extra) { const t = Object.assign({ input: input || 0, output: output || 0, reasoning: 0, cacheRead: 0, steps: 1 }, extra || {}); t.total = t.input + t.output + t.reasoning + t.cacheRead; return t; }
 function dTokAdd(list) { const s = (k) => list.reduce((a, x) => a + ((x && x[k]) || 0), 0); return dTok(s('input'), s('output'), { reasoning: s('reasoning'), cacheRead: s('cacheRead'), steps: s('steps') }); }
 function dTokBy(build, review, other) { const by = { build, review, other }; return { tokens: dTokAdd([build, review, other]), tokensBy: by }; }
-function planTokSum(lanes) { const list = lanes.map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
+function planTokSum(lanes) { const list = lanes.filter(Boolean).map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
 const D_RUN_ACTIONS = ['steer', 'stop', 'attach', 'kick', 'fresh', 'restart-server'];
 const demoControls = []; // fixture log of kick/resume POSTs, read by the check harness
 const demoRemoved = new Set(); // ids deleted in the fixture: a removed plan or lane never comes back
@@ -1327,7 +1327,9 @@ async function deletePlan(id) {
   plans = plans.filter((x) => x.id !== id);
   if (gone.size) lanes = lanes.filter((l) => !gone.has(l.id));
   toast(`Deleted plan ${title}`);
-  if (route.kind === 'plan' && route.id === id) go('/'); else refresh(true);
+  if (route.kind === 'plan' && route.id === id) { go('/'); return; }
+  renderRail();
+  refresh(true);
 }
 async function deleteLane(id) {
   const l = lanes.find((x) => x.id === id) || (detail && detail.id === id ? detail : null);
@@ -1340,7 +1342,9 @@ async function deleteLane(id) {
   lanes = lanes.filter((x) => x.id !== id);
   for (const p of plans) for (const w of p.waves) w.lanes = w.lanes.filter((x) => x.id !== id);
   toast(`Deleted lane ${task}`);
-  if (route.kind === 'lane' && route.id === id) go('/'); else refresh(true);
+  if (route.kind === 'lane' && route.id === id) { go('/'); return; }
+  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } }
+  refresh(true);
 }
 
 // First-run onboarding panel: shown only while there are no plans and no lanes yet.
