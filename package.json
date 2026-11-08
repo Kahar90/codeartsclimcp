@@ -1,6 +1,6 @@
 {
   "name": "codearts-lanes",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "description": "CodeArts lanes runner: supervise private CodeArts coding lanes from any agent harness",
   "bin": {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1 (2026-11-08)
+
+Updates
+- Office fills the stage: no more dark bands beside the room. The room is scaled to cover the whole
+  stage as far as every station sprite and nameplate stays in view, which fully covers 16:9 desktop
+  screens; on ultra-wide screens the leftover area shows a blurred, dimmed copy of the room instead of
+  a flat dark band. The narrow (phone, portrait tablet) layout is unchanged.
+
 ## 0.5.0 (2026-11-08)
 
 Updates
