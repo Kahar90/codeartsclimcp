@@ -1339,6 +1339,31 @@ async function removeLane(l, { purge = true, by = 'ca rm' } = {}) {
   } catch (err) { return { error: String((err && err.message) || err), code: 500 }; }
 }
 
+// Delete a plan for good: remove every lane it lists that is still registered (killing its
+// processes and dropping its logs), then mark the plan file closed and removed and unregister it.
+// The plan.json file is kept (marked removed), so a later lane start never resurrects it.
+async function removePlan(r, { by = 'ca plan rm' } = {}) {
+  if (!r || !r.id) return { error: 'no plan given', code: 400 };
+  try {
+    const snapshot = readJSON(r.file) || {};
+    const base = path.resolve(path.dirname(r.file), '..', snapshot.repo || '.');
+    const reg = new Map(lanes().map((l) => [l.id, l]));
+    const wanted = (snapshot.lanes || []).filter(Boolean).map((pl) => laneId(path.resolve(base, pl.repo || '.'), pl.task));
+    const laneIds = []; const killed = [];
+    for (const id of wanted) {
+      const l = reg.get(id); if (!l) continue;
+      const res = await removeLane(l, { by });
+      if (res && res.ok) { laneIds.push(id); killed.push(...(res.killed || [])); }
+    }
+    const p = readJSON(r.file) || snapshot;
+    p.status = 'closed'; p.removed = true; p.now = `Deleted from the ${by}`;
+    (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Plan ${r.id} deleted from the ${by}` });
+    try { fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n'); } catch {}
+    try { fs.rmSync(path.join(PLANS, `${r.id}.json`), { force: true }); } catch {}
+    return { ok: true, id: r.id, lanes: laneIds, killed };
+  } catch (err) { return { error: String((err && err.message) || err), code: 500 }; }
+}
+
 // ---------- engineer workflow: setup, wait, summary, init, doctor ----------
 async function cmdSetup(args) {
   const f = path.join(HERE, 'setup.mjs');
@@ -1610,8 +1635,12 @@ function ensurePlan(repo, task, briefText) {
       if (fs.existsSync(dest)) {
         const oldId = planId(planFile); const newId = `${oldId}~${stamp}`;
         try { fs.rmSync(path.join(PLANS, `${oldId}.json`), { force: true }); } catch {}
-        fs.mkdirSync(PLANS, { recursive: true });
-        fs.writeFileSync(path.join(PLANS, `${newId}.json`), JSON.stringify({ id: newId, file: dest }, null, 2));
+        // A deleted plan (removed: true) is archived for the record but never registered again,
+        // so a new lane can never bring a removed plan back to the dashboard.
+        if (!cur.removed) {
+          fs.mkdirSync(PLANS, { recursive: true });
+          fs.writeFileSync(path.join(PLANS, `${newId}.json`), JSON.stringify({ id: newId, file: dest }, null, 2));
+        }
       }
     }
     const plan = { title: goal, goal, lead: process.env.CA_LEAD || 'lead', status: 'running', now: '',
@@ -1632,6 +1661,8 @@ function laneAlreadyPlanned(repo, task) {
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
   return files.map((f) => readJSON(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
+    // A plan whose file is marked removed: true was deleted: never list it again.
+    .filter((r) => { const p = readJSON(r.file); return !(p && p.removed === true); })
     .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
 }
 // ca plan [file] registers; ca plan list | close [id] [--reason t] | rm <id> manage registered plans.
