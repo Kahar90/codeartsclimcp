@@ -2,8 +2,8 @@
   "title": "Office fit: less zoom, still no black bars",
   "goal": "On wide desktop screens the Office room is not zoomed in so far that the walls and windows are cut off, and no dark band shows beside it.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "Waiting for the human's widened workshop.png (2120x941, original centred)",
+  "status": "done",
+  "now": "Closed: Lead wired the human's wider art directly (station placement needed visual measurement); all checks pass; 0.5.2 installed. office-zoom lane not needed.",
   "waves": [
     {
       "name": "Wave 1",
@@ -21,7 +21,8 @@
       "files": [
         "runner/office.html",
         "checks/officefit.check.mjs"
-      ]
+      ],
+      "dropped": true
     }
   ],
   "next": [
@@ -29,7 +30,12 @@
     "office-zoom lane: stage size, station and lamp offsets, fit for the wider art",
     "verify at 1920x945, release, install-local"
   ],
-  "decisions": [],
+  "decisions": [
+    {
+      "at": "2026-11-08T15:37:51.814Z",
+      "text": "Plan closed: Lead wired the human's wider art directly (station placement needed visual measurement); all checks pass; 0.5.2 installed. office-zoom lane not needed.. Dropped, never started: office-zoom."
+    }
+  ],
   "risks": [
     "Outpainted edges may not match the original style; check the seams at x=224 and x=1896"
   ],
