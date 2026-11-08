@@ -2131,6 +2131,8 @@ $("planMenu").addEventListener("mousemove", (e) => {
 });
 $("planMenu").addEventListener("keydown", (e) => {
   const n = $("planSel").options.length;
+  // A focused Delete button owns Enter/Space: skip the pick so its own click fires (delete, not pickPlan).
+  if ((e.key === "Enter" || e.key === " ") && e.target.closest && e.target.closest("[data-pm-del]")) return;
   if (e.key === "Escape") { e.preventDefault(); closePlanMenu(true); return; }
   if (e.key === "Tab") { closePlanMenu(); return; }
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickPlan(planMenuActive); return; }
