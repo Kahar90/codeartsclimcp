@@ -14,6 +14,11 @@ A feature is not finished until the installed copy runs it:
 4. Push main to origin when the human has asked for it.
 
 ## Before starting lanes
+- Parallel lanes run in local clones, never `git worktree add`: a worktree's git dir lives in the main repo's
+  `.git/worktrees/`, outside the lane folder the CodeArts sandbox confines the worker to, so its commits fail with
+  `Unable to create .../index.lock: Permission denied`. Use `ca workspace <repo> <task>` (or
+  `git clone --local --no-hardlinks <repo> ../<repo>-wt-<task>` + `git checkout -b lane/<task>`), and merge back
+  with `ca workspace --land` (or `git fetch <clone> lane/<task>` + `git merge --no-ff FETCH_HEAD`).
 - `ca doctor <worktree>` must have no `fail` row (the `repo writable` row catches Windows Controlled
   Folder Access and sandbox ACLs that block git and node in Documents).
 - Wait with `ca wait --any` (MCP `any: true`) and check that each lane has commits within minutes.
