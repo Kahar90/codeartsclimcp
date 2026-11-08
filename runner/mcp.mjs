@@ -452,9 +452,9 @@ function lastJsonObject(s) {
 // ca_wait: exit codes 0, 1, 3, 4, 5 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
 const WAIT_NEXT = {
   0: 'read ca_summary for each lane and verify the work',
-  1: 'read ca_summary; ca_resume continues a failed or stopped lane with a note',
+  1: 'read ca_summary; ca_resume continues a failed, stopped or checks-failing lane with a note',
   3: 'keys missing or rejected: ask the human to run ca auth (a local form opens; never ask for keys in chat), then ca_resume the lane',
-  4: 'read ca_summary: the reviewer asked for changes',
+  4: 'read ca_summary: the reviewer asked for changes, or the checks could not run (unverified)',
   5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
   124: 'still running: call ca_wait again',
 };

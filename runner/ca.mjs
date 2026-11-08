@@ -62,9 +62,9 @@
 //        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
 //        CA_MAX_LANES_PER_MODEL=maas/glm-5.3=2,default=4 (cap lanes per build model; glm 3,
 //        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
-//        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
-//        lane, 3 missing credentials, 4 needs review, 5 paused at LANE_TIMEOUT (resume with --resume),
-//        124 wait timeout.
+//        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed or checks failing,
+//        2 usage or unknown lane, 3 missing credentials, 4 needs review or unverified (a check
+//        could not run), 5 paused at LANE_TIMEOUT (resume with --resume), 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,7 +75,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
-import { laneActions, laneBucket, laneKind } from './controls.mjs';
+import { laneActions, laneBucket, laneKind, classifyCheck } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
 import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
@@ -802,10 +802,18 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
     for (const c of checks) {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
-      const r = await runCheck(c);
+      let r = await runCheck(c);
+      let kind = classifyCheck({ code: r.code, out: r.out });
+      // An infra failure is the machine, not the work: rerun that one check once, 3 s later, before
+      // deciding. A check that cannot run (missing tool, sandbox, timeout) never starts a fix round.
+      if (kind === 'infra') {
+        L(`== gate check could not run (exit ${r.code}); retrying once in 3 s`); await sleep(3000);
+        r = await runCheck(c); kind = classifyCheck({ code: r.code, out: r.out });
+      }
       const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
-      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, ms: r.ms }); save(true);
-      if (r.code !== 0) { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: `check failed: ${c}`, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check, and commit the fix.` }; }
+      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
+      if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check, and commit the fix.` }; }
       L(`== gate check ok (${dur(r.ms)})`);
     }
     return { ok: true };
@@ -837,7 +845,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   };
 
   // ---- run ----
-  let exitCode = 1, reason = '', review = null;
+  let exitCode = 1, reason = '', review = null, forcedResult = '';
   server.events(onEvent, (up) => { S.sse = up; }).catch(() => {});
   try {
     say(`lane ${id}: starting codearts server in ${repo}`);
@@ -879,14 +887,22 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('gate', 'running gates');
       const g = await gates();
       if (g.ok) { reason = ''; exitCode = 0; break; }
-      if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+      // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
+      // repair the machine), but a human must look, so exit 4 like needs review.
+      if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
+      if (++S.fixes > CFG.fixes) {
+        if (g.code !== undefined) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; }
+        else reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`;
+        exitCode = 1; break;
+      }
       say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
       phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
     }
     syncCommits();
 
-    // REVIEW (read-only plan agent, different model)
-    if (exitCode === 0 && !CFG.noReview) {
+    // REVIEW (read-only plan agent, different model). It reads code, not checks, so it still runs
+    // when the checks could not run (unverified): a reviewer asking for fixes wins over it.
+    if ((exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
       const rf = path.join(repo, 'tasks', `${task}.review.md`);
       const rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
         : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
@@ -895,7 +911,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('review', 'reviewing'); L(`== review (${REVIEW}, read-only plan agent) session ${rsid}`);
       await send(rsid, rb, REVIEW, 'plan');
       const rr = await drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
-      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; if (rr.keys) S.keysMessage = rr.keys; }
+      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
       let text = '';
       try {
         const msgs = await server.api('GET', `/session/${rr.sid}/message`);
@@ -912,6 +928,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       review = text;
     }
   } catch (err) {
+    forcedResult = '';
     if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
     else if (err && err.caStop) { reason = 'stopped'; exitCode = 1; L('== stopped while queued for a model slot'); }
     else { reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`); }
@@ -920,8 +937,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // ---- summary ----
   syncCommits();
   // A lane that reaches LANE_TIMEOUT is paused, not failed: the safeguard worked and `--resume` continues it in place.
-  S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done') : (reason === 'stopped' ? 'stopped' : reason === 'timeout' ? 'paused' : 'failed');
-  const finalExit = S.result === 'needs review' ? 4 : S.result === 'paused' ? 5 : exitCode;
+  S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done')
+    : forcedResult === 'unverified' && exitCode === 4 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'unverified')
+    : (forcedResult || (reason === 'stopped' ? 'stopped' : reason === 'timeout' ? 'paused' : 'failed'));
+  const finalExit = S.result === 'needs review' ? 4 : S.result === 'paused' ? 5 : S.result === 'unverified' ? 4 : S.result === 'checks failing' ? 1 : exitCode;
   S.reason = reason; S.exitCode = finalExit; S.phase = 'finished'; S.activity = S.result; S.busy = false; S.finishedAt = now();
   const log = git(repo, 'log', '--oneline', `${START}..HEAD`);
   const left = dirty();
@@ -944,6 +963,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ...(S.errors.length ? [`errors: ${S.errors.slice(-3).map((x) => x.msg).join(' / ')}`] : []),
     '--- review ---', reviewBody || '(no review)', `VERDICT: ${S.verdict || 'none'}`,
     ...(S.result === 'paused' ? [`paused at the time limit (LANE_TIMEOUT ${CFG.laneTimeout}s). Continue in place: ca lane ${repo} ${task} --resume   (optional lead notes: tasks/${task}.resume.md)`] : []),
+    ...(S.result === 'unverified' ? [`checks could not run (a machine problem, not a test failure): fix the environment, then rerun them. ca resume ${id}`] : []),
+    ...(S.result === 'checks failing' ? [`a check still fails after ${S.fixes} fix rounds. Fix it or resume for another round: ca resume ${id}`] : []),
     `files: ${dir} (live.log, review.md, events.jsonl)`,
   ].join('\n');
   fs.writeFileSync(path.join(dir, 'summary.md'), md + '\n');
@@ -1418,6 +1439,7 @@ async function cmdOnboard(args) {
 function laneExit(s) {
   if (s.result === 'done') return !s.verdict || s.verdict === 'ready' ? 0 : 4;
   if (s.result === 'needs review') return 4;
+  if (s.result === 'unverified') return 4;
   if (resultOf(s) === 'paused') return 5;
   if (s.result === 'failed' && s.exitCode === 3) return 3;
   return 1;
