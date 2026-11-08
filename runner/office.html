@@ -72,7 +72,9 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 .hc-bar span { height: 100%; }
 .hc-note { margin-top: 8px; color: var(--faint); font-size: 12px; }
 #stagewrap { flex: 1; min-height: 420px; background: var(--stage); display: flex; align-items: center; justify-content: center; }
-#stage { position: relative; overflow: hidden; background: var(--stage); }
+/* The room is letterboxed inside the stage on desktop, so the leftover band must blend with the room:
+   the dark plum shell colour with a soft vignette and no hard edge. */
+#stage { position: relative; overflow: hidden; background: radial-gradient(140% 130% at 50% 42%, #2a2233 0%, #1d1727 55%, #120e19 100%); }
 #room { position: absolute; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
 #sprites { position: absolute; inset: 0; pointer-events: none; z-index: 1; } /* own stacking context: depth-sorted sprite z values never rise above plates */
 #sprites .px-sprite { position: absolute; }
@@ -92,6 +94,10 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 .plate.compact .p-name { font-size: 12px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
 .plate.compact .p-sub { font-size: 10.5px; max-width: 152px; overflow: hidden; text-overflow: ellipsis; }
 .plate.compact .p-badge { right: -6px; top: -6px; width: 15px; height: 15px; font: 700 10px/15px var(--font); }
+/* One truth: a needs-you plate is loud, a settled lane calms down, so a label never contradicts the sign. */
+#plates .plate[data-tone="attn"] { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(255, 181, 71, .28), 0 3px 10px rgba(0, 0, 0, .4); }
+#plates .plate[data-tone="done"] { border-color: var(--run); }
+#plates .plate[data-tone="idle"] { opacity: .85; }
 #overflow { position: absolute; right: 10px; bottom: 10px; z-index: 6; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #overflow[hidden] { display: none; }
 .empty-card { position: absolute; left: 50%; top: 58%; transform: translate(-50%, -50%); z-index: 7; width: min(360px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; background: rgba(35, 29, 44, .92); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, .5); text-align: center; animation: ca-rise var(--dur-3) var(--ease-out); backdrop-filter: blur(4px); }
@@ -298,6 +304,15 @@ body.narrow #glanceSign .gs-detail { font-size: 11px; max-width: none; }
 #glanceBubble::after { content: ""; position: absolute; left: 50%; margin-left: -6px; bottom: -9px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #140d07; }
 @keyframes glance-spark-fly { 0% { opacity: 0; transform: translate(0, 0) scale(.5); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--sx, 0), var(--sy, 0)) scale(.4); } }
 .glance-spark { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 1px; z-index: 5; pointer-events: none; image-rendering: pixelated; animation: glance-spark-fly 1s ease-out forwards; }
+/* Step 4: the top-bar glance toggle, styled like the view tabs it sits beside. */
+.ca-glance-tog { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-2); background: transparent; color: var(--muted); font-weight: 600; font-size: 14px; cursor: pointer; transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+.ca-glance-tog:hover { color: var(--fg); border-color: var(--sel); }
+.ca-glance-tog:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
+.ca-glance-tog[aria-pressed="true"] { color: var(--fg); border-color: var(--sel); }
+.ca-glance-tog .cgt-state { font-size: 12px; font-weight: 700; letter-spacing: .02em; color: var(--faint); }
+.ca-glance-tog[aria-pressed="true"] .cgt-state { color: var(--run); }
+body.narrow .ca-glance-tog { padding: 0 9px; gap: 0; }
+body.narrow .ca-glance-tog .cgt-word, body.narrow .ca-glance-tog .cgt-state { display: none; }
 </style>
 </head>
 <body>
@@ -307,7 +322,7 @@ body.narrow #glanceSign .gs-detail { font-size: 11px; max-width: none; }
     <a class="ca-tab" href="/office" aria-current="page"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 2h5v5H2zM11 2h5v5h-5zM2 11h5v5H2zM11 11h5v5h-5z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Office</a>
     <a class="ca-tab" href="/"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2 16 6 9 10 2 6ZM2 10.5l7 4 7-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Lanes</a>
   </nav>
-  <span class="ca-top-fill"></span><a class="needs-pill" id="needsPill" href="/#/" title="Lanes that need you: open the Control room" hidden><span class="np-word">Needs you</span><span class="np-mark" aria-hidden="true">!</span> <b id="needsPillN">0</b></a><span class="ca-counts" id="counts"></span>
+  <span class="ca-top-fill"></span><button type="button" class="ca-glance-tog" id="glanceToggle" aria-pressed="true" title="Show the glance sign, room edge glow and lead bubble (g)"><svg class="ca-ico" viewBox="0 0 18 18" aria-hidden="true"><path d="M1.5 9s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5S1.5 9 1.5 9Z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="9" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span class="cgt-word">Glance</span><span class="cgt-state" id="glanceToggleState">On</span></button><a class="needs-pill" id="needsPill" href="/#/" title="Lanes that need you: open the Control room" hidden><span class="np-word">Needs you</span><span class="np-mark" aria-hidden="true">!</span> <b id="needsPillN">0</b></a><span class="ca-counts" id="counts"></span>
 </header>
 <div class="runstrip" id="runstrip">
   <span class="ptitle" id="planTitle"></span>
@@ -407,6 +422,10 @@ const demoStatus = q.get("demo") === "status";
 const demoNeeds = q.get("demo") === "needs";
 const demoFailed = q.get("demo") === "failed";
 const demoQuiet = q.get("demo") === "quiet";
+// A plan the lead closed: Done sign and pill, with lanes Merged, Handled by lead and Stopped by lead.
+const demoClosed = q.get("demo") === "closed";
+// Server-shaped lane statuses (key + tone): a running lane, a verified lane and a stalled running lane.
+const demoClips = q.get("demo") === "clips";
 const mode = q.has("demo") ? "demo" : "live";
 let STAGE_W = 1280, STAGE_H = 720;
 const HOTDESKS = [
@@ -467,6 +486,7 @@ const detailCache = new Map();
 const DEMO_T0 = Date.now();
 const TOK_KEYS = ["input", "output", "reasoning", "cacheRead", "steps", "total"];
 const tokRec = (arr) => {
+  arr = arr || [];
   const t = { input: arr[0] || 0, output: arr[1] || 0, reasoning: arr[2] || 0, cacheRead: arr[3] || 0, steps: arr[4] || 0 };
   t.total = t.input + t.output + t.reasoning + t.cacheRead;
   return t;
@@ -581,7 +601,23 @@ const DEMO_KINDS = {
   "cli-dx": "code", mcp: "review", setup: "docs", onboard: "code",
   "office-motion": "art", "docs-site": "docs", "perf-pass": "code",
 };
-const DEMO_SET = demoBig ? DEMO_BIG_BASE : demoCrowd ? DEMO_CROWD_BASE : demoStatus ? DEMO_STATUS_BASE : DEMO_BASE;
+// Server-shaped lane statuses (key + tone): a running lane (work clip), a verified lane (idle clip) and
+// a stalled running lane (blocked clip). The page must pick the clip from these, not fall back to idle.
+const DEMO_CLIPS_BASE = {
+  "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 20, by: { build: [5000, 1200, 300, 40000, 3] },
+    texts: ["Data layer", "Scene and cards", "Run every check"],
+    status: { key: "running", label: "Running", tone: "run", reason: "working", attention: false, steps: "live", glyph: "\u25CF" },
+    init: { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" } },
+  "office-sprites": { phase: "build", model: "maas/glm-5.3", dur: 20, by: { build: [4000, 900, 200, 30000, 3] },
+    texts: ["Draw the roles", "Polish the animations"],
+    status: { key: "running", label: "Stalled", tone: "bad", reason: "no model activity for 6m", attention: true, steps: "live", glyph: "!" },
+    init: { dn: 1, cur: 2, health: "STALLED", running: true, result: "", verdict: "" } },
+  "office-review": { phase: "review", model: "maas/glm-5.3", dur: 12, by: { build: [500, 200, 50, 3000, 1], review: [1600, 700, 140, 9000, 1] },
+    texts: ["Read the diffs", "Run the checks", "Write the verdict"],
+    status: { key: "verified", label: "Verified", tone: "done", reason: "checks green", attention: false, steps: "complete", glyph: "\u2713" },
+    init: { dn: 3, cur: 0, health: "done", running: false, result: "done", verdict: "ready" } },
+};
+const DEMO_SET = demoBig ? DEMO_BIG_BASE : demoCrowd ? DEMO_CROWD_BASE : demoStatus ? DEMO_STATUS_BASE : demoClips ? DEMO_CLIPS_BASE : DEMO_BASE;
 const DEMO_STUCK_INIT = {
   "office-scene": { dn: 2, cur: 3, health: "STALLED", running: true, result: "", verdict: "" },
   "office-sprites": { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" },
@@ -656,7 +692,7 @@ function demoApply(ev) {
 
 const DEMO_LEAD = 1000;
 function scheduleDemoEvents() {
-  if (mode !== "demo" || demoBig || demoDone || demoStuck || demoCrowd || demoNeeds || demoFailed || demoQuiet || q.get("still") === "1") return;
+  if (mode !== "demo" || demoBig || demoDone || demoStuck || demoCrowd || demoNeeds || demoFailed || demoQuiet || demoClosed || demoClips || demoStatus || q.get("still") === "1") return;
   for (const ev of (SCENE.fixture && SCENE.fixture.events) || []) {
     setTimeout(() => { if (mode === "demo") demoApply(ev); }, (ev.atMs || 0) + DEMO_LEAD);
   }
@@ -750,6 +786,58 @@ function demoModel() {
       ],
     };
   }
+  if (demoClosed) {
+    const lane = (id, kind, status, extra) => {
+      const b = DEMO_BASE[id] || { texts: ["Step"], by: { build: [1200, 300, 0, 2000, 1] } };
+      const tp = tokParts(b.by);
+      return {
+        id, task: id, kind, health: extra.health, phase: "build", running: !!extra.running,
+        result: extra.result, verdict: extra.verdict || "",
+        commits: extra.commits || "0/1", runs: 0, continues: [],
+        status, bucket: extra.bucket || "ended", handled: !!extra.handled,
+        models: { build: "maas/glm-5.3" }, tokens: tp.tokens, tokensBy: tp.tokensBy,
+        actions: [], suggest: "", why: "",
+        progress: extra.progress, steps: [],
+        startedAt: DEMO_T0 - 3600000, finishedAt: DEMO_T0 - 600000,
+      };
+    };
+    const lanes = [
+      lane("docs-site", "docs", { key: "verified", label: "Merged", tone: "done", reason: "merged by the lead", attention: false, steps: "complete", glyph: "\u2713" },
+        { health: "done", result: "done", handled: true, commits: "8/8", progress: { done: 8, total: 8, current: null } }),
+      lane("cli-dx", "code", { key: "handled", label: "Handled by lead", tone: "idle", reason: "the lead acked it", attention: false, steps: "hide", glyph: "\u2013" },
+        { health: "done", result: "done", handled: true, commits: "4/8", progress: { done: 4, total: 8, current: null } }),
+      lane("mcp", "review", { key: "stopped", label: "Stopped by lead", tone: "warn", reason: "the lead stopped it", attention: false, steps: "hide", glyph: "\u2013" },
+        { health: "stopped", result: "stopped", commits: "3/8", progress: { done: 3, total: 8, current: null } }),
+    ];
+    const pt = planTokenSums(lanes);
+    return {
+      plan: {
+        id: "demo-closed", title: "Closed plan: docs and cleanup", goal: "A plan the lead closed after merging and handling the rest",
+        lead: "Claude Opus 5.5", status: "done", closed: true,
+        badge: { word: "Done", tone: "done", glyph: "\u2713" },
+        glance: { state: "done", word: "Done", detail: "All lanes merged, handled or stopped by the lead", at: null },
+        tokens: pt.tokens, tokensBy: pt.tokensBy,
+        now: "Closed; three lanes merged, handled or stopped.", next: [], decisions: [],
+      },
+      lanes,
+      waves: [{ name: "Wave 1", lanes }],
+    };
+  }
+  if (demoClips) {
+    const lanes = Object.keys(DEMO_SET).map(mk).filter((l) => !demoRemoved.has(l.id));
+    const pt = planTokenSums(lanes);
+    return {
+      plan: {
+        id: "demo-clips", title: "Lane clips: work, idle and blocked", goal: "Server-shaped lane statuses drive the sprite clips",
+        lead: "Claude Opus 5.5", status: "running",
+        glance: glanceFor(lanes),
+        tokens: pt.tokens, tokensBy: pt.tokensBy,
+        now: "A running lane works, a verified lane idles, a stalled lane blocks.", next: [], decisions: [],
+      },
+      lanes,
+      waves: [{ name: "Wave 1", lanes }],
+    };
+  }
   const lanes = Object.keys(DEMO_SET).map(mk).filter((l) => !demoRemoved.has(l.id));
   const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
   const pt = planTokenSums(lanes);
@@ -808,10 +896,12 @@ function sizeStage() {
   }
   stage.style.width = w + "px";
   stage.style.height = h + "px";
-  k = narrow ? w / STAGE_W : Math.min(Math.max(w / STAGE_W, h / STAGE_H), w / 1020, h / 510);
+  // Desktop: fit the whole room inside the stage (k is the smaller of the two ratios, so nothing is
+  // cropped) and centre it; the stage backdrop blends the leftover band. Narrow keeps its own aspect.
+  k = narrow ? w / STAGE_W : Math.min(w / STAGE_W, h / STAGE_H);
   const iw = STAGE_W * k, ih = STAGE_H * k;
-  ox = iw >= w ? Math.min(0, Math.max(w - iw, w / 2 - 680 * k)) : (w - iw) / 2;
-  oy = ih >= h ? Math.min(0, Math.max(h - ih, h / 2 - 445 * k)) : (h - ih) / 2;
+  ox = (w - iw) / 2;
+  oy = (h - ih) / 2;
   const room = $("room");
   room.style.left = ox + "px";
   room.style.top = oy + "px";
@@ -883,6 +973,13 @@ function planOutcome(lanes) {
 // The plan's own lanes: running lanes from outside the plan join the cast but do not decide how the plan stands.
 function ownLanes() { const w = model.plan && model.plan.waves; return Array.isArray(w) && w.length ? w.flatMap((x) => x.lanes || []) : model.lanes; }
 function planBadgeHtml(lanes) {
+  // One truth: when the server sends plan.badge (word, tone, glyph), every plan-level pill shows it,
+  // so a Done sign can never sit next to a page-computed "Not finished". Older payloads keep the fallback.
+  const badge = model && model.plan && model.plan.badge;
+  if (badge && badge.word) {
+    const glyph = badge.glyph ? CAUI.esc(badge.glyph) + " " : "";
+    return '<span class="ca-badge s-' + CAUI.esc(badge.tone || "idle") + '">' + glyph + CAUI.esc(badge.word) + "</span>";
+  }
   const b = planBucket(lanes);
   if (b !== "ended") return bucketBadge(b);
   const o = planOutcome(lanes);
@@ -891,7 +988,8 @@ function planBadgeHtml(lanes) {
 function outcomeCard(lanes) {
   const b = planBucket(lanes), o = planOutcome(lanes);
   const head = b === "ended" ? "Plan finished" : "Plan " + BUCKET_WORD[b].toLowerCase();
-  const big = b === "ended" ? o.word : BUCKET_WORD[b];
+  const badge = model && model.plan && model.plan.badge;
+  const big = badge && badge.word ? ((badge.glyph ? badge.glyph + " " : "") + badge.word) : (b === "ended" ? o.word : BUCKET_WORD[b]);
   const rows = Object.keys(OUTCOME).filter((k) => o.n[k]).map((k) =>
     `<div class="hc-row"><span class="hc-sw" style="background:${OUTCOME[k].color}"></span><span class="hc-l">${OUTCOME[k].word}</span><span class="hc-v">${o.n[k]}</span></div>`).join("");
   const bar = o.counted > 0 ? '<div class="hc-bar">' + ["attention", "running", "done", "handled", "stopped", "notrun"].filter((k) => o.n[k]).map((k) =>
@@ -976,7 +1074,7 @@ function renderTop() {
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
   $("counts").textContent = `${nPlans} plan${nPlans === 1 ? "" : "s"} \u00b7 ${nLanes} lane${nLanes === 1 ? "" : "s"}`;
   const sel = $("planSel");
-  const sig = JSON.stringify(planOptions.map((x) => x.id));
+  const sig = JSON.stringify(planOptions.map((x) => [x.id, x.title, !!x.closed]));
   if (planOptions.length >= 1) {
     sel.hidden = false;
     if (sig !== plansSig) { plansSig = sig; sel.innerHTML = planOptions.map((x) => `<option value="${CAUI.esc(x.id)}">${CAUI.esc(x.title)}${x.closed ? " (closed)" : ""}</option>`).join(""); }
@@ -1137,9 +1235,28 @@ const GLANCE_META = {
 };
 const setTxt = (el, v) => { if (el && el.textContent !== v) el.textContent = v; };
 let glancePlanId = null;
+// Step 4: one top-bar toggle for the whole glance layer (sign, room edge glow, lead bubble). The choice
+// lives under "ca.glance" so another tab (and the Lanes page) follows it; "on" is the default.
+const GLANCE_KEY = "ca.glance";
+function readGlancePref() { try { return localStorage.getItem(GLANCE_KEY) !== "off"; } catch { return true; } }
+let glanceOn = readGlancePref();
+function applyGlanceToggle() {
+  const btn = $("glanceToggle");
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", glanceOn ? "true" : "false");
+  const s = $("glanceToggleState");
+  if (s) s.textContent = glanceOn ? "On" : "Off";
+}
+function setGlanceOn(on) {
+  if (glanceOn === on) return;
+  glanceOn = on;
+  try { localStorage.setItem(GLANCE_KEY, on ? "on" : "off"); } catch {}
+  renderGlance();
+}
 function renderGlance() {
   const sign = $("glanceSign"), glow = $("glanceGlow");
   if (!sign) return;
+  applyGlanceToggle();
   const p = model && model.plan;
   glancePlanId = p ? p.id : null;
   const g = p && p.glance;
@@ -1153,7 +1270,8 @@ function renderGlance() {
   }
   const state = g.state, meta = GLANCE_META[state];
   const word = g.word || meta.word;
-  sign.hidden = false;
+  // The toggle hides the stage surfaces only; the tab title and favicon stay the glance in both states.
+  sign.hidden = !glanceOn;
   sign.dataset.state = state;
   setTxt(sign.querySelector(".gs-glyph"), meta.glyph);
   setTxt(sign.querySelector(".gs-word"), word);
@@ -1167,10 +1285,11 @@ function renderGlance() {
     if (state === "working" && total > 0) { bar.hidden = false; bar.firstElementChild.style.width = Math.round((done / total) * 100) + "%"; }
     else bar.hidden = true;
   }
-  if (glow) { glow.hidden = false; glow.dataset.state = state; }
-  renderGlanceBubble(state);
+  if (glow) { glow.hidden = !glanceOn; glow.dataset.state = state; }
+  renderGlanceBubble(glanceOn ? state : null);
   applyGlanceTitle(state, meta, word, p);
   noteGlance(state);
+  placeGlanceSign();
 }
 
 // Step 2: the lead speech bubble, the tab title and canvas favicon, and the done sparkle.
@@ -1189,6 +1308,75 @@ function renderGlanceBubble(state) {
   if (b.textContent !== glyph) b.textContent = glyph;
   b.style.left = (ox + f[0] * k) + "px";
   b.style.top = (oy + (f[1] - 26) * k) + "px";
+}
+// The sign hangs over the room but must never cover an agent: pick a free spot from the station
+// sprite boxes, their labels and the lead bubble. Try top-centre first and shrink the word down to its
+// minimum before moving it elsewhere; on short screens it may sit in the open floor instead.
+function signBaseFont() {
+  const stw = $("stage").clientWidth || STAGE_W;
+  return Math.max(22, Math.round((44 * stw) / 1280));
+}
+function signObstacles() {
+  const sr = $("stage").getBoundingClientRect();
+  const obs = [];
+  const push = (el) => {
+    if (!el || el.hidden || el.style.display === "none") return;
+    const b = el.getBoundingClientRect();
+    if (b.width <= 0 || b.height <= 0) return;
+    obs.push({ l: b.left - sr.left, t: b.top - sr.top, r: b.right - sr.left, b: b.bottom - sr.top });
+  };
+  for (const key of STATION_KEYS) {
+    const sp = sprites[key];
+    if (sp && sp.el) push(sp.el);
+    push($("plate-" + key));
+  }
+  for (const hd of SCENE.hotdesks) {
+    const sp = hotSprites[hd.key];
+    if (sp && sp.el) push(sp.el);
+    push($("plate-" + hd.key));
+  }
+  push($("glanceBubble"));
+  return obs;
+}
+function placeGlanceSign() {
+  const sign = $("glanceSign");
+  if (!sign || sign.hidden) return;
+  if (narrow) { // the narrow sign is a full-width top bar; the CSS owns its place
+    sign.style.left = ""; sign.style.top = ""; sign.style.transform = "";
+    return;
+  }
+  const stage = $("stage");
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  if (!sw || !sh) return;
+  const board = sign.querySelector(".gs-board") || sign;
+  const obs = signObstacles();
+  const M = 8, base = signBaseFont(), minScale = 0.5;
+  // Candidate anchors as fractions of the free space: top-centre first, then the corners, then the floor.
+  const cands = [[0.5, 0], [0, 0], [1, 0], [0, 0.5], [1, 0.5], [0.5, 1], [0, 1], [1, 1], [0.25, 0], [0.75, 0], [0.25, 1], [0.75, 1]];
+  sign.style.transform = "none";
+  let picked = null;
+  outer:
+  for (const c of cands) {
+    for (let s = 1; s >= minScale - 1e-6; s -= 0.1) {
+      sign.style.setProperty("--gs-word", Math.round(base * s) + "px");
+      sign.style.left = "0px"; sign.style.top = "0px";
+      const w = board.offsetWidth, h = board.offsetHeight;
+      const x = M + c[0] * Math.max(0, sw - w - 2 * M);
+      const y = M + c[1] * Math.max(0, sh - h - 2 * M);
+      if (x < 0 || y < 0 || x + w > sw || y + h > sh) continue;
+      let hit = false;
+      for (const o of obs) { if (x < o.r && o.l < x + w && y < o.b && o.t < y + h) { hit = true; break; } }
+      if (!hit) { picked = { x, y }; break outer; }
+    }
+  }
+  if (!picked) { // last resort: minimum font, top-centre, clamped inside the stage
+    sign.style.setProperty("--gs-word", Math.round(base * minScale) + "px");
+    sign.style.left = "0px"; sign.style.top = "0px";
+    const w = board.offsetWidth, h = board.offsetHeight;
+    picked = { x: Math.max(M, Math.min((sw - w) / 2, sw - w)), y: M };
+  }
+  sign.style.left = Math.round(picked.x) + "px";
+  sign.style.top = Math.round(picked.y) + "px";
 }
 const glanceIconCache = {};
 function glanceFavicon(meta) {
@@ -1338,6 +1526,14 @@ function demoFail(id) {
 const WORKER_STATIONS = ["builder", "artist", "reviewer"];
 const STATION_KEYS = ["lead", "builder", "artist", "reviewer"];
 const CLIP_BY_KEY = { run: "work", done: "idle", bad: "blocked", warn: "idle", idle: "idle" };
+// The server sends lane.status with a tone (run, done, bad, warn, idle) and a key ("running",
+// "verified", "handled"...). The clip map is keyed by tone, so a running lane keeps the working clip
+// unless it is stalled (bad tone, e.g. "Stalled"), which blocks; everything else follows the tone.
+function clipForStatus(st) {
+  if (!st) return "idle";
+  if (st.key === "running") return st.tone === "bad" ? "blocked" : "work";
+  return CLIP_BY_KEY[st.tone || st.key] || "idle";
+}
 const stationLane = { builder: null, artist: null, reviewer: null };
 const laneStation = new Map();
 const sprites = {};
@@ -1353,7 +1549,9 @@ const winHooks = { open: () => {}, close: () => {} };
 let assignedOnce = false, prevPlanId = null, prevRunning = new Map();
 let ovOpen = false;
 
-function spriteScale() { return Math.max(0.25, Math.round(k * 2 * 4) / 4); }
+// Sprite scale is about 20% smaller than the old room scale so more floor stays clear; the foot anchor
+// is unchanged (it is placed from the scene foot, not from the sprite size) so agents keep their spot.
+function spriteScale() { return Math.max(0.2, Math.round(k * 1.6 * 4) / 4); }
 const KIND_FALLBACK = {
   code: { rolePrefix: "hot", prop: "hotdesk", label: "Coder" },
   art: { rolePrefix: "painter", prop: "easel", label: "Painter" },
@@ -1392,10 +1590,45 @@ function setHotLook(hd, l) {
   hotLookDirty = true;
 }
 function laneName(l) { return l.task || l.id; }
+// One label per agent, never contradicting the sign: the status word carries its contract glyph, the
+// step fraction shows only when the server says steps are live ("step d/t") or complete ("t/t" with a
+// check), and the plate tone follows the status attention/tone so a needs-you lane is loud while a
+// settled lane stays a calm done or idle colour.
+function statusGlyph(st) {
+  if (!st) return "";
+  if (st.glyph) return st.glyph;
+  if (st.tone === "bad" || st.key === "bad") return "\u2715";
+  if (st.attention) return "!";
+  if (st.tone === "run" || st.key === "run" || st.key === "running") return "\u25CF";
+  if (st.tone === "done" || st.key === "done") return "\u2713";
+  return "\u2013";
+}
+function stepsFraction(st, l) {
+  const p = (l && l.progress) || {};
+  const d = p.done || 0, t = p.total || 0;
+  const mode = st && st.steps;
+  if (mode === "live") return t ? "step " + d + "/" + t : "";
+  if (mode === "complete") { const n = t || d; return n ? n + "/" + n + " \u2713" : "\u2713"; }
+  if (mode === "hide") return "";
+  return t ? d + "/" + t : ""; // older server: keep today's behaviour
+}
+function isAttentionLane(l, st) {
+  if (st && typeof st.attention === "boolean") return st.attention;
+  return laneBucket(l) === "attention";
+}
+function plateTone(l) {
+  const st = CAUI.laneStatus(l);
+  if (isAttentionLane(l, st)) return "attn";
+  const t = st.tone || st.key;
+  if (t === "done") return "done";
+  if (!l.running) return "idle";
+  return "";
+}
 function stationSub(l) {
   const st = CAUI.laneStatus(l);
-  const p = l.progress || {};
-  let s = p.total ? st.label + " \u00b7 " + (p.done || 0) + "/" + p.total : st.label;
+  let s = statusGlyph(st) + " " + st.label;
+  const frac = stepsFraction(st, l);
+  if (frac) s += " \u00b7 " + frac;
   const tt = CAUI.tokenTotal(l.tokens);
   if (tt) s += " \u00b7 " + CAUI.fmtTokens(tt);
   return s;
@@ -1501,6 +1734,7 @@ function setStation(key, opts) {
   pname.title = opts.name;
   plate.querySelector(".p-sub").textContent = opts.sub;
   plate.dataset.lane = opts.laneId;
+  plate.dataset.tone = opts.tone || "";
   if (badge) {
     badge.hidden = !opts.suggest;
     if (opts.suggest) badge.title = opts.why || "";
@@ -1516,14 +1750,14 @@ function renderStations() {
     const id = stationLane[stKey];
     const l = id && model.lanes.find((x) => x.id === id);
     if (!l) { setStation(stKey, null); continue; }
-    setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.laneStatus(l).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
+    setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: clipForStatus(CAUI.laneStatus(l)), tone: plateTone(l), suggest: l.suggest || "", why: l.why || "" });
   }
 }
 function hotSub(l) {
   const st = CAUI.laneStatus(l);
-  const p = l.progress || {};
-  let s = st.label;
-  if (p.total) s += " " + (p.done || 0) + "/" + p.total;
+  let s = statusGlyph(st) + " " + st.label;
+  const frac = stepsFraction(st, l);
+  if (frac) s += " " + frac;
   const tt = CAUI.tokenTotal(l.tokens);
   if (tt) s += " " + CAUI.fmtTokens(tt);
   return s;
@@ -1544,7 +1778,7 @@ function renderHotDesks() {
       continue;
     }
     setHotLook(hd, l);
-    setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.laneStatus(l).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
+    setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: clipForStatus(CAUI.laneStatus(l)), tone: plateTone(l), suggest: l.suggest || "", why: l.why || "" });
     if (desk) desk.style.display = "";
     if (hit) { if (hit.dataset.lane !== l.id || hit.style.display === "none") hotLookDirty = true; hit.style.display = ""; hit.dataset.lane = l.id; }
     if (plate) plate.title = kindDef(l).label + " \u00b7 " + laneName(l);
@@ -1613,6 +1847,7 @@ function layoutStations() {
       plate.style.top = (oy + (f[1] + 34) * k) + "px";
     }
   }
+  placeGlanceSign();
   if (!$("win").hidden) positionWin();
 }
 function ovRank(l) { return isNeedsYou(l) ? 0 : l.running ? 1 : 2; }
@@ -2365,7 +2600,7 @@ window.__office = {
       win: { open: !win.hidden, sheet: narrow, rect: { x: wr.x, y: wr.y, w: wr.width, h: wr.height }, maxHeight: win.style.maxHeight || getComputedStyle(win).maxHeight },
       effects: effects.slice(),
       motion: PixelSprites.motion(),
-      lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 })),
+      lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0, steps: (l.status && l.status.steps) || "", attention: l.status ? !!l.status.attention : null })),
       planTokens: CAUI.tokenTotal(model && model.plan.tokens),
       controls: demoControls.slice(),
       quickSteers: $("winChips").hidden ? 0 : $("winChips").childElementCount,
@@ -2396,7 +2631,39 @@ window.__office = {
       detail: (d && d.textContent) || "",
       title: document.title,
       favicon: (link && link.getAttribute("href")) || "",
+      glanceOn: glanceOn,
     };
+  },
+  // The geometry the fit checks read: the stage, the room, the sign board and every station sprite and
+  // label rect, all in viewport coordinates so a check can test them against the stage.
+  layout() {
+    const r = $("stage").getBoundingClientRect();
+    const box = (el) => {
+      if (!el || el.hidden || el.style.display === "none") return null;
+      const b = el.getBoundingClientRect();
+      if (b.width <= 0 && b.height <= 0) return null;
+      return { x: b.x, y: b.y, w: b.width, h: b.height };
+    };
+    const stations = [];
+    for (const key of STATION_KEYS.concat(SCENE.hotdesks.map((h) => h.key))) {
+      const sp = sprites[key] || hotSprites[key];
+      const plateEl = $("plate-" + key);
+      const sprite = box(sp && sp.el);
+      const label = box(plateEl);
+      if (!sprite && !label) continue;
+      const laneId = key === "lead" ? "lead" : (stationLane[key] || hotSeat[key] || null);
+      const l = laneId && laneId !== "lead" && model ? model.lanes.find((x) => x.id === laneId) : null;
+      const st = l ? CAUI.laneStatus(l) : null;
+      stations.push({
+        station: key, laneId: laneId || null, clip: sp ? sp.clip : "",
+        steps: (st && st.steps) || "",
+        sub: plateEl ? ((plateEl.querySelector(".p-sub") || {}).textContent || "") : "",
+        sprite, label,
+      });
+    }
+    const signEl = $("glanceSign");
+    const sign = signEl && !signEl.hidden ? (box(signEl.querySelector(".gs-board")) || box(signEl)) : null;
+    return { stage: { x: r.x, y: r.y, w: r.width, h: r.height }, room: box($("room")), sign, stations };
   },
   // ids deleted through the Delete controls, for the check harness
   removed: () => [...demoRemoved],
@@ -2441,6 +2708,21 @@ for (const id of ["tokenChip", "statusBadge"]) {
 }
 
 $("planSel").addEventListener("change", () => { planSel = $("planSel").value; planUserPicked = true; render(); });
+// Step 4: the glance toggle in the top bar, the "g" shortcut and the cross-tab "ca.glance" listener.
+$("glanceToggle").addEventListener("click", () => setGlanceOn(!glanceOn));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "g" && e.key !== "G") return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  e.preventDefault();
+  setGlanceOn(!glanceOn);
+});
+window.addEventListener("storage", (e) => {
+  if (e.key !== GLANCE_KEY) return;
+  const on = e.newValue !== "off";
+  if (on !== glanceOn) { glanceOn = on; renderGlance(); }
+});
 new ResizeObserver(() => { sizeStage(); layoutStations(); renderNarrowList(); }).observe($("stagewrap"));
 new ResizeObserver(() => { if (!$("win").hidden) schedulePositionWin(); }).observe($("win"));
 (async () => {
