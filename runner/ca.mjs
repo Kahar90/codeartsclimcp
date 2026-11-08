@@ -767,9 +767,21 @@ Message from the lead: ${rk.text}` : ''), model, agent);
 
   // Files already dirty before the lane started are not this lane's fault: leave them out of the gate.
   const dirty = () => dirtyAll().filter((l) => !PRE_DIRTY.has(l));
+  // The CHECK shell inherits the runner's PATH. A supervisor launched by a service, a daemon or the
+  // CodeArts CLI often has a minimal PATH with no node on it, so `node --check ...` exits 127
+  // "command not found". Put the node running the runner first on PATH so every CHECK line resolves
+  // `node` (and npm beside it) to a real binary.
+  const checkEnv = () => {
+    const key = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+    const dir = path.dirname(process.execPath);
+    const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+    const parts = String(process.env[key] || '').split(path.delimiter).filter(Boolean);
+    if (!parts.some((p) => same(p, dir))) parts.unshift(dir);
+    return { ...process.env, [key]: parts.join(path.delimiter) };
+  };
   const runCheck = (cmd) => new Promise((res) => {
     const t0 = now(); let out = '';
-    const ch = spawn('bash', ['-c', cmd], { cwd: repo, env: { ...process.env, CA_LANE: id }, windowsHide: true });
+    const ch = spawn('bash', ['-c', cmd], { cwd: repo, env: { ...checkEnv(), CA_LANE: id }, windowsHide: true });
     const timer = setTimeout(() => { out += `\n[runner: timed out after ${CFG.checkTimeout}s]`; killTree(ch.pid); }, CFG.checkTimeout * 1000);
     ch.stdout.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
     ch.stderr.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
