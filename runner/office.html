@@ -433,17 +433,18 @@ const demoClosed = q.get("demo") === "closed";
 // Server-shaped lane statuses (key + tone): a running lane, a verified lane and a stalled running lane.
 const demoClips = q.get("demo") === "clips";
 const mode = q.has("demo") ? "demo" : "live";
-let STAGE_W = 1280, STAGE_H = 720;
+let STAGE_W = 1764, STAGE_H = 720;
 const HOTDESKS = [
-  { key: "hot1", role: "hot1", foot: [470, 250], prop: "hotdesk", plate: "below" },
-  { key: "hot2", role: "hot2", foot: [455, 470], prop: "hotdesk", plate: "below" },
-  { key: "hot3", role: "hot3", foot: [840, 290], prop: "hotdesk", plate: "below" },
-  { key: "hot4", role: "hot4", foot: [480, 625], prop: "hotdesk", plate: "below" },
-  { key: "hot5", role: "hot5", foot: [1010, 615], prop: "hotdesk", plate: "below" },
+  { key: "hot1", role: "hot1", foot: [387, 431], prop: "hotdesk", plate: "below" },
+  { key: "hot2", role: "hot2", foot: [683, 422], prop: "hotdesk", plate: "below" },
+  { key: "hot3", role: "hot3", foot: [1425, 422], prop: "hotdesk", plate: "below" },
+  { key: "hot4", role: "hot4", foot: [773, 629], prop: "hotdesk", plate: "below" },
+  { key: "hot5", role: "hot5", foot: [1258, 548], prop: "hotdesk", plate: "below" },
 ];
 let SCENE = {
-  stage: [1280, 720],
-  stations: { lead: { foot: [292, 356] }, builder: { foot: [626, 354] }, artist: { foot: [759, 601] }, reviewer: { foot: [1036, 350] } },
+  stage: [1764, 720],
+  lamp: [881, 121, 210, 155],
+  stations: { lead: { foot: [539, 346] }, builder: { foot: [870, 342] }, artist: { foot: [998, 589] }, reviewer: { foot: [1276, 325] } },
   hotdesks: HOTDESKS,
   fixture: {
     events: [
@@ -466,7 +467,7 @@ async function loadScene() {
     const j = await r.json();
     if (j && Array.isArray(j.stageSize) && j.stageSize.length === 2 && j.stations && ["lead", "builder", "artist", "reviewer"].every((s) => j.stations[s] && Array.isArray(j.stations[s].foot))) {
       const hd = Array.isArray(j.hotdesks) && j.hotdesks.length ? j.hotdesks : HOTDESKS;
-      SCENE = { stage: j.stageSize, stations: j.stations, hotdesks: hd, fixture: j.fixture || { events: [] } };
+      SCENE = { stage: j.stageSize, stations: j.stations, hotdesks: hd, lamp: Array.isArray(j.lamp) && j.lamp.length === 4 ? j.lamp : SCENE.lamp, fixture: j.fixture || { events: [] } };
     }
   } catch (e) {}
 }
@@ -891,55 +892,52 @@ function sizeStage() {
   document.body.classList.toggle("narrow", narrow);
   document.documentElement.classList.toggle("narrow", narrow);
   const w = wrap.clientWidth || 1;
+  // Content box in room units, from the station and hotdesk feet: sprites and desks sit above the foot,
+  // the plate 34 units below it. Clamped to the room. The room art is wider than 16:9, so its outer
+  // walls and railings may be cropped, but never a station.
+  let minFootX = Infinity, maxFootX = -Infinity, minFootY = Infinity, maxFootY = -Infinity;
+  const feet = Object.keys(SCENE.stations).map((key) => SCENE.stations[key] && SCENE.stations[key].foot).concat(SCENE.hotdesks.map((hd) => hd && hd.foot));
+  for (const f of feet) { if (f) { minFootX = Math.min(minFootX, f[0]); maxFootX = Math.max(maxFootX, f[0]); minFootY = Math.min(minFootY, f[1]); maxFootY = Math.max(maxFootY, f[1]); } }
+  const padX = narrow ? 60 : 110; // narrow shows no plates on the room (the station list sits below it)
+  let boxX0 = 0, boxX1 = STAGE_W, boxY0 = 0, boxY1 = STAGE_H;
+  if (Number.isFinite(minFootX)) {
+    boxX0 = Math.max(0, minFootX - padX); boxX1 = Math.min(STAGE_W, maxFootX + padX);
+    boxY0 = Math.max(0, minFootY - 110); boxY1 = Math.min(STAGE_H, maxFootY + 60);
+  }
+  const boxW = Math.max(1, boxX1 - boxX0), boxH = Math.max(1, boxY1 - boxY0);
   let h;
   if (narrow) {
-    // Narrow: the whole room at its own aspect; the station list sits right below it.
-    h = Math.round((w * STAGE_H) / STAGE_W);
+    // Narrow: the room spans the width with its outer walls cropped to the stations, at full height;
+    // the station list sits right below it.
+    k = Math.max(w / STAGE_W, Math.min(w / boxW, (w * 0.75) / STAGE_H));
+    h = Math.round(STAGE_H * k);
     wrap.style.height = h + "px";
   } else {
     wrap.style.height = "";
     h = wrap.clientHeight || 1;
+    // Desktop: a content-aware cover fit. The room is scaled to cover the whole stage so no dark band
+    // shows, but never so far that a station (its sprite, desk or plate) leaves the stage: the cover ratio
+    // is capped by the content box (10 px stage margin) and floored at the fit ratio. Any leftover area
+    // shows #roomfill, a blurred copy of the room.
+    const kFit = Math.min(w / STAGE_W, h / STAGE_H);
+    const kCover = Math.max(w / STAGE_W, h / STAGE_H);
+    k = Math.max(kFit, Math.min(kCover, (w - 20) / boxW, (h - 20) / boxH));
   }
   stage.style.width = w + "px";
   stage.style.height = h + "px";
-  // Desktop uses a content-aware cover fit: the room is scaled to cover the whole stage so no dark band
-  // shows, but never so far that a station (its sprite, desk or plate) leaves the stage. The cover ratio
-  // is capped by the content box so the feet and their plates stay inside with a 10 px stage margin, and
-  // floored at the fit ratio. Narrow keeps its own aspect and centring.
-  let iw, ih;
-  if (narrow) {
-    k = w / STAGE_W;
-    iw = STAGE_W * k; ih = STAGE_H * k;
-    ox = (w - iw) / 2;
-    oy = (h - ih) / 2;
-  } else {
-    const kFit = Math.min(w / STAGE_W, h / STAGE_H);
-    const kCover = Math.max(w / STAGE_W, h / STAGE_H);
-    // Content box in room units, from the station and hotdesk feet: sprites and desks sit above the
-    // foot, the plate 34 units below it. Clamped to the room.
-    let minFootX = Infinity, maxFootX = -Infinity, minFootY = Infinity, maxFootY = -Infinity;
-    for (const key of Object.keys(SCENE.stations)) { const f = SCENE.stations[key] && SCENE.stations[key].foot; if (f) { minFootX = Math.min(minFootX, f[0]); maxFootX = Math.max(maxFootX, f[0]); minFootY = Math.min(minFootY, f[1]); maxFootY = Math.max(maxFootY, f[1]); } }
-    for (const hd of SCENE.hotdesks) { const f = hd && hd.foot; if (f) { minFootX = Math.min(minFootX, f[0]); maxFootX = Math.max(maxFootX, f[0]); minFootY = Math.min(minFootY, f[1]); maxFootY = Math.max(maxFootY, f[1]); } }
-    let boxX0 = 0, boxX1 = STAGE_W, boxY0 = 0, boxY1 = STAGE_H;
-    if (Number.isFinite(minFootX)) {
-      boxX0 = Math.max(0, minFootX - 130); boxX1 = Math.min(STAGE_W, maxFootX + 130);
-      boxY0 = Math.max(0, minFootY - 110); boxY1 = Math.min(STAGE_H, maxFootY + 60);
-    }
-    const boxW = Math.max(1, boxX1 - boxX0), boxH = Math.max(1, boxY1 - boxY0);
-    k = Math.max(kFit, Math.min(kCover, (w - 20) / boxW, (h - 20) / boxH));
-    iw = STAGE_W * k; ih = STAGE_H * k;
-    ox = (w - iw) / 2;
-    oy = (h - ih) / 2;
-    // On an axis where the room is larger than the stage it must keep covering it; within that, slide
-    // the room so the content box keeps its 10 px margin. Where the room is smaller, keep it centred.
-    if (iw > w) {
-      const cx = Math.min(w - 10 - boxX1 * k, Math.max(10 - boxX0 * k, ox));
-      ox = Math.min(0, Math.max(w - iw, cx));
-    }
-    if (ih > h) {
-      const cy = Math.min(h - 10 - boxY1 * k, Math.max(10 - boxY0 * k, oy));
-      oy = Math.min(0, Math.max(h - ih, cy));
-    }
+  const iw = STAGE_W * k, ih = STAGE_H * k;
+  const m = narrow ? 0 : 10;
+  ox = (w - iw) / 2;
+  oy = (h - ih) / 2;
+  // On an axis where the room is larger than the stage it must keep covering it; within that, slide the
+  // room so the content box keeps its margin. Where the room is smaller, keep it centred.
+  if (iw > w) {
+    const cx = Math.min(w - m - boxX1 * k, Math.max(m - boxX0 * k, ox));
+    ox = Math.min(0, Math.max(w - iw, cx));
+  }
+  if (ih > h) {
+    const cy = Math.min(h - m - boxY1 * k, Math.max(m - boxY0 * k, oy));
+    oy = Math.min(0, Math.max(h - ih, cy));
   }
   const room = $("room");
   room.style.left = ox + "px";
@@ -1828,10 +1826,11 @@ function layoutStations() {
   const a = PixelSprites.anchor();
   const sc = spriteScale();
   const lamp = $("lamp");
-  lamp.style.left = ox + 650 * k + "px";
-  lamp.style.top = oy + 120 * k + "px";
-  lamp.style.width = 230 * k + "px";
-  lamp.style.height = 170 * k + "px";
+  const lp = SCENE.lamp || [650, 120, 230, 170]; // glow box under the ceiling lamp, stage units
+  lamp.style.left = ox + lp[0] * k + "px";
+  lamp.style.top = oy + lp[1] * k + "px";
+  lamp.style.width = lp[2] * k + "px";
+  lamp.style.height = lp[3] * k + "px";
   for (const key of STATION_KEYS) {
     const f = SCENE.stations[key].foot;
     const sp = sprites[key];

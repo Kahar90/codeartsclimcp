@@ -181,7 +181,9 @@ try {
   s = await st();
   check('narrow mode below 700 px', (await ev('document.body.classList.contains("narrow")')) === true);
   check('stage fills the width at 390x844', near(s.stage.w, 390), `${s.stage.w}x${s.stage.h}`);
-  check('narrow stage shows the whole room at 16:9', near(s.stage.h, (s.stage.w * 720) / 1280), `${s.stage.w}x${s.stage.h}`);
+  const nroom = await ev('(function(){var r=document.getElementById("room").getBoundingClientRect(),g=document.getElementById("stage").getBoundingClientRect();return {x:r.x-g.x,y:r.y-g.y,w:r.width,h:r.height};})()');
+  check('narrow room spans the stage height and covers its width', near(nroom.h, s.stage.h) && nroom.x <= 1 && nroom.x + nroom.w >= s.stage.w - 1, JSON.stringify(nroom));
+  check('narrow stage is between the full-room and 4:3 heights', s.stage.h >= Math.floor((s.stage.w * 720) / 1764) && s.stage.h <= Math.ceil(s.stage.w * 0.75) + 1, `${s.stage.w}x${s.stage.h}`);
   const listTop = await ev('Math.round(document.getElementById("stlist").getBoundingClientRect().top)');
   check('station list starts right below the narrow stage', Math.abs(listTop - (s.stage.y + s.stage.h)) < 24, `list ${listTop} stage bottom ${s.stage.y + s.stage.h}`);
   check('nameplates hidden when narrow', s.stations.every((x) => x.plate.w === 0));

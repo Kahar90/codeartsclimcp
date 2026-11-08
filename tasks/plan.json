@@ -1,23 +1,23 @@
 {
-  "title": "Office fills the stage: no black bars",
-  "goal": "The Office room fills the whole stage on desktop (no dark bands beside or above it) while every station sprite, nameplate and the sign stay in view.",
+  "title": "Office fit: less zoom, still no black bars",
+  "goal": "On wide desktop screens the Office room is not zoomed in so far that the walls and windows are cut off, and no dark band shows beside it.",
   "lead": "Claude Opus 5.5",
-  "status": "done",
-  "now": "Closed: office-cover merged on main plus lead margin fix; all checks pass; 0.5.1 installed",
+  "status": "running",
+  "now": "Waiting for the human's widened workshop.png (2120x941, original centred)",
   "waves": [
     {
       "name": "Wave 1",
       "lanes": [
-        "office-cover"
+        "office-zoom"
       ]
     }
   ],
   "lanes": [
     {
-      "task": "office-cover",
+      "task": "office-zoom",
       "repo": ".",
       "model": "flash",
-      "why": "sizeStage letterboxes the room with Math.min; switch to a content-aware cover fit plus a blurred room backdrop for any remainder",
+      "why": "0.5.1 covers a 2.28:1 stage with a 16:9 room by zooming 1.5x, which crops the top and bottom; pick a gentler fit",
       "files": [
         "runner/office.html",
         "checks/officefit.check.mjs"
@@ -25,26 +25,28 @@
     }
   ],
   "next": [
-    "verify fit checks and screenshots at 1920x945, 2560x1440, 1366x768",
-    "merge, release, install-local"
+    "human supplies widened workshop.png (2120x941, original pixels unchanged in the middle)",
+    "office-zoom lane: stage size, station and lamp offsets, fit for the wider art",
+    "verify at 1920x945, release, install-local"
   ],
-  "decisions": [
-    "Cover the stage as far as the station content allows; any leftover band shows a blurred, dimmed copy of the room instead of the dark shell colour",
-    {
-      "at": "2026-11-08T15:08:58.694Z",
-      "text": "Plan closed: office-cover merged on main plus lead margin fix; all checks pass; 0.5.1 installed."
-    }
-  ],
+  "decisions": [],
   "risks": [
-    "Ultra-wide screens cannot be fully covered without cropping stations; the blurred backdrop fills that band"
+    "Outpainted edges may not match the original style; check the seams at x=224 and x=1896"
   ],
-  "phase": "waiting",
-  "nowAt": "2026-11-08T14:46:12.655Z",
+  "phase": "asking",
+  "nowAt": "2026-11-08T15:12:22.747Z",
   "leadActivity": [
     {
-      "at": "2026-11-08T14:46:12.655Z",
-      "text": "office-cover lane running: cover fit plus blurred backdrop",
-      "phase": "waiting"
+      "at": "2026-11-08T15:11:32.654Z",
+      "text": "Which fit: whole room with blurred sides, half zoom with soft edges, or extend the room art wider?",
+      "phase": "asking"
+    },
+    {
+      "at": "2026-11-08T15:12:22.747Z",
+      "text": "Extending the room art needs new painted art; asking whether the human supplies a wider workshop.png or we go half zoom",
+      "phase": "asking"
     }
-  ]
+  ],
+  "revision": 1,
+  "updatedAt": "2026-11-08T15:15:34.866Z"
 }
