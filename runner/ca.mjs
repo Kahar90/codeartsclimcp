@@ -1988,6 +1988,18 @@ function cmdDash(args) {
         return json({ counts, lanes: ls });
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
+      const pm = u.pathname.match(/^\/api\/plans\/(.+)\/remove$/);
+      if (pm) {
+        // Exact registered-plan id only (ids may carry ~ and .): decode the segment, never die().
+        if (req.method !== 'POST') return json({ error: 'use POST /api/plans/<id>/remove' }, 405);
+        const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+        const pid = decodeURIComponent(pm[1]);
+        const pr = plans().find((x) => x.id === pid);
+        if (!pr) return json({ error: `no registered plan has id "${pid}"` }, 404);
+        const res = await removePlan(pr, { by: 'dashboard' });
+        if (res.error) return json({ error: res.error }, res.code || 500);
+        return json(res);
+      }
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
       if (u.pathname === '/api/update') {
         // The update pill: the cached check plus the running dash pid. A stale cache refreshes in
@@ -2027,7 +2039,7 @@ function cmdDash(args) {
         if (!v) return json({ error: 'auth did not return JSON' }, 500);
         return json({ ready: !!v.ready, url: v.url || '' });
       }
-      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack)$/);
+      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack|remove)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
         const pr = pickOne(all, q, (x) => x.id, (x) => x.task);
@@ -2058,6 +2070,12 @@ function cmdDash(args) {
           return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
         }
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'remove') {
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const res = await removeLane(l, { purge: rb.body.keepLogs !== true, by: 'dashboard' });
+          if (res.error) return json({ error: res.error }, res.code || 500);
+          return json(res);
+        }
         if (req.method === 'POST' && m[2] === 'ack') {
           // Mark a finished lane seen (or unseen again) for this finishedAt; a later finish is unseen anew.
           const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
