@@ -49,6 +49,10 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
 .pm-tag.run { color: var(--run); }
 .pm-check { flex: none; width: 12px; height: 12px; color: var(--sel); visibility: hidden; }
 [aria-selected="true"] > .pm-check { visibility: visible; }
+/* delete control: a trash button on every plan in the menu and in the lane window */
+.pm-del { flex: none; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--faint); cursor: pointer; }
+.pm-del:hover { border-color: var(--bad); color: var(--bad); background: var(--raise); }
+.pm-del svg { width: 13px; height: 13px; }
 /* hover cards (tokens, plan outcome): styled replacements for native title tooltips */
 #statusBadge, #tokenChip { cursor: default; }
 #tokenChip:hover, #tokenChip:focus-visible { border-color: var(--sel); color: var(--fg); }
@@ -165,6 +169,8 @@ body.narrow #winTail { display: none; }
 .ctl-btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 13px var(--font); cursor: pointer; }
 .ctl-btn:hover { border-color: var(--sel); }
 .ctl-btn.primary { background: var(--sel); border-color: var(--sel); color: #201331; }
+.ctl-btn.danger { color: var(--bad); border-color: var(--bad); }
+.ctl-btn.danger:hover { background: rgba(255, 156, 156, .14); }
 .ctl-why { color: var(--amber); font-size: 12.5px; }
 #winNote { display: flex; flex-direction: column; gap: 7px; }
 #noteText { resize: vertical; min-height: 46px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--code-bg); color: var(--fg); font: 13.5px/1.4 var(--font); }
@@ -311,6 +317,7 @@ body.narrow #win a { display: inline-flex; align-items: center; }
               <button type="button" id="noteCancel" class="ctl-btn">Cancel</button>
             </div>
           </div>
+          <div class="ctl-row" id="winDelRow" hidden><button type="button" id="winDel" class="ctl-btn danger"></button></div>
         </div>
       <div id="winTail" aria-hidden="true"></div>
       <div id="winChips" hidden></div>
@@ -505,6 +512,10 @@ for (const [id, b] of Object.entries(DEMO_SET)) {
 const demoHooks = { press: () => {}, escape: () => {} };
 const DEMO_STATION_LANE = { builder: "office-scene", artist: "office-sprites", reviewer: "office-review" };
 const demoControls = [];
+// Ids deleted in the fixture: a deleted plan or lane never comes back in demo mode. Only demo mode
+// reads it (a live delete also logs here, for the window.__office.removed() test hook).
+const demoRemoved = new Set();
+const DEL_ICO = '<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5h11M7 5V3.2h4V5M5.2 5l.7 9.3h6.2L12.8 5M7.6 7.6v4.4M10.4 7.6v4.4"/></svg>';
 function sendControl(id, action, extra) {
   const def = CAUI.ACTIONS[action] || {};
   if (mode === "demo") {
@@ -563,7 +574,9 @@ function scheduleDemoEvents() {
   }
 }
 
+const DEMO_PLAN_ID = demoBig ? "demo-big" : demoCrowd ? "demo-crowd" : "demo";
 function demoModel() {
+  if (demoRemoved.has(DEMO_PLAN_ID)) return { plan: { id: "", title: "", goal: "", lead: "", status: "", now: "", next: [], decisions: [], tokens: {}, tokensBy: {} }, lanes: [], waves: [] };
   const mkSteps = (texts, dn, cur) => texts.map((tx, i) => ({ text: tx, state: i < dn ? "done" : cur === i + 1 ? "current" : "pending" }));
   const mk = (id) => {
     const b = DEMO_SET[id], st = demoState[id];
@@ -584,8 +597,9 @@ function demoModel() {
   };
   const at = (m) => new Date(DEMO_T0 - m * 60000).toISOString();
   if (demoBig) {
-    const lanes = Object.keys(DEMO_BIG_BASE).map(mk);
+    const lanes = Object.keys(DEMO_BIG_BASE).map(mk).filter((l) => !demoRemoved.has(l.id));
     const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
+    const wv = (name, ids) => ({ name, lanes: ids.map((id) => byId[id]).filter(Boolean) });
     const pt = planTokenSums(lanes);
     return {
       plan: {
@@ -602,16 +616,17 @@ function demoModel() {
       },
       lanes,
       waves: [
-        { name: "Wave 1", lanes: [byId["office-scene"], byId["office-sprites"]] },
-        { name: "Wave 2", lanes: [byId["office-review"], byId["cli-dx"]] },
-        { name: "Wave 3", lanes: [byId["mcp"], byId["setup"], byId["office-motion"]] },
-        { name: "Wave 4", lanes: [byId["onboard"]] },
+        wv("Wave 1", ["office-scene", "office-sprites"]),
+        wv("Wave 2", ["office-review", "cli-dx"]),
+        wv("Wave 3", ["mcp", "setup", "office-motion"]),
+        wv("Wave 4", ["onboard"]),
       ],
     };
   }
   if (demoCrowd) {
-    const lanes = Object.keys(DEMO_CROWD_BASE).map(mk);
+    const lanes = Object.keys(DEMO_CROWD_BASE).map(mk).filter((l) => !demoRemoved.has(l.id));
     const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
+    const wv = (name, ids) => ({ name, lanes: ids.map((id) => byId[id]).filter(Boolean) });
     const pt = planTokenSums(lanes);
     return {
       plan: {
@@ -628,18 +643,18 @@ function demoModel() {
       },
       lanes,
       waves: [
-        { name: "Wave 1", lanes: [byId["office-scene"], byId["office-sprites"], byId["office-review"]] },
-        { name: "Wave 2", lanes: [byId["cli-dx"], byId["mcp"], byId["setup"]] },
-        { name: "Wave 3", lanes: [byId["onboard"], byId["office-motion"], byId["docs-site"], byId["perf-pass"]] },
+        wv("Wave 1", ["office-scene", "office-sprites", "office-review"]),
+        wv("Wave 2", ["cli-dx", "mcp", "setup"]),
+        wv("Wave 3", ["onboard", "office-motion", "docs-site", "perf-pass"]),
       ],
     };
   }
-  const scene = mk("office-scene"), sprites = mk("office-sprites"), review = mk("office-review");
-  const lanes = [scene, sprites, review];
+  const lanes = [mk("office-scene"), mk("office-sprites"), mk("office-review")].filter((l) => !demoRemoved.has(l.id));
+  const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
   const pt = planTokenSums(lanes);
   return {
     plan: {
-      id: "demo", title: "Office view for codearts-build", goal: "Build the Office view for codearts-build lanes",
+      id: DEMO_PLAN_ID, title: "Office view for codearts-build", goal: "Build the Office view for codearts-build lanes",
       lead: "Claude Opus 5.5", status: demoDone ? "done" : "running",
       tokens: pt.tokens, tokensBy: pt.tokensBy,
       now: demoDone ? "All lanes finished; reviewing the screenshots." : demoStuck ? "The builder stalled mid-turn and the reviewer gave up; the artist is still drawing." : "Waiting for the scene and sprites lanes to finish.",
@@ -651,7 +666,7 @@ function demoModel() {
       ],
     },
     lanes,
-    waves: [{ name: "Wave 1", lanes: [scene, sprites] }, { name: "Wave 2", lanes: [review] }],
+    waves: [{ name: "Wave 1", lanes: [byId["office-scene"], byId["office-sprites"]].filter(Boolean) }, { name: "Wave 2", lanes: [byId["office-review"]].filter(Boolean) }],
   };
 }
 
@@ -798,6 +813,13 @@ function tokenCard(p) {
 // The plan carries the author name as leadName (lead is now the lead token table); old/demo fixtures still use a string.
 function leadName(p) { return (p && (p.leadName || (typeof p.lead === "string" ? p.lead : ""))) || "Lead"; }
 
+// The plans offered by the picker. Live mode lists the runner plans; demo mode lists the one fixture
+// plan so the menu (and its Delete control) is reachable in demo mode too.
+function demoPlanOptions() {
+  const p = model && model.plan;
+  if (!p || !p.id || demoRemoved.has(p.id)) return [];
+  return [{ id: p.id, title: p.title, closed: !!p.closed }];
+}
 let needsShown = -1;
 function renderTop() {
   const p = model.plan;
@@ -832,15 +854,16 @@ function renderTop() {
     $("tokenChip").setAttribute("aria-label", "Tokens " + CAUI.fmtTokens(pt) + ": " + CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).concat(mm).join(", "));
     $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).join(" \u00b7 ");
   }
-  const nPlans = mode === "demo" ? 1 : plansArr.length;
+  const planOptions = mode === "demo" ? demoPlanOptions() : plansArr;
+  const nPlans = mode === "demo" ? planOptions.length : plansArr.length;
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
   $("counts").textContent = `${nPlans} plan${nPlans === 1 ? "" : "s"} \u00b7 ${nLanes} lane${nLanes === 1 ? "" : "s"}`;
   const sel = $("planSel");
-  const sig = JSON.stringify(plansArr.map((x) => x.id));
-  if (mode === "live" && plansArr.length >= 1) {
+  const sig = JSON.stringify(planOptions.map((x) => x.id));
+  if (planOptions.length >= 1) {
     sel.hidden = false;
-    if (sig !== plansSig) { plansSig = sig; sel.innerHTML = plansArr.map((x) => `<option value="${CAUI.esc(x.id)}">${CAUI.esc(x.title)}${x.closed ? " (closed)" : ""}</option>`).join(""); }
-    sel.value = (planSel && plansArr.some((x) => x.id === planSel)) ? planSel : plansArr[0].id;
+    if (sig !== plansSig) { plansSig = sig; sel.innerHTML = planOptions.map((x) => `<option value="${CAUI.esc(x.id)}">${CAUI.esc(x.title)}${x.closed ? " (closed)" : ""}</option>`).join(""); }
+    sel.value = (planSel && planOptions.some((x) => x.id === planSel)) ? planSel : planOptions[0].id;
   } else { sel.hidden = true; plansSig = ""; }
   $("planPick").hidden = sel.hidden;
   if (sel.hidden) closePlanMenu();
@@ -855,6 +878,7 @@ function renderTop() {
 // Plan picker: a styled listbox over the hidden #planSel (which keeps the value and fires change).
 let planMenuActive = -1;
 function planRunning(id) {
+  if (mode === "demo") return !!(model && model.lanes.some((l) => l.running));
   const p = plansArr.find((x) => x.id === id);
   if (!p) return false;
   const run = new Set(lanesArr.filter((l) => l.running).map((l) => l.id));
@@ -862,15 +886,18 @@ function planRunning(id) {
 }
 function renderPlanMenu() {
   const sel = $("planSel"), opts = [...sel.options].map((o, i) => [o, i]);
+  const src = mode === "demo" ? demoPlanOptions() : plansArr;
+  const planIds = new Set(src.map((x) => x.id));
   const row = ([o, i]) => {
-    const p = plansArr.find((x) => x.id === o.value);
+    const p = src.find((x) => x.id === o.value);
     const running = planRunning(o.value), closed = !!(p && p.closed);
     const label = o.textContent.replace(/ \(closed\)$/, "");
     const dot = `<span class="pm-dot${running ? " run" : closed ? " closed" : ""}" aria-hidden="true"></span>`;
     const tag = running ? '<span class="pm-tag run">running</span>' : closed ? '<span class="pm-tag">closed</span>' : "";
-    return `<li role="option" id="pm-${i}" data-i="${i}" style="--i:${Math.min(i, 7)}" aria-selected="${o.value === sel.value}"${i === planMenuActive ? ' class="active"' : ""}>${dot}<span class="pm-t" title="${CAUI.esc(label)}">${CAUI.esc(label)}</span>${tag}<svg class="pm-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></li>`;
+    const del = planIds.has(o.value) ? `<button type="button" class="pm-del" data-pm-del="${CAUI.esc(o.value)}" aria-label="Delete plan ${CAUI.esc(label)}" title="Delete plan ${CAUI.esc(label)}">${DEL_ICO}</button>` : "";
+    return `<li role="option" id="pm-${i}" data-i="${i}" style="--i:${Math.min(i, 7)}" aria-selected="${o.value === sel.value}"${i === planMenuActive ? ' class="active"' : ""}>${dot}<span class="pm-t" title="${CAUI.esc(label)}">${CAUI.esc(label)}</span>${tag}${del}<svg class="pm-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></li>`;
   };
-  const isPlan = ([o]) => plansArr.some((x) => x.id === o.value);
+  const isPlan = ([o]) => planIds.has(o.value);
   const views = opts.filter((x) => !isPlan(x)), plans = opts.filter(isPlan);
   let html = views.map(row).join("");
   if (views.length && plans.length) html += '<li class="pm-sep" role="presentation"></li>';
@@ -921,6 +948,48 @@ function pickPlan(i) {
   sel.dispatchEvent(new Event("change"));
 }
 
+// Delete a plan or a lane through the runner API: one confirm, one POST, then drop it from the scene
+// at once and reload. Demo mode never fetches: it drops the id from the fixture and re-renders.
+async function postRemove(path) {
+  try { return await (await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json(); }
+  catch { return { error: "request failed" }; }
+}
+async function deletePlan(id) {
+  const p = mode === "demo" ? (model && model.plan) : plansArr.find((x) => x.id === id);
+  const title = p ? p.title : id;
+  const n = mode === "demo" ? (model ? model.lanes.length : 0) : (p ? planLaneIds(p).length : 0);
+  if (!confirm(`Delete plan ${title}? Its ${n} lane(s) will be stopped, their processes killed and their logs deleted. Briefs are kept.`)) return;
+  if (mode === "demo") { demoRemoved.add(id); closePlanMenu(); render(); toast(`Deleted plan ${title}`); return; }
+  const r = await postRemove(`/api/plans/${encodeURIComponent(id)}/remove`);
+  if (r && r.error) { toast(r.error, true); return; }
+  demoRemoved.add(id);
+  const gone = new Set(Array.isArray(r.lanes) ? r.lanes : []);
+  plansArr = plansArr.filter((x) => x.id !== id);
+  if (gone.size) lanesArr = lanesArr.filter((l) => !gone.has(l.id));
+  if (planSel === id) { planSel = defaultPlanId(); planUserPicked = false; }
+  closePlanMenu();
+  render();
+  toast(`Deleted plan ${title}`);
+  tick();
+}
+async function deleteLane(id) {
+  const l = model && model.lanes.find((x) => x.id === id);
+  const task = l ? laneName(l) : id;
+  const running = !!(l && l.running);
+  const tail = running ? "It is running: it will be stopped and killed, its logs deleted. Briefs are kept." : "Its process will be killed and its logs deleted. Briefs are kept.";
+  if (!confirm(`Delete lane ${task}? ${tail}`)) return;
+  if (mode === "demo") { demoRemoved.add(id); render(); toast(`Deleted lane ${task}`); return; }
+  const r = await postRemove(`/api/lane/${encodeURIComponent(id)}/remove`);
+  if (r && r.error) { toast(r.error, true); return; }
+  demoRemoved.add(id);
+  lanesArr = lanesArr.filter((x) => x.id !== id);
+  for (const p of plansArr) for (const w of (p.waves || [])) if (w.lanes) w.lanes = w.lanes.filter((x) => x.id !== id);
+  if (winFor === id) closeWin(false);
+  render();
+  toast(`Deleted lane ${task}`);
+  tick();
+}
+
 // Hover cards for the token chip and the plan badge.
 let hoverOn = null;
 function showHoverCard(id) {
@@ -947,7 +1016,7 @@ function render() {
   renderNarrowList();
   fireCues(cues);
   updateWin();
-  $("emptyCard").hidden = !(mode !== "demo" && model && model.lanes.length === 0 && !(model.plan && model.plan.waves && model.plan.waves.some((w) => (w.lanes || []).length)));
+  $("emptyCard").hidden = !(model && model.lanes.length === 0 && !(model.plan && model.plan.waves && model.plan.waves.some((w) => (w.lanes || []).length)));
 }
 
 async function tick() {
@@ -1529,7 +1598,14 @@ function renderControls(l) {
     }
     closeNote();
   }
-  $("winCtl").hidden = !ids.length;
+  // The Delete control rides with the window controls: always shown for a lane, even one with no actions.
+  const canDel = !!(winFor && winFor !== "lead");
+  const delRow = $("winDelRow"), del = $("winDel");
+  if (delRow && del) {
+    delRow.hidden = !canDel;
+    if (canDel) { const dTask = laneName(l); del.textContent = "Delete lane"; del.setAttribute("aria-label", "Delete lane " + dTask); del.title = "Delete lane " + dTask; }
+  }
+  $("winCtl").hidden = !ids.length && !(canDel);
   const why = ids.length ? (l.why || "") : "";
   $("winWhy").hidden = !why;
   $("winWhy").textContent = why;
@@ -1560,6 +1636,7 @@ function hideControls() {
   $("winBtns").innerHTML = "";
   $("winCtl").hidden = true;
   $("winWhy").hidden = true;
+  $("winDelRow").hidden = true;
   closeNote();
   $("winChips").hidden = true;
 }
@@ -1816,6 +1893,7 @@ demoHooks.press = (id) => {
 };
 demoHooks.escape = () => winHooks.close();
 $("winX").addEventListener("click", () => closeWin(true));
+$("winDel").addEventListener("click", () => { if (!winFor || winFor === "lead") return; deleteLane(winFor); });
 $("noteSend").addEventListener("click", () => {
   if (!winFor || winFor === "lead" || !noteAction || ctlInFlight) return;
   const id = winFor, action = noteAction;
@@ -2038,11 +2116,13 @@ window.__office = {
   },
   demoAdvance,
   demoFail,
+  // ids deleted through the Delete controls, for the check harness
+  removed: () => [...demoRemoved],
 };
 
 $("planBtn").addEventListener("click", () => ($("planMenu").hidden ? openPlanMenu() : closePlanMenu(true)));
 $("planBtn").addEventListener("keydown", (e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); openPlanMenu(); } });
-$("planMenu").addEventListener("click", (e) => { const li = e.target.closest("[role=option]"); if (li) pickPlan(Number(li.dataset.i)); });
+$("planMenu").addEventListener("click", (e) => { const del = e.target.closest("[data-pm-del]"); if (del) { e.preventDefault(); deletePlan(del.dataset.pmDel); return; } const li = e.target.closest("[role=option]"); if (li) pickPlan(Number(li.dataset.i)); });
 $("planMenu").addEventListener("mousemove", (e) => {
   const li = e.target.closest("[role=option]"); if (!li || Number(li.dataset.i) === planMenuActive) return;
   planMenuActive = Number(li.dataset.i);
