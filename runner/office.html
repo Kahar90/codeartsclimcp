@@ -1854,7 +1854,7 @@ function showWin(id, anchor, kb) {
   win.classList.remove("win-in", "win-out");
   if (!wasOpen && !winInstant()) { void win.offsetWidth; win.classList.add("win-in"); }
   if (kb) $("winX").focus();
-  if (mode !== "demo" && id !== "lead") fetchDetail(id).then((d) => { if (winFor === id && !$("win").hidden && d && d.steps) renderChecklist(d.steps); });
+  if (mode !== "demo" && id !== "lead") fetchDetail(id).then((d) => { if (winFor === id && !$("win").hidden && d && d.steps) renderChecklist(d.steps, !!(model.lanes.find((x) => x.id === id) || {}).running); });
 }
 function closeWin(toFocus) {
   openSeq++;
@@ -1890,7 +1890,7 @@ function updateWin() {
   const l = model.lanes.find((x) => x.id === winFor);
   if (!l) { closeWin(false); focusFallback(); return; }
   renderWinContent(true);
-  if (mode !== "demo") fetchDetail(winFor).then((d) => { if (winFor && !$("win").hidden && d && d.steps) renderChecklist(d.steps); });
+  if (mode !== "demo") fetchDetail(winFor).then((d) => { if (winFor && !$("win").hidden && d && d.steps) renderChecklist(d.steps, !!l.running); });
 }
 winHooks.open = (id, anchor, kb) => {
   if (winFor === id && !$("win").hidden) { closeWin(false); return; }
