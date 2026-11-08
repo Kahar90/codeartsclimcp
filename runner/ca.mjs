@@ -75,7 +75,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
-import { laneActions, laneBucket, laneKind, classifyCheck } from './controls.mjs';
+import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
 import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
@@ -1079,6 +1079,13 @@ function bucketFor(l) {
   return r;
 }
 function bucketOf(l) { return bucketFor(l).bucket; }
+// The one status a person sees for this lane, shown the same way in the CLI, MCP and both views.
+// bucketFor already decides whether a finished needs-you lane was acknowledged (handled): pass
+// that through so an acked lane reads Handled (or Merged) and everything else keeps its own status.
+function laneStatusOf(l, s = l.s) {
+  const r = bucketFor(l);
+  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '' });
+}
 // Lane kind for the Office characters; the brief is read once per change (mtime), not on every poll.
 const kindCache = new Map();
 function kindOf(l) {
@@ -1097,7 +1104,7 @@ const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 477
 // A status row for scripts: every laneRow field plus identity, result, progress and file paths.
 function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
-  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '',
+  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', status: laneStatusOf(l),
     progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
     summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
@@ -1170,7 +1177,7 @@ function cmdSummary(args) {
   const text = fs.existsSync(sm) ? fs.readFileSync(sm, 'utf8') : '';
   if (args.includes('--json')) {
     const pg = stepProgress(s);
-    console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', verdict: s.verdict || '',
+    console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', status: laneStatusOf(l), reason: s.reason || '', verdict: s.verdict || '',
       elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), commits: s.commitLog || [], steps: pg.list,
       gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
     return;
@@ -1472,7 +1479,7 @@ async function cmdWait(args) {
       if (last.get(l.id) !== key) { last.set(l.id, key); if (!quiet) note(l, s); }
     }
     if (states.every(({ s }) => s.result)) {
-      const objs = states.map(({ l, s }) => ({ lane: l.id, result: s.result, verdict: s.verdict || '', exit: laneExit(s),
+      const objs = states.map(({ l, s }) => ({ lane: l.id, result: s.result, status: laneStatusOf(l, s), verdict: s.verdict || '', exit: laneExit(s),
         summaryPath: fs.existsSync(path.join(l.dir, 'summary.md')) ? path.join(l.dir, 'summary.md') : null }));
       for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
       if (asJson) process.stdout.write(JSON.stringify({ lanes: objs }) + '\n');
@@ -1856,7 +1863,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
-    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
+    actions, suggest, why, bucket, bucketWhy, status: laneStatusOf(l), project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1905,6 +1912,13 @@ function leadView(p) {
   if (!Object.keys(out).length) { const m = (typeof p.lead === 'string' && p.lead) || 'lead'; out[m] = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0, total: null, who: 'lead', source: 'none' }; }
   return out;
 }
+// A lane status key (from laneView/laneStatusOf), falling back to the raw result for a lane that
+// never got one. Plan and wave badges read these so the new results show up correctly.
+const statusKey = (x) => (x && x.status && x.status.key) || (x && x.result) || '';
+// Settled: nothing is left for a human (the new Verified, a plain Done, or an acked Handled lane).
+const settledKey = (k) => k === 'verified' || k === 'done' || k === 'handled';
+// Anything a human must look at, plus the ended-without-a-result states the old badge read the same way.
+const attnKey = (k) => ['checks failing', 'failed', 'unverified', 'stopped', 'killed'].includes(k);
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
@@ -1915,9 +1929,12 @@ function planView(r) {
     if (!fs.existsSync(bf)) bf = path.join(base, 'tasks', `${pl.task}.md`);
     const old = l ? null : laneFromLog(path.join(base, 'tasks', `${pl.task}.lane.log`), { id, task: pl.task, repo, dir: path.join(repo, 'tasks', `${pl.task}.lane`) }, bf);
     const v = l ? laneView(l) : old ? { ...laneView(old), archived: true } : { id, task: pl.task, repo, health: 'planned', phase: 'planned', running: false, result: '',
+      status: { key: 'planned', label: 'Planned', tone: 'idle', reason: 'planned, not started' },
       progress: { done: 0, total: briefSteps(bf).length, current: null } };
     // "dropped": true marks a planned lane the lead decided not to run; it never counts as open work.
-    const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
+    const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped',
+      status: { key: 'dropped', label: 'Dropped', tone: 'idle', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' },
+      reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
     if (pl.kind && ['code', 'art', 'review', 'docs'].includes(String(pl.kind).toLowerCase())) v.kind = String(pl.kind).toLowerCase(); // plan override
     return { ...v, ...d, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
   });
@@ -1926,7 +1943,9 @@ function planView(r) {
   for (const pl of (p.lanes || []).filter((x) => x && !x.removed)) {
     const old = pl.continues && byTask.get(pl.continues), nu = byTask.get(pl.task);
     if (old && nu && old.result && old.result !== 'done') {
-      Object.assign(old, { health: 'continued', result: 'continued', continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
+      Object.assign(old, { health: 'continued', result: 'continued',
+        status: { key: 'continued', label: 'Continued', tone: 'idle', reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` },
+        continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
       // One agent, one station: the successor carries the earlier run(s); views show them as history, not as another lane.
       nu.continues = [...(old.continues || []), { id: old.id, task: old.task, reason: old.reason, commits: old.commits, progress: old.progress, elapsed: old.elapsed }];
       nu.runs = (nu.runs || 1) + (old.runs || 1);
@@ -1936,8 +1955,8 @@ function planView(r) {
   const waves = (p.waves && p.waves.length ? p.waves : [{ name: 'Lanes', lanes: planned.map((x) => x.task) }]).map((w) => {
     const all = (w.lanes || []).map((t) => byTask.get(t)).filter(Boolean);
     const ls = all.filter((x) => !x.folded); const act = ls.filter((x) => x.result !== 'dropped');
-    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => ['done', 'needs review'].includes(x.result)) ? 'done' : act.some((x) => x.running) ? 'running'
-      : act.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : act.some((x) => x.result === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
+    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => settledKey(statusKey(x))) ? 'done' : act.some((x) => x.running) ? 'running'
+      : act.some((x) => attnKey(statusKey(x))) ? 'attention' : act.some((x) => statusKey(x) === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
     return { name: w.name, note: w.note || w.after || '', status: st, lanes: ls, folded: all.length && !ls.length };
   }).filter((w) => !w.folded).map(({ folded, ...w }) => w); // a wave whose lanes all continued elsewhere is history, not a stage
   // The plan badge comes from what the lanes really do, never only from the hand-written status: a plan whose
@@ -1949,9 +1968,10 @@ function planView(r) {
   const ts = (t) => { const n = typeof t === 'number' ? t : new Date(t || 0).getTime(); return Number.isFinite(n) ? n : 0; };
   const lastActivity = Math.max(r.mtime || 0, ...allL.map((x) => Math.max(ts(x.finishedAt), ts(x.startedAt))));
   const closed = /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || '');
+  const allSettled = live.length > 0 && live.every((x) => settledKey(statusKey(x)));
   const state = counts.running ? 'running' : closed ? (counts.done === counts.total ? 'done' : 'closed')
-    : live.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : live.some((x) => x.result === 'paused') ? 'paused'
-    : counts.total && counts.done === counts.total ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
+    : live.some((x) => attnKey(statusKey(x))) ? 'attention' : live.some((x) => statusKey(x) === 'paused') ? 'paused'
+    : allSettled ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
   const idle = Date.now() - lastActivity; const dur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
   const bits = [`${counts.done}/${counts.total} lanes done`];
   if (counts.running) bits.push(`${counts.running} running`);

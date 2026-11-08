@@ -189,7 +189,7 @@ const TOOLS = [
   },
   {
     name: 'ca_status',
-    description: 'Snapshot of all lanes as JSON: health, phase, elapsed, step progress, tokens, result, verdict. Use it to see what exists and what finished; to wait for a lane, block on ca_wait instead of polling this.',
+    description: 'Snapshot of all lanes as JSON: status (key, label, tone, reason), health, phase, elapsed, step progress, tokens, result, verdict. status.label is the one word a person sees (Verified, Unverified, Checks failing, Merged, ...); use it instead of reading result. Use it to see what exists and what finished; to wait for a lane, block on ca_wait instead of polling this.',
     inputSchema: { type: 'object', properties: { all: { type: 'boolean', description: 'include lanes that finished more than 24 h ago' } }, required: [] },
     ok: [0],
     timeout: 60000,
@@ -197,7 +197,7 @@ const TOOLS = [
   },
   {
     name: 'ca_wait',
-    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed or stopped, 3 keys missing or rejected (run ca auth), 4 needs review, 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -210,7 +210,7 @@ const TOOLS = [
   },
   {
     name: 'ca_summary',
-    description: 'Final report of one lane as JSON: result, verdict, commits, gates, fix rounds, interruptions, steering, outside-repo access and the summary text. Read it when a lane ends, judge the reviewer findings against the brief and verify the work yourself; open ca_tail only when the summary points at a problem.',
+    description: 'Final report of one lane as JSON: status (key, label, tone, reason), result, verdict, commits, gates, fix rounds, interruptions, steering, outside-repo access and the summary text. Read it when a lane ends, judge the reviewer findings against the brief and verify the work yourself; open ca_tail only when the summary points at a problem.',
     inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name (as in ca_status)' } }, required: ['lane'] },
     ok: [0],
     timeout: 60000,
