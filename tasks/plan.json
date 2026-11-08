@@ -1,32 +1,28 @@
 {
-  "title": "You are working in a git repo (current directory)",
-  "goal": "You are working in a git repo (current directory)",
+  "title": "two UX bugs reported by the user",
+  "goal": "two UX bugs reported by the user",
   "lead": "lead",
-  "status": "done",
-  "now": "Closed: README refresh accepted by lead after image inspection and README/Office checks. Runner Bash lacks node; no reviewer verdict. Two existing onboarding doctor-row assertions fail. No remaining implementation work.",
+  "status": "running",
+  "now": "",
   "waves": [
     {
       "name": "Lanes",
       "lanes": [
-        "readme-refresh"
+        "ui-polish"
       ]
     }
   ],
   "lanes": [
     {
-      "task": "readme-refresh",
+      "task": "ui-polish",
       "repo": ".",
-      "why": "You are working in a git repo (current directory)"
+      "why": "two UX bugs reported by the user"
     }
   ],
   "decisions": [
     {
-      "at": "2026-11-08T05:06:25.395Z",
-      "text": "Plan created by the runner: lane readme-refresh started without an open plan."
-    },
-    {
-      "at": "2026-11-08T05:19:53.136Z",
-      "text": "Plan closed: README refresh accepted by lead after image inspection and README/Office checks. Runner Bash lacks node; no reviewer verdict. Two existing onboarding doctor-row assertions fail. No remaining implementation work.."
+      "at": "2026-11-08T07:32:06.370Z",
+      "text": "Plan created by the runner: lane ui-polish started without an open plan."
     }
   ],
   "next": [],
