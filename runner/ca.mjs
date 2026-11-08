@@ -766,7 +766,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   const dirty = () => dirtyAll().filter((l) => !PRE_DIRTY.has(l));
   const runCheck = (cmd) => new Promise((res) => {
     const t0 = now(); let out = '';
-    const ch = spawn('bash', ['-c', cmd], { cwd: repo, env: { ...process.env, CA_LANE: id }, windowsHide: true });
+    // Run the check in the same shell the worker uses. A bare "bash" resolves through PATH and on
+    // Windows can pick C:\Windows\System32\bash.exe (the WSL launcher), where node is not installed,
+    // so every CHECK line fails with exit 127 "node: command not found". workerShell() picks Git bash.
+    const ch = spawn(workerShell() || 'bash', ['-c', cmd], { cwd: repo, env: { ...process.env, CA_LANE: id }, windowsHide: true });
     const timer = setTimeout(() => { out += `\n[runner: timed out after ${CFG.checkTimeout}s]`; killTree(ch.pid); }, CFG.checkTimeout * 1000);
     ch.stdout.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
     ch.stderr.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
