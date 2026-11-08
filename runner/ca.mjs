@@ -991,7 +991,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const g = await gates();
       if (g.ok) { reason = ''; exitCode = 0; break; }
       // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
-      if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`repo not writable; no fix round (${g.what})`); break; }
+      if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
       // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
       // repair the machine), but a human must look, so exit 4 like needs review.
       if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
@@ -1692,7 +1692,8 @@ function cmdWorkspace(args) {
   const fail = (what, r) => die(`${what}: ${oneLine(String((r.stderr || '') + (r.stdout || '')).trim(), 300)}`, 1);
   if (land) {
     if (!fs.existsSync(clone)) die(`no workspace to land: ${clone}`, 2);
-    const dirtyTree = git(repo, 'status', '--porcelain');
+    // tasks/ holds the plan and lane logs the lead and runner update while lanes run: they never block a land.
+    const dirtyTree = git(repo, 'status', '--porcelain', '--', '.', ':!tasks');
     if (dirtyTree) die(`main tree is dirty in ${repo}: commit or stash first, then land\n${oneLine(dirtyTree, 200)}`, 1);
     const f = run(repo, 'fetch', clone, branch);
     if (f.status !== 0) fail('git fetch failed', f);
