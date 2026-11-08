@@ -225,6 +225,12 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .del { display: inline-flex; align-items: center; gap: 5px; flex: none }
 .del .ca-ico { width: 13px; height: 13px }
 .rail-row .del, .rail-fin .del { padding: 4px 8px }
+/* In the narrow plans rail the Delete control is icon only and quiet until the card is hovered or
+   focused, so the plan title keeps the row width (aria-label and title still name it). */
+.rail-row .del { padding: 3px 5px; min-height: 0; opacity: .45; transition: opacity .15s }
+.rail-row .del > span { display: none }
+.rail-card:hover .rail-row .del, .rail-card:focus-within .rail-row .del, .rail-row .del:focus-visible { opacity: 1 }
+@media (hover: none) { .rail-row .del { opacity: 1 } }
 .plan-head-row, .lane-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between }
 
 /* ---------- onboarding ---------- */
