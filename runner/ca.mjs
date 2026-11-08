@@ -131,8 +131,8 @@ const writeAtomic = (f, text) => {
   try { fs.writeFileSync(f, text); } catch {} try { fs.rmSync(tmp, { force: true }); } catch {}
 };
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-const killTree = (pid) => { if (!pid) return; if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} } } };
-const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding: 'utf8' }); return (r.stdout || '').trim(); };
+const killTree = (pid) => { if (!pid) return; if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} } } };
+const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }); return (r.stdout || '').trim(); };
 
 // ---------- CodeArts environment (same as installers/codearts.cmd) ----------
 const envCache = {};
@@ -142,7 +142,7 @@ function userEnv(name) {
   if (saved) return saved;
   if (name in envCache) return envCache[name];
   if (process.platform !== 'win32') return '';
-  try { return (envCache[name] = execFileSync('powershell', ['-NoProfile', '-Command', `[Environment]::GetEnvironmentVariable('${name}','User')`], { encoding: 'utf8' }).trim()); } catch { return (envCache[name] = ''); }
+  try { return (envCache[name] = execFileSync('powershell', ['-NoProfile', '-Command', `[Environment]::GetEnvironmentVariable('${name}','User')`], { encoding: 'utf8', windowsHide: true }).trim()); } catch { return (envCache[name] = ''); }
 }
 // The worker's bash tool runs $SHELL. When ca is started from Git Bash, SHELL is the raw MSYS
 // binary (Git\usr\bin\bash.exe), which hangs forever at startup under a console-less native
@@ -215,7 +215,7 @@ class Server {
     const out = fs.openSync(this.logFile, 'a');
     if (process.env.CA_DUMP_ENV) fs.writeFileSync(process.env.CA_DUMP_ENV, JSON.stringify({ env: redactEnv(caEnv({ CODEARTS_SERVER_PASSWORD: this.pw })), cwd: this.cwd }, null, 1));
     this.child = spawn(EXE, ['serve', '--port', String(this.port), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'WARN'],
-      { cwd: this.cwd, env: caEnv({ CODEARTS_SERVER_PASSWORD: this.pw }), stdio: ['ignore', out, out] });
+      { cwd: this.cwd, env: caEnv({ CODEARTS_SERVER_PASSWORD: this.pw }), stdio: ['ignore', out, out], windowsHide: true });
     this.alive = true;
     this.child.on('exit', (code) => { this.alive = false; this.exitCode = code; });
     const t0 = now();
@@ -300,7 +300,7 @@ async function runLane(repoArg, task, opts = {}) {
     git(repo, 'add', '.gitignore'); git(repo, 'commit', '-qm', 'chore: ignore codearts state and lane files');
   }
   // Folder trust (prefix match in ~/.codeartsdoer/cli-data/settings.json).
-  const tr = spawnSync(process.execPath, [path.join(SKILL, 'scripts', 'trust.mjs'), repo], { encoding: 'utf8' });
+  const tr = spawnSync(process.execPath, [path.join(SKILL, 'scripts', 'trust.mjs'), repo], { encoding: 'utf8', windowsHide: true });
   if (tr.status !== 0) die(`folder trust failed: ${tr.stderr}`, 4);
 
   const live = fs.openSync(path.join(dir, 'live.log'), 'a');
@@ -1416,7 +1416,7 @@ async function doctorData(repoArg) {
   add('maas key', userEnv('MAAS_API_KEY') ? 'ok' : 'warn', userEnv('MAAS_API_KEY') ? 'set' : 'not set, falls back to CodeArts quota models',
     userEnv('MAAS_API_KEY') ? '' : 'ca auth --force adds MAAS_API_KEY for the MaaS models');
 
-  const g = spawnSync('git', ['--version'], { encoding: 'utf8' });
+  const g = spawnSync('git', ['--version'], { encoding: 'utf8', windowsHide: true });
   add('git', g.status === 0 ? 'ok' : 'fail', oneLine(((g.stdout || '') + (g.stderr || '')).trim(), 120) || 'git not found', g.status === 0 ? '' : 'install git');
 
   const settings = readJSON(SETTINGS) || {};
