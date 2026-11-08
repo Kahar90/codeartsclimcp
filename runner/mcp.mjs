@@ -347,6 +347,36 @@ const TOOLS = [
     build: () => ['gc'],
   },
   {
+    name: 'ca_rm',
+    description: "Delete a lane for good (ca rm <lane>): kills the lane's processes, unregisters it and deletes its lane logs; the brief is kept. Set keep_logs to keep the lane folder and log. Use it to clean up a lane nothing will resume.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', description: 'lane id or task name (as in ca_status)' },
+        keep_logs: { type: 'boolean', description: 'keep the lane folder and log instead of deleting them (the brief is always kept)' },
+      },
+      required: ['lane'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['rm', needStr(a.lane, 'lane'), ...(a.keep_logs ? ['--keep-logs'] : [])],
+  },
+  {
+    name: 'ca_plan_rm',
+    description: 'Delete a registered plan and its registered lanes (ca plan rm <id>): kills each lane\'s processes and deletes its lane logs, unregisters the plan and marks it removed so it never appears again. Set keep_lanes to only unregister the plan and leave its lanes alone. Use it to drop a plan whose work is done or abandoned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'registered plan id to delete (as in ca_plan_list)' },
+        keep_lanes: { type: 'boolean', description: 'only unregister the plan; its lanes stay registered (the plan.json file is kept)' },
+      },
+      required: ['id'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['plan', 'rm', needStr(a.id, 'id'), ...(a.keep_lanes ? ['--keep-lanes'] : [])],
+  },
+  {
     name: 'ca_update_check',
     description: 'Check whether a newer codearts-lanes release exists (ca update --check --json) and return current, latest, available, what is new in each newer version and the install command. Read-only: it never installs anything.',
     inputSchema: { type: 'object', properties: {}, required: [] },
@@ -450,10 +480,11 @@ async function cliResult(tool, cliArgs) {
   return { content: [{ type: 'text', text }], isError: !ok };
 }
 
-// MCP annotations per tool: read-only tools are safe to auto-approve; the two that end work
-// (ca_stop, ca_plan_close) are destructive; every other tool changes state without destroying it.
+// MCP annotations per tool: read-only tools are safe to auto-approve; the tools that end or delete
+// work (ca_stop, ca_plan_close, ca_rm, ca_plan_rm) are destructive; every other tool changes state
+// without destroying it.
 const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list', 'ca_update_check']);
-const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close']);
+const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close', 'ca_rm', 'ca_plan_rm']);
 const annotationsFor = (name) => (READ_ONLY_TOOLS.has(name)
   ? { readOnlyHint: true }
   : { readOnlyHint: false, destructiveHint: DESTRUCTIVE_TOOLS.has(name) });
