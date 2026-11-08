@@ -9,6 +9,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
@@ -101,8 +102,9 @@ let chrome = null;
 const dashPort = await freePort();
 const dash = spawn(process.execPath, [CA, 'dash', String(dashPort)], { stdio: 'ignore', env });
 const base = `http://127.0.0.1:${dashPort}`;
-const cleanup = () => { try { if (chrome) chrome.kill(); } catch {} try { dash.kill(); } catch {} };
-process.on('exit', cleanup);
+let sock = null;
+const finish = (code) => settle({ socket: sock, children: [dash, chrome], code });
+guard({ children: [dash] });
 try {
   let up = false; for (let i = 0; i < 40 && !up; i++) { await wait(250); try { up = (await fetch(base + '/api/lanes')).ok; } catch {} }
   check('ca dash starts', up);
@@ -121,8 +123,9 @@ try {
     const cdpPort = await freePort();
     const profile = chromeProfileDir('status');
     chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
+    guard({ children: [chrome] });
     let ws; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); const p = t.find((x) => x.type === 'page'); if (p) ws = p.webSocketDebuggerUrl; } catch {} }
-    const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+    sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
     let id = 0; const pending = new Map(); const errors = [];
     sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
     const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
@@ -158,7 +161,6 @@ try {
     sock.close();
   }
 } catch (e) { check('status check script ran', false, String((e && e.stack) || e)); }
-cleanup();
 const bad = report();
-fs.rmSync(tmp, { recursive: true, force: true });
-process.exit(bad ? 1 : 0);
+await finish(bad ? 1 : 0);
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }

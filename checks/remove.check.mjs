@@ -8,6 +8,7 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-remove-'));
@@ -19,7 +20,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 // Every process this check starts is tracked so the finally block can never leave one behind.
 const spawned = [];
-const spawnSleeper = () => { const p = spawn(process.execPath, ['-e', 'setTimeout(()=>{},600000)'], { detached: true, stdio: 'ignore' }); p.unref(); spawned.push(p); return p; };
+const spawnSleeper = () => { const p = spawn(process.execPath, ['-e', 'setTimeout(()=>{},600000)'], { detached: true, stdio: 'ignore' }); p.unref(); spawned.push(p); guard({ children: [p] }); return p; };
 const isDead = (pid) => { if (!pid) return true; try { process.kill(pid, 0); return false; } catch (e) { return e.code !== 'EPERM'; } };
 
 const repo = path.join(tmp, 'sbx'); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
@@ -86,7 +87,7 @@ try {
 
   // ---- 5. the dashboard POST API: same behaviour over HTTP, JSON content-type required ----
   const port = await freePort();
-  const dash = spawn(process.execPath, [CA, 'dash', String(port)], { stdio: 'ignore', env }); spawned.push(dash);
+  const dash = spawn(process.execPath, [CA, 'dash', String(port)], { stdio: 'ignore', env }); spawned.push(dash); guard({ children: [dash] });
   let up = false; for (let i = 0; i < 60 && !up; i++) { await wait(250); try { up = (await fetch(`http://127.0.0.1:${port}/api/lanes`)).ok; } catch {} }
   const web = fakeLane(repo, 'web1', {});
   const post = (url, body, headers = { 'content-type': 'application/json' }) => fetch(`http://127.0.0.1:${port}${url}`, { method: 'POST', headers, body });
@@ -110,7 +111,7 @@ try {
   check('HTTP plan remove 404 on an unknown id', rp404.status === 404, `status ${rp404.status}`);
 
   // ---- 6. MCP tools/list exposes ca_rm and ca_plan_rm as destructive ----
-  const mcp = spawn(process.execPath, [CA, 'mcp'], { env, stdio: ['pipe', 'pipe', 'pipe'] }); spawned.push(mcp);
+  const mcp = spawn(process.execPath, [CA, 'mcp'], { env, stdio: ['pipe', 'pipe', 'pipe'] }); spawned.push(mcp); guard({ children: [mcp] });
   let buf = ''; const waiters = new Map();
   mcp.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue; let m; try { m = JSON.parse(line); } catch { continue; } if (m.id != null && waiters.has(m.id)) { waiters.get(m.id)(m); waiters.delete(m.id); } } });
   let nid = 0;
@@ -127,11 +128,11 @@ try {
 } catch (e) {
   check('check script ran', false, String((e && e.stack) || e));
 } finally {
-  for (const p of spawned) { try { p.kill(); } catch {} }
+  await settle({ children: spawned, code: 0 });
 }
 
-try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); }
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;
 console.log(fails ? `${fails} FAILED` : `all ${results.length} passed`);
-process.exit(fails ? 1 : 0);
+process.exitCode = fails ? 1 : 0;

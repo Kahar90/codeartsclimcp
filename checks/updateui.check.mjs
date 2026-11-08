@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chromePath = findChrome();
 if (!chromePath) { console.log('SKIP updateui: no Chrome found (set CHROME_PATH)'); process.exit(0); }
@@ -34,12 +35,13 @@ const env = { ...process.env, HOME: home, USERPROFILE: home, LOCALAPPDATA: path.
 delete env.CA_NO_UPDATE_CHECK;
 const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(dp)], { cwd: tmp, env, stdio: 'ignore' });
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cp}`, `--user-data-dir=${chromeProfileDir('updateui')}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
-let newPid = null;
-const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} if (newPid) { try { process.kill(newPid); } catch {} } srv.close(); };
-const timer = setTimeout(() => { console.log('FAIL timeout'); cleanup(); process.exit(1); }, 120000);
+let sock = null; let newPid = null;
+const finish = (code) => { if (newPid) { try { process.kill(newPid); } catch {} } srv.close(); return settle({ socket: sock, children: [chrome, dash], code }); };
+guard({ children: [chrome, dash] });
+const timer = setTimeout(() => { console.log('FAIL timeout'); finish(1); }, 120000);
 try {
   let ws = null; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { ws = (await (await fetch(`http://127.0.0.1:${cp}/json/list`)).json()).find((x) => x.type === 'page')?.webSocketDebuggerUrl; } catch {} }
-  const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+  sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
   let n = 0; const pend = new Map(); sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pend.has(m.id)) { pend.get(m.id)(m.result); pend.delete(m.id); } });
   const send = (method, params = {}) => new Promise((r) => { const i = ++n; pend.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
   const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }))?.result?.value;
@@ -59,7 +61,7 @@ try {
   check('the popover has an Update now button', btn);
   await click('[data-test-update]'); await wait(300);
   const busy = await ev(`(document.querySelector('.ca-update-pop') || document.body).textContent`);
-  check('Update now shows progress (Updating or Restarting)', /Updating|Restarting/i.test(busy), busy.slice(0, 160));
+  check('Update now shows progress (Installing or Restarting)', /Installing|Restarting/i.test(busy), busy.slice(0, 160));
   await send('Page.captureScreenshot', { format: 'png' }).then((r) => r && r.data && fs.writeFileSync(path.join(OUT, 'update-restarting.png'), Buffer.from(r.data, 'base64')));
   // the dashboard restarts on the same port; the page reloads by itself
   let back = null; for (let i = 0; i < 80; i++) { await wait(250); try { const j = await (await fetch(`http://127.0.0.1:${dp}/api/update`)).json(); if (j.pid && j.pid !== dash.pid) { back = j; break; } } catch {} }
@@ -68,8 +70,8 @@ try {
   let gone = false; for (let i = 0; i < 60 && !gone; i++) { await wait(250); gone = await ev(`document.readyState === 'complete' && !!document.querySelector('.ca-top') && !document.querySelector('.ca-update') && !document.querySelector('.ca-update-pop')`); }
   check('after the reload the pill is gone (up to date)', gone);
 } catch (e) { check('no exception', false, e.stack || e.message); }
-clearTimeout(timer); cleanup();
+clearTimeout(timer);
 for (const r of results) console.log(r);
 const fails = results.filter((r) => r.startsWith('FAIL')).length;
 console.log(fails ? `${fails} FAILED` : 'ALL PASS');
-process.exit(fails ? 1 : 0);
+await finish(fails ? 1 : 0);

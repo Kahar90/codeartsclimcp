@@ -8,6 +8,7 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-overview-'));
@@ -81,6 +82,7 @@ check('lead-tokens --set without --add replaces the entry', set3.input === 1 && 
 // ---------- dashboard: ack round trip, seen reset, /api/overview ----------
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const dash = spawn(process.execPath, [CA, 'dash', String(port)], { stdio: 'ignore', env });
+guard({ children: [dash, sleeper] });
 const url = `http://127.0.0.1:${port}`;
 const post = async (id, what, body, json = true) => { const res = await fetch(`${url}/api/lane/${encodeURIComponent(id)}/${what}`, { method: 'POST', headers: { 'content-type': json ? 'application/json' : 'text/plain' }, body: JSON.stringify(body || {}) }); let j = {}; try { j = await res.json(); } catch {} return { status: res.status, j }; };
 const lane = async (t) => { const ls = await (await fetch(url + '/api/lanes')).json(); return (ls || []).find((x) => x.task === t) || {}; };
@@ -119,7 +121,7 @@ try {
   check('ack seen false clears the entry', x.status === 200 && x.j.seen === false && (await lane('fin1')).seen === false, JSON.stringify(x.j));
   x = await post('demo-repo--nope', 'ack', { seen: true });
   check('ack on an unknown lane is 404', x.status === 404, String(x.status));
-} catch (e) { check('the dashboard section ran to the end', false, String((e && e.message) || e)); } finally { dash.kill(); sleeper.kill(); }
+} catch (e) { check('the dashboard section ran to the end', false, String((e && e.message) || e)); } finally { await settle({ children: [dash, sleeper], code: 0 }); }
 
 // ---------- Mark handled: a finished needs-you lane the user dealt with moves to ended, a running one cannot ----------
 {
@@ -137,5 +139,5 @@ try {
 console.log(results.join('\n'));
 const bad = results.filter((x) => x.startsWith('FAIL')).length;
 console.log(bad ? `${bad} FAILED` : `all ${results.length} passed`);
-fs.rmSync(tmp, { recursive: true, force: true });
-process.exit(bad ? 1 : 0);
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }
+process.exitCode = bad ? 1 : 0;

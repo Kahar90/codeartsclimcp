@@ -54,7 +54,7 @@ const run = (name, fn) => { try { return fn(); } catch (e) { check(name, false, 
 // 0. positive control: an already-correct launch must be detected as hidden (proves the harness works)
 run('control: runCheck launch is detected as hidden', () => {
   calls.length = 0;
-  evalExpr(callExpr(`const ch = spawn('bash'`, 'spawn'), { spawn: stub.spawn, process: { env: {} }, repo: '/repo', id: 'x', cmd: 'true' });
+  evalExpr(callExpr(`const ch = spawn(checkShell()`, 'spawn'), { spawn: stub.spawn, repo: '/repo', id: 'x', cmd: 'true', checkShell: () => 'bash', checkEnv: () => ({}) });
   const c = calls[0];
   check('control: runCheck launch is detected as hidden', !!c && c.options.windowsHide === true, JSON.stringify(c && c.options));
 });
