@@ -22,6 +22,9 @@
 //        ca wait <lane...> [--any] [--timeout S] [--json] [--quiet]  block until lanes end (--any: first); exit = worst lane
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
+//        ca workspace <repo> <task> [--from <branch>]   prepare a parallel lane workspace as a local
+//                                  clone (../<repo-name>-wt-<task>) on branch lane/<task>; --land merges
+//                                  that branch back into <repo> and deletes the clone
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
 //        ca setup <harness> [repo] [--user]   write MCP + rules config for claude|kiro|cursor|codex|vscode|opencode
 //        ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]   guided first-run setup
@@ -78,7 +81,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
-import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck, GLYPHS } from './controls.mjs';
+import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck, GLYPHS, gitDirInsideRepo, commitRefused, commitFallbackDecision, sleepPoll } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
 import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
@@ -166,11 +169,15 @@ function workerShell() {
 // { ok, where, error } with error the first line of the failing output. CA_WRITE_PROBE_FAIL=1 forces a
 // failure for tests.
 function writeProbe(repo) {
-  if (String(process.env.CA_WRITE_PROBE_FAIL || '') === '1') return { ok: false, where: 'write probe (test hook)', error: 'CA_WRITE_PROBE_FAIL=1 forces a write failure' };
+  // A worktree keeps its git dir outside the lane folder (in the main repo's .git/worktrees/<name>),
+  // where the CodeArts sandbox refuses to write: flag it so doctor can warn instead of a false ok.
+  const gd = git(repo, 'rev-parse', '--absolute-git-dir');
+  const worktree = !!gd && !gitDirInsideRepo(repo, gd);
+  if (String(process.env.CA_WRITE_PROBE_FAIL || '') === '1') return { ok: false, where: 'write probe (test hook)', error: 'CA_WRITE_PROBE_FAIL=1 forces a write failure', worktree };
   const sh = workerShell();
   const shell = sh && fs.existsSync(sh) ? sh : (process.platform === 'win32' ? 'bash' : (process.env.SHELL || 'sh'));
   // A folder that is not a git repo yet is fine (onboard or git init makes it one): probe only its root.
-  const gitdir = git(repo, 'rev-parse', '--absolute-git-dir');
+  const gitdir = gd;
   const spots = [
     { where: `repo root (${repo})`, file: path.join(repo, '.ca-write-probe') },
     ...(gitdir ? [{ where: `git dir (${gitdir})`, file: path.join(gitdir, '.ca-write-probe') },
@@ -182,10 +189,10 @@ function writeProbe(repo) {
     if (r.status !== 0) {
       const out = String((r.stderr || '') + (r.stdout || '')).trim();
       const first = out.split(/\r?\n/).find((l) => l.trim()) || (r.error ? String(r.error.message) : `exit ${r.status}`);
-      return { ok: false, where: s.where, error: first };
+      return { ok: false, where: s.where, error: first, worktree };
     }
   }
-  return { ok: true, where: '', error: '' };
+  return { ok: true, where: '', error: '', worktree };
 }
 // Huawei Cloud ModelArts MaaS as a CodeArts custom provider ("maas/<model>"). CodeArts only
 // enables providers named in CUSTOM_PROVIDER_KEYS; the config goes in OPENCODE_CONFIG_CONTENT
@@ -1586,6 +1593,60 @@ function cmdInit(args) {
   console.log(`next: ca lane ${repoArg} ${task} --detach`);
   console.log(`      ca wait ${laneId(repo, task)}`);
 }
+// `ca workspace <repo> <task>`: prepare a parallel lane workspace as a LOCAL CLONE
+// (../<repo-name>-wt-<task>) on a new branch lane/<task>, from --from (default: the repo's current
+// branch). A clone keeps .git inside the lane folder, so the CodeArts sandbox can commit there; a
+// git worktree keeps its git dir in the main repo (outside the folder) and every sandboxed commit
+// fails with "Permission denied". `--land` fetches lane/<task> from the clone into <repo>, merges it
+// (refusing on a dirty main tree), then deletes the clone folder.
+function cmdWorkspace(args) {
+  const usage = 'usage: ca workspace <repo> <task> [--from <branch>] | ca workspace --land <repo> <task>';
+  const land = args.includes('--land');
+  const fi = args.indexOf('--from');
+  const from = fi >= 0 ? args[fi + 1] : '';
+  if (fi >= 0 && (!from || from.startsWith('--'))) die(usage, 2);
+  const pos = args.filter((a, i) => !a.startsWith('--') && !(fi >= 0 && i === fi + 1));
+  const [repoArg, task] = pos;
+  if (!repoArg || !task) die(usage, 2);
+  const repo = path.resolve(repoArg);
+  if (!git(repo, 'rev-parse', '--git-dir')) die(`not a git repo: ${repo}`, 2);
+  const branch = `lane/${task}`;
+  const clone = path.join(path.dirname(repo), `${path.basename(repo)}-wt-${task}`);
+  const run = (cwd, ...gargs) => spawnSync('git', gargs, { cwd, encoding: 'utf8', windowsHide: true });
+  const fail = (what, r) => die(`${what}: ${oneLine(String((r.stderr || '') + (r.stdout || '')).trim(), 300)}`, 1);
+  if (land) {
+    if (!fs.existsSync(clone)) die(`no workspace to land: ${clone}`, 2);
+    const dirtyTree = git(repo, 'status', '--porcelain');
+    if (dirtyTree) die(`main tree is dirty in ${repo}: commit or stash first, then land\n${oneLine(dirtyTree, 200)}`, 1);
+    const f = run(repo, 'fetch', clone, branch);
+    if (f.status !== 0) fail('git fetch failed', f);
+    const m = run(repo, 'merge', '--no-ff', 'FETCH_HEAD');
+    if (m.status !== 0) die(`git merge failed (resolve it in ${repo}): ${oneLine(String((m.stderr || '') + (m.stdout || '')).trim(), 300)}`, 1);
+    fs.rmSync(clone, { recursive: true, force: true });
+    console.log(`landed ${branch} into ${repo}`);
+    console.log(`removed ${clone}`);
+    const log = git(repo, 'log', '--oneline', '-1');
+    if (log) console.log(`head: ${log}`);
+    return;
+  }
+  if (fs.existsSync(clone)) die(`workspace already exists: ${clone} (land or remove it first)`, 2);
+  const c = run(path.dirname(repo), 'clone', '--local', '--no-hardlinks', repo, clone);
+  if (c.status !== 0) fail('git clone failed', c);
+  // The clone carries the source branches as origin/<name>; a sha needs the plain name, so fall back.
+  const start = from || git(repo, 'rev-parse', '--abbrev-ref', 'HEAD') || 'HEAD';
+  let b = run(clone, 'checkout', '-b', branch, `origin/${start}`);
+  if (b.status !== 0) b = run(clone, 'checkout', '-b', branch, start);
+  if (b.status !== 0) fail('git checkout failed', b);
+  // A brief the repo has not committed yet is not in the clone: copy it so the lane can read it.
+  const briefSrc = path.join(repo, 'tasks', `${task}.md`);
+  const briefDst = path.join(clone, 'tasks', `${task}.md`);
+  if (fs.existsSync(briefSrc) && !fs.existsSync(briefDst)) { fs.mkdirSync(path.dirname(briefDst), { recursive: true }); fs.copyFileSync(briefSrc, briefDst); }
+  console.log(`workspace: ${clone}`);
+  console.log(`branch: ${branch} (from ${from || start})`);
+  console.log(`start the lane: ca lane ${clone} ${task} --detach`);
+  console.log(`merge back: git -C ${repo} fetch ${clone} ${branch} && git -C ${repo} merge --no-ff FETCH_HEAD`);
+  console.log(`or: ca workspace --land ${repoArg} ${task}`);
+}
 // Preflight for engineers and agents: every row is ok | warn | fail, secrets are never printed.
 // Shared by `ca doctor` and the dashboard's GET /api/doctor (same function, no subprocess).
 async function doctorData(repoArg) {
@@ -1628,11 +1689,18 @@ async function doctorData(repoArg) {
   add('shell', shOk ? 'ok' : 'fail', sh || 'no SHELL set', shOk ? '' : 'set SHELL or CA_SHELL to Git bash (Git\\bin\\bash.exe)');
 
   // A repo the lane cannot write to fails every commit, so nothing else works: fail the row hard.
+  // A git worktree is writable by the runner but its git dir lives in the main repo, outside the lane
+  // folder the CodeArts sandbox confines the worker to: warn so the lead uses a clone instead.
   const wp = writeProbe(repo);
-  add('repo writable', wp.ok ? 'ok' : 'fail', wp.ok ? `wrote and removed a probe in ${repo}` : `${wp.where}: ${wp.error}`,
-    wp.ok ? '' : process.platform === 'win32'
-      ? 'Windows Controlled Folder Access or a sandbox ACL is blocking writes: allow git, Git Bash and node in Defender (Controlled Folder Access, Allow an app) or move the repo out of Documents'
-      : 'check the folder permissions');
+  if (wp.worktree) {
+    add('repo writable', 'warn', `git dir is outside the lane folder (${git(repo, 'rev-parse', '--absolute-git-dir')})`,
+      'this is a git worktree: its git dir is outside the lane folder, so the CodeArts sandbox refuses commits; use `ca workspace` (a local clone) instead');
+  } else {
+    add('repo writable', wp.ok ? 'ok' : 'fail', wp.ok ? `wrote and removed a probe in ${repo}` : `${wp.where}: ${wp.error}`,
+      wp.ok ? '' : process.platform === 'win32'
+        ? 'Windows Controlled Folder Access or a sandbox ACL is blocking writes: allow git, Git Bash and node in Defender (Controlled Folder Access, Allow an app) or move the repo out of Documents'
+        : 'check the folder permissions');
+  }
 
   try {
     const r = await fetch(`${dashUrl()}/api/lanes`, { signal: AbortSignal.timeout(1500) });
@@ -2431,7 +2499,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), workspace: () => cmdWorkspace(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); await updateNotice(args); process.exit(0); }
 if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
   let v = '0.0.0'; try { v = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version || v; } catch {}

@@ -11,8 +11,8 @@ no goal, ask for one in a single question, then start.
 
 ## Tools
 
-Use the `codearts` MCP server tools: `mcp__codearts__ca_doctor`, `ca_init`, `ca_lane_start`,
-`ca_status`, `ca_wait`, `ca_summary`, `ca_tail`, `ca_steer`, `ca_stop`, `ca_plan`,
+Use the `codearts` MCP server tools: `mcp__codearts__ca_doctor`, `ca_init`, `ca_workspace`,
+`ca_lane_start`, `ca_status`, `ca_wait`, `ca_summary`, `ca_tail`, `ca_steer`, `ca_stop`, `ca_plan`,
 `ca_plan_update`, `ca_note` (all prefixed `mcp__codearts__`). Below they are named without the
 prefix.
 
@@ -32,6 +32,12 @@ Documents), otherwise every commit fails.
 
 Run: in `ca_wait`, wait with `any: true` when lanes run in parallel, so an early failure is seen at
 once (the finished lanes come back, the rest as still running).
+
+Parallel lanes: give each its own clone with `ca_workspace {repo, task, from}` (CLI
+`ca workspace <repo> <task> [--from <branch>]`), which makes `../<repo>-wt-<task>` on branch
+`lane/<task>`, then start the lane in that folder. Never use `git worktree add` for a lane: a
+worktree keeps its git dir in the main repo, outside the lane folder, so the CodeArts sandbox
+refuses every commit ("Permission denied"). Merge a clone back with `ca_workspace --land {repo, task}`.
 
 If those tools are missing, the server is not connected: tell the user to run
 `ca onboard --yes --harness claude` once and restart Claude Code (or `/mcp` to reconnect). Until

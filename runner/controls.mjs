@@ -12,6 +12,51 @@ export function classifyCheck({ code, out }) {
   return 'fail';
 }
 
+// Is the git dir inside the folder of repoDir? A clone keeps .git in the lane folder (inside); a
+// git worktree keeps its git dir in the MAIN repo's .git/worktrees/<name> (outside), which the
+// CodeArts sandbox refuses to write, so every sandboxed commit fails. String logic only (no path
+// import): separators normalize to '/', case folds so Windows drive letters compare equal.
+export function gitDirInsideRepo(repoDir, gitDir) {
+  const norm = (p) => String(p == null ? '' : p).replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+  const a = norm(repoDir); const b = norm(gitDir);
+  if (!a || !b) return true;
+  return b === a || b.startsWith(a + '/');
+}
+
+// Did the worker's own commit get refused? Read its last reply and tool output for the git errors a
+// sandboxed commit prints. Returns the first offending line (the reason) or '' when none matched.
+export function commitRefused(text) {
+  const s = String(text == null ? '' : text);
+  if (!s) return '';
+  const line = s.split(/\r?\n/).find((l) => /Unable to create|index\.lock|Permission denied|\bfatal:/i.test(l));
+  return line ? line.trim() : '';
+}
+
+// The runner's decision when the tree is dirty at the gate: if the worker's commit was refused and
+// the runner itself can write, the runner commits the work (action 'commit'); if the runner cannot
+// write either, the lane fails with reason "commit failed: <first error line>" (action 'fail'). No
+// refusal means the ordinary uncommitted-changes handling (action 'none').
+export function commitFallbackDecision({ dirty, refused, writable } = {}) {
+  if (!dirty) return { action: 'skip' };
+  if (!refused) return { action: 'none' };
+  if (!writable) return { action: 'fail', reason: `commit failed: ${refused}` };
+  return { action: 'commit' };
+}
+
+// A worker bash call that waits with `sleep N` (N >= 20 s) wastes tokens: the model replays the whole
+// context on every idle turn. Returns N (a number >= 20) when a long sleep is present, else 0.
+// `sleep 5` is fine; `sleep 200; cat x` and `sleep 30 && tail` both count.
+export function sleepPoll(text) {
+  const s = String(text == null ? '' : text);
+  const re = /\bsleep\s+(\d+(?:\.\d+)?)\b/gi;
+  let m;
+  while ((m = re.exec(s))) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n >= 20) return n;
+  }
+  return 0;
+}
+
 // The one status a person sees for a lane, shown the same way everywhere (CLI, MCP, Lanes, Office).
 // key: the status name; label: the badge text; tone: run | done | warn | bad | idle (the badge
 // colour); reason: one human line for tooltips and the "Now:" line. Live lanes keep their health
