@@ -1,32 +1,28 @@
 {
-  "title": "You are working in a git repo",
-  "goal": "You are working in a git repo",
+  "title": "You are working in a git repo (current directory)",
+  "goal": "You are working in a git repo (current directory)",
   "lead": "lead",
-  "status": "done",
-  "now": "Closed: Lead accepted and installed windowsHide fix after independent Windows checks; automatic gate could not find node in Bash PATH. No remaining implementation work.",
+  "status": "running",
+  "now": "",
   "waves": [
     {
       "name": "Lanes",
       "lanes": [
-        "hide-background-windows"
+        "readme-refresh"
       ]
     }
   ],
   "lanes": [
     {
-      "task": "hide-background-windows",
+      "task": "readme-refresh",
       "repo": ".",
-      "why": "You are working in a git repo"
+      "why": "You are working in a git repo (current directory)"
     }
   ],
   "decisions": [
     {
-      "at": "2026-11-08T04:44:37.567Z",
-      "text": "Plan created by the runner: lane hide-background-windows started without an open plan."
-    },
-    {
-      "at": "2026-11-08T04:58:05.827Z",
-      "text": "Plan closed: Lead accepted and installed windowsHide fix after independent Windows checks; automatic gate could not find node in Bash PATH. No remaining implementation work.."
+      "at": "2026-11-08T05:06:25.395Z",
+      "text": "Plan created by the runner: lane readme-refresh started without an open plan."
     }
   ],
   "next": [],
