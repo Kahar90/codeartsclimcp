@@ -775,6 +775,9 @@ const evScroll = new Map(); // "laneId:tab" -> evidence scroll top
 let inFlight = null; // {what, laneId} while a steer/stop/attach/control POST runs
 const ctlNotes = new Map(); // laneId -> { action, text } while an inline note box is open
 const tget = (id) => { let s = tstate.get(id); if (!s) { s = { html: '', pos: 0, rendered: 0, follow: true, top: 0, atBottom: true }; tstate.set(id, s); } return s; };
+// Poll-driven renders leave the DOM alone when nothing changed: a rebuilt node drops hover, title
+// tooltips, selection and scroll. railSig/viewSig hold the last signature; the counters feed the check hook.
+let railSig = '', viewSig = '', railRenders = 0, viewRenders = 0;
 
 function toast(msg, err) {
   CAUI.toast(msg, { tone: err ? 'bad' : 'info' });
@@ -950,12 +953,16 @@ function renderControl() {
     [...crProjectKeys()].map(([k, n]) => { const a = lanes.filter((l) => projKey(l) === k && laneBucket(l) === 'attention').length; return `<button type="button" class="cr-chip${crProject === k ? ' on' : ''}" data-crproj="${esc(k)}" aria-pressed="${crProject === k}">${esc(n)}${a ? ` <span class="ca-badge s-bad">${a}</span>` : ''}</button>`; }).join('');
   const groups = ['status', 'project'].map((g) => `<button type="button" class="cr-gbtn${crGroup === g ? ' on' : ''}" data-crgroup="${g}" aria-pressed="${crGroup === g}">${g === 'status' ? 'By status' : 'By project'}</button>`).join('');
   const body = crGroup === 'project' ? crProjectView(shown) : crStatusView(shown);
-  $('view').innerHTML = `<div class="pad">
+  const html = `<div class="pad">
     <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · ${crGroup === 'project' ? 'by project' : 'by status'}</div></div>
     <div class="crtiles" role="group" aria-label="Lane buckets">${tiles}</div>
     <div class="cr-controls"><div class="cr-group" role="group" aria-label="Group lanes">${groups}</div><div class="cr-chips">${chips}</div></div>
     <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div>
     <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(crModels())}</div></div>`;
+  const sig = JSON.stringify([lanes, crFilter, crProject, crGroup, route.kind, route.id]);
+  if (sig === viewSig) { syncBarPad(); return; }
+  viewSig = sig; viewRenders++;
+  $('view').innerHTML = html;
   for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; lsSet('ca-cr-filter', crFilter); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; const open = !crOpen.has(k); open ? crOpen.add(k) : crOpen.delete(k); lsSet('ca-cr-open', [...crOpen].join(',')); const sec = h.closest('.cr-sec'); if (sec) sec.classList.toggle('open', open); h.setAttribute('aria-expanded', String(open)); };
   for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
@@ -1053,6 +1060,8 @@ function renderRail() {
   h += '<div class="rail-div"></div><div class="rail-h">' + (plans.length ? 'Other lanes' : 'Lanes') + '</div>';
   h += act.length ? act.map(row).join('') : '<div class="rail-none"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="9" r="6.5"/></svg>None running</div>';
   if (fin.length) h += '<div class="rail-div"></div><div class="rail-h">Finished</div>' + fin.map(row).join('');
+  if (h === railSig) return;
+  railSig = h; railRenders++;
   $('railBody').innerHTML = h;
   for (const c of $('railBody').querySelectorAll('[data-go]')) c.onclick = (e) => { if (e.target.closest('[data-del]')) return; go(c.dataset.go); };
 }
@@ -1109,7 +1118,7 @@ function renderPlan(p) {
   const dec = p.decisions.length ? `<ul class="plain dec">${[...p.decisions].reverse().map((d) => `<li><span class="at">${esc(clock(d.at))}</span><span class="dv"></span><span class="tx">${esc(d.text)}</span></li>`).join('')}</ul>` : '<div class="small">None yet</div>';
   const pRows = CAUI.tokenSplit(p.tokensBy);
   const planTokTitle = pRows.map((r) => `${r.label} ${CAUI.fmtTokens(r.total)}`).join(' / ');
-  $('view').innerHTML = `<div class="pad">
+  const html = `<div class="pad">
     <div class="plan-head">
       <div class="plan-head-row"><h1>${esc(p.title)}</h1>${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
@@ -1125,6 +1134,10 @@ function renderPlan(p) {
       <div class="box"><h4>Planned next (lead)</h4>${next}${risks}</div>
       <div class="box"><h4>Decisions log</h4>${dec}</div>
     </div></div>`;
+  const sig = JSON.stringify([p, route.kind, route.id, [...waveCollapsed.keys()], [...stepsOpen.keys()], [...stepsCache.keys()], [...ctlNotes.keys()]]);
+  if (sig === viewSig) { syncBarPad(); return; }
+  viewSig = sig; viewRenders++;
+  $('view').innerHTML = html;
   for (const b of $('view').querySelectorAll('[data-wave]')) b.onclick = () => { waveCollapsed.has(b.dataset.wave) ? waveCollapsed.delete(b.dataset.wave) : waveCollapsed.set(b.dataset.wave, true); renderPlan(curPlan); };
   for (const b of $('view').querySelectorAll('[data-steps]')) b.onclick = () => toggleSteps(b.dataset.steps);
   applyEntryRise();
@@ -1149,6 +1162,9 @@ function pipeline(d) {
   return `<div class="pipe">${st.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="step"' : ''}>${ic(c)}${esc(n)}</span>`).join('')}</div>`;
 }
 function renderLane(d, keep) {
+  const sig = JSON.stringify([d, tab, route.id, ctlNotes.has(d.id)]);
+  if (sig === viewSig) return;
+  viewSig = sig; viewRenders++;
   const vtop = keep ? $('view')?.scrollTop : 0;
   const hadFocus = keep && document.activeElement?.id === 'msg';
   const t = d.tokens || {}; const plan = plans.find((p) => p.waves.some((w) => w.lanes.some((l) => l.id === d.id)));
@@ -1464,6 +1480,7 @@ async function renderOnboard() {
   if ($('onboard') && html === lastOnbHtml) return;
   const wasOpen = !!$('onb-byhand')?.open;
   lastOnbHtml = html;
+  viewSig = '';
   $('view').innerHTML = html;
   if (wasOpen && $('onb-byhand')) $('onb-byhand').open = true;
   syncBarPad();
@@ -1566,10 +1583,10 @@ async function refresh(full) {
   document.title = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
   diffNotify();
   renderRail();
-  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
+  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else { viewSig = ''; $('view').innerHTML = '<div class="empty">Plan not found</div>'; } }
   else if (route.kind === 'lane') {
     try { const d = await api(`/api/lane/${encodeURIComponent(route.id)}/detail`); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
-    catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    catch (e) { viewSig = ''; $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }
   else if (!plans.length && !lanes.length) await renderOnboard();
   else renderControl();
