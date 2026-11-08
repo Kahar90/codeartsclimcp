@@ -1,0 +1,96 @@
+{
+  "title": "MCP lead visibility and lean workflow",
+  "goal": "Publish lead activity and revised plans through MCP, simplify briefs; token budgets deferred.",
+  "lead": "Codex gpt-6.1-sol",
+  "status": "done",
+  "now": "Closed: Implementation and focused verification complete; full-suite baseline and environment failures recorded.",
+  "waves": [
+    {
+      "name": "Implementation",
+      "lanes": [
+        "lead-mcp"
+      ]
+    }
+  ],
+  "lanes": [
+    {
+      "task": "lead-mcp",
+      "repo": ".",
+      "why": "MCP-first lead visibility and lean workflow"
+    }
+  ],
+  "next": [
+    {
+      "text": "MCP activity and plan updates",
+      "done": true
+    },
+    {
+      "text": "Lead visibility in dashboard and Office",
+      "done": true
+    },
+    {
+      "text": "Lean workflow guidance and verification",
+      "done": true
+    }
+  ],
+  "decisions": [
+    {
+      "at": "2026-11-08",
+      "text": "User chose MCP with model-owned updates; defer token limits and harness integrations."
+    },
+    {
+      "at": "2026-11-08T09:59:32.709Z",
+      "text": "Plan closed: Implementation and focused verification complete; full-suite baseline and environment failures recorded.."
+    }
+  ],
+  "risks": [
+    "Full suite: 27 files passed, 11 failed. Baseline assertions, Windows libuv cleanup errors, screenshot writes and hung browser tests remain. Fresh-folder hover, lanes and office checks pass.",
+    "Token savings have not been benchmarked. Progress publishing remains the lead model responsibility.",
+    "Reconnect MCP and restart the dashboard process to load the updated server and UI."
+  ],
+  "nowAt": "2026-11-08T09:59:32.579Z",
+  "leadActivity": [
+    {
+      "at": "2026-11-08T09:22:14.971Z",
+      "text": "Waiting for CodeArts contract tests and implementation; checking safe plan targeting and concurrent update preservation before UI verification"
+    },
+    {
+      "at": "2026-11-08T09:27:05.752Z",
+      "text": "Waiting for CodeArts to finish MCP contract fixes; then verify live dashboard updates and workflow changes",
+      "phase": "waiting"
+    },
+    {
+      "at": "2026-11-08T09:29:23.942Z",
+      "text": "MCP contracts committed (ca47cf9). CodeArts is adding live lead activity, update age and revised tasks to both visualizer views.",
+      "phase": "waiting"
+    },
+    {
+      "at": "2026-11-08T09:34:20.179Z",
+      "text": "CodeArts has added browser checks for both lead panels; compatibility checks are running before the UI commit. Token budgets remain deferred.",
+      "phase": "waiting"
+    },
+    {
+      "at": "2026-11-08T09:40:19.177Z",
+      "text": "All 3 implementation steps committed. Runner gates and model review are next; lead will independently run repository checks.",
+      "phase": "verifying"
+    },
+    {
+      "at": "2026-11-08T09:48:52.060Z",
+      "text": "Review fixes committed; lead/MCP, UI and generated setup checks pass. Full suite remains in its long-running polish browser check.",
+      "phase": "verifying"
+    },
+    {
+      "at": "2026-11-08T09:54:24.008Z",
+      "text": "Lead and generated setup checks pass; fresh-folder hover and dashboard checks pass. Full suite has a baseline controls failure and screenshot-path errors; a hung polish test was stopped.",
+      "phase": "verifying"
+    },
+    {
+      "at": "2026-11-08T09:59:32.579Z",
+      "text": "Implemented MCP plan revisions and lead activity, both views and lean workflow. Review findings fixed. Focused checks pass; full suite limitations recorded.",
+      "phase": "done"
+    }
+  ],
+  "phase": "done",
+  "revision": 2,
+  "updatedAt": "2026-11-08T09:59:32.488Z"
+}
