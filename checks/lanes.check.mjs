@@ -58,9 +58,9 @@ try {
   await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1600);
   check('the default route is the Control room', (await ev('location.hash')) === '' && (await ev('!!document.querySelector(".cr-head h1")')) === true, String(await ev('location.hash')));
   let cr = await st();
-  check('overview counts the buckets', !!cr?.overview?.counts && cr.overview.counts.attention === 3 && cr.overview.counts.running === 2 && cr.overview.counts.done === 2 && cr.overview.counts.ended === 2, JSON.stringify(cr?.overview?.counts));
+  check('overview counts the buckets', !!cr?.overview?.counts && cr.overview.counts.attention === 5 && cr.overview.counts.running === 2 && cr.overview.counts.done === 2 && cr.overview.counts.ended === 3, JSON.stringify(cr?.overview?.counts));
   check('Needs you comes first and holds the stuck and failed lanes', (() => { const s0 = cr?.overview?.sections?.[0]; return !!s0 && s0.bucket === 'attention' && s0.ids.includes('demo-repo--stuck') && s0.ids.includes('demo-repo--stall'); })(), JSON.stringify(cr?.overview?.sections));
-  check('the tab title carries the Needs you count', /^\((3)\) Needs you . Lanes$/.test(cr?.overview?.title || ''), cr?.overview?.title);
+  check('the tab title carries the Needs you count', /^\((5)\) Needs you . Lanes$/.test(cr?.overview?.title || ''), cr?.overview?.title);
   check('no stale banner while polls succeed', cr?.overview?.banner === false, String(cr?.overview?.banner));
   await shot('lanes-control-room');
   check('a bucket tile is a filter toggle', await clickSel('[data-cr="running"]'));
@@ -104,7 +104,7 @@ try {
   const counts = await ev('(function(){const r=document.getElementById("counts").getBoundingClientRect();return {left:Math.round(r.left),right:Math.round(r.right),w:window.innerWidth};})()');
   check('top bar counts inside the viewport at 1280x800', !!counts && counts.left >= 0 && counts.right <= counts.w, JSON.stringify(counts));
   const railJ = JSON.parse(await ev('(function(){return JSON.stringify({plans:document.querySelectorAll("#railBody .rail-card:not(.cr)").length,fin:document.querySelectorAll("#railBody .rail-fin").length});})()') || '{}');
-  check('rail lists 2 plans and 6 finished lanes', railJ.plans === 2 && railJ.fin === 6, JSON.stringify(railJ));
+  check('rail lists 2 plans and 9 finished lanes', railJ.plans === 2 && railJ.fin === 9, JSON.stringify(railJ));
   const laneHref = await ev('document.querySelector(".lane-name")?.getAttribute("href")');
   check('lane card links to the lane route', laneHref === '#/lane/demo-repo--office-layout', String(laneHref));
   check('plan home renders one wave', (await ev('document.querySelectorAll(".wave").length')) === 1);
