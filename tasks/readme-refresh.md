@@ -1,4 +1,4 @@
-﻿You are working in a git repo (current directory). Refresh the README with current genuine screenshots and clear onboarding. The user gives creative freedom, but the quick install must be immediately accessible. Lead has chosen: short intro, quick install before any large image, Use it, then an attractive visual tour prioritizing Lanes, with Office retained.
+You are working in a git repo (current directory). Refresh the README with current genuine screenshots and clear onboarding. The user gives creative freedom, but the quick install must be immediately accessible. Lead has chosen: short intro, quick install before any large image, Use it, then an attractive visual tour prioritizing Lanes, with Office retained.
 Do the steps in order. Commit after each step with subject `step N: <summary>`. Do not ask questions; decide and keep going.
 
 1. Capture current UI using ONLY existing checks: `node checks/lanes.check.mjs` and `node checks/office.check.mjs`. Copy selected PNGs from checks/out into docs/images: lanes-control-room.png, lanes.png (fresh lanes-home or plan token view), lane-detail.png (transcript view), office.png (fresh scene or window). Use representative demo fixtures only, never real local lanes/private text. Do not alter product code or checks to make nicer screenshots. Commit images.
@@ -20,4 +20,3 @@ Lead-run capture check: node checks/lanes.check.mjs (dashboard assertions passed
 Lead-run capture check: node checks/office.check.mjs (ALL PASS)
 
 Final reply: steps with commit hashes, capture mappings, checks and anything skipped.
-
