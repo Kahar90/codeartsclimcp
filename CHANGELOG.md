@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0 (2026-11-08)
+
+Updates
+- One truthful status: the server owns every status word. Each lane carries `attention` (does it need
+  you), `steps` (live, complete or hide) and a glyph; each plan carries `badge`, always the glance word.
+  Pills, labels, banners and the sign can no longer disagree, settled lanes never show a stray step
+  fraction ("Handled by lead", "Stopped by lead", "Merged 3/3"), and lanes of a closed plan never need you.
+- Office fits the whole room on any screen (no cropping), draws agents 20% smaller, places the sign where
+  it covers no agent, and animates running lanes again (lane sprites were stuck on idle with real data).
+- Glance toggle (eye button, `g` key) in both views: off gives a plain agent-team view; the choice is
+  shared by both views and remembered.
+- Lanes no longer fail on "Permission denied": `ca workspace <repo> <task>` makes each lane a local clone
+  (a worktree's git dir sits outside the lane folder the CodeArts sandbox allows), `ca workspace --land`
+  merges it back, `ca doctor` warns on a worktree, and the runner commits for a worker whose commit was
+  refused instead of looping.
+- Workers are kept from sleep-polling (`sleep 20+` is refused or steered), a check that crashes after
+  passing counts as failed instead of "couldn't run", and `ca_wait` returns compact rows.
+- `ca ack` handles any finished lane; `ca plan update --patch-file <file>` and `--patch -` (stdin).
+- Every browser check exits cleanly under Node 26; three outdated checks were brought up to date.
+
+
 ## 0.4.0 (2026-11-08)
 
 Updates
