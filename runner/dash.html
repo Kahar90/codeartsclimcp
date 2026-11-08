@@ -216,6 +216,11 @@ button.btn.danger { color: var(--bad); border-color: var(--bad); background: tra
 .notebox textarea:focus { outline: none; border-color: var(--sel) }
 #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60; background: var(--panel); border: 1.5px solid var(--sel); color: var(--fg); border-radius: var(--radius-sm); padding: 9px 15px; font-size: 13px; max-width: 80vw; box-shadow: 0 8px 26px rgba(0,0,0,.4) }
 #toast.err { border-color: var(--bad); color: var(--bad) }
+/* ---------- delete control ---------- */
+.del { display: inline-flex; align-items: center; gap: 5px; flex: none }
+.del .ca-ico { width: 13px; height: 13px }
+.rail-row .del, .rail-fin .del { padding: 4px 8px }
+.plan-head-row, .lane-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between }
 
 /* ---------- onboarding ---------- */
 .cmd { display: flex; align-items: center; gap: 10px; background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0; cursor: pointer }
@@ -439,6 +444,12 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const ago = (t) => { if (!t) return ''; const s = Math.round((Date.now() - new Date(t).getTime()) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
 const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+// Delete control: one trash + label button on the plans rail, the plan and lane headers and every
+// lane row/card. The click is delegated (see the document listener); confirm and POST live below.
+const DEL_ICO = '<svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5h11M7 5V3.2h4V5M5.2 5l.7 9.3h6.2L12.8 5M7.6 7.6v4.4M10.4 7.6v4.4"/></svg>';
+function delBtn(kind, id, label, running) {
+  return `<button type="button" class="btn tiny danger del" data-del="${kind}:${esc(id)}"${running ? ' data-running="1"' : ''} aria-label="${esc(label)}" title="${esc(label)}">${DEL_ICO}<span>Delete</span></button>`;
+}
 const short = (m) => String(m || '').replace(/^huaweicloud-maas\//, 'codearts/');
 const leadName = (p) => (p && (p.leadName || (typeof p.lead === 'string' ? p.lead : ''))) || 'Lead';
 // Tokens by model: one row per model, sorted by total, lead and worker tagged; unknown is never shown as a zero.
@@ -483,9 +494,12 @@ const D_HASHES = ['e3f1c2a', 'b7d94ce', 'c5a83f1', 'd9274ab', 'a6b5e90'];
 function dTok(input, output, extra) { const t = Object.assign({ input: input || 0, output: output || 0, reasoning: 0, cacheRead: 0, steps: 1 }, extra || {}); t.total = t.input + t.output + t.reasoning + t.cacheRead; return t; }
 function dTokAdd(list) { const s = (k) => list.reduce((a, x) => a + ((x && x[k]) || 0), 0); return dTok(s('input'), s('output'), { reasoning: s('reasoning'), cacheRead: s('cacheRead'), steps: s('steps') }); }
 function dTokBy(build, review, other) { const by = { build, review, other }; return { tokens: dTokAdd([build, review, other]), tokensBy: by }; }
-function planTokSum(lanes) { const list = lanes.map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
+function planTokSum(lanes) { const list = lanes.filter(Boolean).map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
 const D_RUN_ACTIONS = ['steer', 'stop', 'attach', 'kick', 'fresh', 'restart-server'];
 const demoControls = []; // fixture log of kick/resume POSTs, read by the check harness
+const demoRemoved = new Set(); // ids deleted in the fixture: a removed plan or lane never comes back
+// plan id -> its lane ids, so deleting a plan also drops its lanes from /api/lanes and the waves
+const D_PLAN_LANES = { 'office-polish': ['demo-repo--office-layout'], 'string-utils': ['demo-repo--string-utils', 'demo-repo--path-join', 'demo-repo--stuck'] };
 function dLane(id, task, o) {
   return Object.assign({ lane: id, id, task, repo: D_REPO, health: 'planned', phase: 'planned', elapsed: '', idle: '-', commits: '0/0',
     steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tokensBy: {}, actions: [], suggest: '', why: '', tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
@@ -525,6 +539,7 @@ const D_PROJ_A = { key: 'demo-repo', name: 'demo-repo' };
 const D_PROJ_B = { key: 'sandbox', name: 'sandbox' };
 const dSeen = new Set(['demo-repo--path-join']);
 function demoLanes() {
+  const gone = new Set(Object.entries(D_PLAN_LANES).filter(([pid]) => demoRemoved.has(pid)).flatMap(([, ids]) => ids));
   const ls = [
     dLane('demo-repo--office-layout', 'office-layout', { bucket: 'running', bucketWhy: 'building wave 1, step 1/7', project: D_PROJ_A, health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', ...dTokBy(dTok(48000, 150, { reasoning: 4200, cacheRead: 9000 }), dTok(3900, 40), dTok(864, 12)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7011', startedAt: DEMO_T0 - 231000,
       runs: 2, continues: [{ id: 'demo-repo--office-v2', task: 'office-v2', reason: 'paused by the operator for a scope change', commits: 6, progress: { done: 6, total: 8 }, elapsed: '41m 12s' }],
@@ -540,7 +555,7 @@ function demoLanes() {
     dLane('demo-repo--orphan', 'orphan', { bucket: 'ended', bucketWhy: 'stopped by the operator', project: D_PROJ_A, health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', ...dTokBy(dTok(900, 80), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
     dLane('demo-repo--chaos', 'chaos', { bucket: 'attention', bucketWhy: 'needs review: two fixes asked', project: D_PROJ_A, health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', ...dTokBy(dTok(7300, 1060), dTok(2200, 300), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
     dLane('demo-repo--archive', 'archive', { bucket: 'ended', bucketWhy: 'archived after cleanup', project: D_PROJ_A, health: 'idle', phase: 'finished', result: 'archived', elapsed: '12m 40s', commits: '2/2', ...dTokBy(dTok(5200, 400), dTok(0, 0), dTok(0, 0)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 6 * 86400000, progress: { done: 2, total: 2, current: null } }),
-  ];
+  ].filter((l) => !demoRemoved.has(l.id) && !gone.has(l.id));
   for (const l of ls) {
     l.seen = dSeen.has(l.id);
     // same rule as the server: a finished needs-you lane marked handled reads as ended
@@ -550,8 +565,8 @@ function demoLanes() {
 }
 function demoPlans() {
   const by = Object.fromEntries(demoLanes().map((l) => [l.id, l]));
-  const wp = (id, plan) => ({ ...by[id], plan });
-  return [
+  const wp = (id, plan) => (by[id] ? { ...by[id], plan } : null);
+  const list = [
     { id: 'office-polish', file: 'D:/Coding/demo-repo/tasks/plan.json', updatedAt: dIso(4), title: 'Office view polish: sprites and layout',
       goal: 'Polish the Office view: sprite-driven layout, tight spacing and a check harness that screenshots both routes without real lanes.',
       lead: 'Claude Opus 5.5', status: 'running',
@@ -579,6 +594,9 @@ function demoPlans() {
         wp('demo-repo--stuck', { model: 'maas/glm-5.3', why: 'Recover the stalled turn', files: ['runner/sandbox.mjs'], briefExists: true }),
       ] }] },
   ];
+  return list
+    .filter((p) => !demoRemoved.has(p.id))
+    .map((p) => ({ ...p, waves: p.waves.map((w) => ({ ...w, lanes: w.lanes.filter(Boolean) })) }));
 }
 // The demo layer resolves lane ids exactly like the server: exact id, then task name, then substring.
 function demoResolve(id) {
@@ -693,6 +711,7 @@ async function demoPost(what, id, body) {
   if (what === 'kick') { demoControls.push({ laneId: id, action: 'kick', body: body || {} }); return { ok: true, message: `Kick sent (${(body && body.mode) || 'turn'})` }; }
   if (what === 'resume') { demoControls.push({ laneId: id, action: 'resume', body: body || {} }); return { ok: true, message: 'Lane resumed' }; }
   if (what === 'ack') { const seen = !(body && body.seen === false); if (seen) dSeen.add(id); else dSeen.delete(id); return { ok: true, seen }; }
+  if (what === 'remove') { demoRemoved.add(id); demoControls.push({ action: 'remove', laneId: id }); return { ok: true, id, killed: [], removed: [] }; }
   return { ok: true };
 }
 function demoOverview() {
@@ -711,10 +730,17 @@ async function demoApi(path, opts) {
   if (demoFailAt) throw new Error('demo: forced runner failure'); // check hook: window.__lanes.fail(true)
   const u = new URL(path, 'http://x');
   if (u.pathname === '/api/plans') return demoPlans();
+  const pm = u.pathname.match(/^\/api\/plans\/([^/]+)\/remove$/);
+  if (pm && opts && opts.method === 'POST') {
+    const id = decodeURIComponent(pm[1]);
+    demoRemoved.add(id);
+    demoControls.push({ action: 'remove', planId: id });
+    return { ok: true, id, lanes: D_PLAN_LANES[id] || [], killed: [] };
+  }
   if (u.pathname === '/api/lanes') return demoLanes();
   if (u.pathname === '/api/overview') return demoOverview();
   if (u.pathname === '/api/doctor') return demoDoctor();
-  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume|ack)$/);
+  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume|ack|remove)$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
     if (m[2] === 'detail') return demoDetail(id);
@@ -1011,7 +1037,7 @@ function renderRail() {
   const loose = lanes.filter((l) => !inPlan.has(l.id));
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
   const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
-  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}</div>`;
+  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}${delBtn('lane', l.id, `Delete lane ${l.task}`, l.running)}</div>`;
   const attention = lanes.filter((l) => laneBucket(l) === 'attention').length;
   let h = `<div class="rail-card cr${route.kind === '' ? ' sel' : ''}" data-go="/">
     <div class="rail-row"><span class="ca-dot" style="color:var(--sel)"></span><span class="rail-title">Control room</span>${attention ? `<span class="ca-badge s-bad">${attention}</span>` : ''}</div>
@@ -1020,7 +1046,7 @@ function renderRail() {
   h += plans.length ? plans.map((p) => {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
-      <div class="rail-row">${dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}</div>
+      <div class="rail-row">${dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
@@ -1028,7 +1054,7 @@ function renderRail() {
   h += act.length ? act.map(row).join('') : '<div class="rail-none"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="9" r="6.5"/></svg>None running</div>';
   if (fin.length) h += '<div class="rail-div"></div><div class="rail-h">Finished</div>' + fin.map(row).join('');
   $('railBody').innerHTML = h;
-  for (const c of $('railBody').querySelectorAll('[data-go]')) c.onclick = () => go(c.dataset.go);
+  for (const c of $('railBody').querySelectorAll('[data-go]')) c.onclick = (e) => { if (e.target.closest('[data-del]')) return; go(c.dataset.go); };
 }
 
 // A lane that continues an earlier paused run is one agent: one muted line, never a second card.
@@ -1063,7 +1089,7 @@ function renderPlan(p) {
   const laneCard = (l) => `<div class="lane-card">
       <span class="spot" data-spot="lane:${esc(l.id)}" data-role="${l.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.75" data-work="${l.running ? 1 : 0}"></span>
       <div class="lane-main">
-        <a class="lane-name" href="#/lane/${esc(l.id)}">${esc(l.task)}</a>
+        <div class="lane-title-row"><a class="lane-name" href="#/lane/${esc(l.id)}">${esc(l.task)}</a>${delBtn('lane', l.id, `Delete lane ${l.task}`, l.running)}</div>
         <div class="lane-meta">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
         <div class="lane-tok" title="${esc(CAUI.tokenDetail(l.tokens))}">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</div>
         ${contLine(l)}
@@ -1085,7 +1111,7 @@ function renderPlan(p) {
   const planTokTitle = pRows.map((r) => `${r.label} ${CAUI.fmtTokens(r.total)}`).join(' / ');
   $('view').innerHTML = `<div class="pad">
     <div class="plan-head">
-      <h1>${esc(p.title)}</h1>
+      <div class="plan-head-row"><h1>${esc(p.title)}</h1>${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
       ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
@@ -1151,7 +1177,7 @@ function renderLane(d, keep) {
   $('view').innerHTML = `<div class="pad has-bar" style="flex:1">
     <div class="crumb"><a class="backlink" href="#/">Control room</a>${plan ? `<span class="crumb-sep" aria-hidden="true">/</span><a class="backlink" href="#/plan/${esc(plan.id)}">${esc(plan.title)}</a>` : ''}</div>
     ${d.bucketWhy ? `<div class="lane-bucket" data-bucket="${esc(d.bucket || laneBucket(d))}"><span class="cr-why-big">${esc(d.bucketWhy)}</span></div>` : ''}
-    <div class="idrow"><span class="spot" data-spot="lane:${esc(d.id)}" data-role="${d.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.875" data-work="${d.running ? 1 : 0}"></span><h1>${esc(d.task)}</h1>${CAUI.badge(st)}${d.verdict ? `<span class="ca-badge s-${d.verdict === 'ready' ? 'done' : 'warn'}">review: ${esc(d.verdict)}</span>` : ''}</div>
+    <div class="idrow"><span class="spot" data-spot="lane:${esc(d.id)}" data-role="${d.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.875" data-work="${d.running ? 1 : 0}"></span><h1>${esc(d.task)}</h1>${CAUI.badge(st)}${d.verdict ? `<span class="ca-badge s-${d.verdict === 'ready' ? 'done' : 'warn'}">review: ${esc(d.verdict)}</span>` : ''}${delBtn('lane', d.id, `Delete lane ${d.task}`, d.running)}</div>
     ${metrics}
     ${contLine(d.continues ? d : wl)}
     <div class="wt">${esc(d.repo)}</div>
@@ -1284,6 +1310,42 @@ async function pollLog() {
   } catch {}
 }
 async function post(what, body) { return api(`/api/lane/${encodeURIComponent(route.id)}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }); }
+// Delete a plan or a lane through the runner API: one confirm, one POST, then drop it from the
+// rendered view at once and refetch. The brief file is kept; running processes are killed by the server.
+async function removePost(path) {
+  try { return await api(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); }
+  catch { return { error: 'request failed' }; }
+}
+async function deletePlan(id) {
+  const p = plans.find((x) => x.id === id);
+  const title = p ? p.title : id;
+  const n = p ? p.waves.flatMap((w) => w.lanes).length : 0;
+  if (!window.confirm(`Delete plan ${title}? Its ${n} lane(s) will be stopped, their processes killed and their logs deleted. Briefs are kept.`)) return;
+  const r = await removePost(`/api/plans/${encodeURIComponent(id)}/remove`);
+  if (r.error) { toast(r.error, true); return; }
+  const gone = new Set(Array.isArray(r.lanes) ? r.lanes : []);
+  plans = plans.filter((x) => x.id !== id);
+  if (gone.size) lanes = lanes.filter((l) => !gone.has(l.id));
+  toast(`Deleted plan ${title}`);
+  if (route.kind === 'plan' && route.id === id) { go('/'); return; }
+  renderRail();
+  refresh(true);
+}
+async function deleteLane(id) {
+  const l = lanes.find((x) => x.id === id) || (detail && detail.id === id ? detail : null);
+  const task = l ? l.task : id;
+  const running = !!(l && l.running);
+  const tail = running ? 'It is running: it will be stopped and killed, its logs deleted. Briefs are kept.' : 'Its process will be killed and its logs deleted. Briefs are kept.';
+  if (!window.confirm(`Delete lane ${task}? ${tail}`)) return;
+  const r = await removePost(`/api/lane/${encodeURIComponent(id)}/remove`);
+  if (r.error) { toast(r.error, true); return; }
+  lanes = lanes.filter((x) => x.id !== id);
+  for (const p of plans) for (const w of p.waves) w.lanes = w.lanes.filter((x) => x.id !== id);
+  toast(`Deleted lane ${task}`);
+  if (route.kind === 'lane' && route.id === id) { go('/'); return; }
+  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } }
+  refresh(true);
+}
 
 // First-run onboarding panel: shown only while there are no plans and no lanes yet.
 // /api/doctor is cached for 30 s (the poll runs every 2.5 s) and concurrent calls share one request.
@@ -1442,7 +1504,9 @@ onboard: () => {
   const fails = rows.filter((r) => r.status === 'fail').length;
   const warns = rows.filter((r) => r.status === 'warn').length;
   return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
-}, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; } };
+}, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; },
+// ids deleted in the fixture, for the check harness: a removed plan or lane never comes back
+removed: () => [...demoRemoved] };
 
 // ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
 let lastOkAt = 0, firstFailAt = 0, staleOn = false;
@@ -1522,6 +1586,14 @@ document.addEventListener('click', (e) => {
   if (cb) { e.preventDefault(); copyText(cb.dataset.copy || '').then((ok) => flash(cb.querySelector('.onb-copy'), ok)); return; }
   const kb = e.target.closest('.onb-keys');
   if (kb) { e.preventDefault(); if (typeof connectKeys === 'function') connectKeys(); return; }
+  const del = e.target.closest('[data-del]');
+  if (del) {
+    e.preventDefault();
+    const s = del.dataset.del, i = s.indexOf(':');
+    const kind = s.slice(0, i), id = s.slice(i + 1);
+    if (kind === 'plan') deletePlan(id); else deleteLane(id);
+    return;
+  }
   const btn = e.target.closest('[data-action]');
   if (btn) { e.preventDefault(); runControl(btn.dataset.action, btn.dataset.lane); return; }
   const send = e.target.closest('[data-note-send]');
