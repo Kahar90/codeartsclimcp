@@ -31,6 +31,9 @@ summaries, not transcripts.
     and `lanes`. It patches only the fields you send and bumps the revision.
   - Publish real transitions, not a heartbeat: nothing changed means nothing to post. Never paste
     private reasoning or chat, only what you did and what is next.
+- Publish activity before long waits, before verification and before closing. When a user message
+  changes scope, publish the revised goal, pending tasks and lanes before starting the added work.
+  Pass the plan id explicitly to notes so concurrent projects cannot steal your updates.
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.
 - Parallel lanes each get a git worktree: `git worktree add ../<repo>-wt-<task> -b lane/<task>`.
 
@@ -42,13 +45,17 @@ summaries, not transcripts.
   - one `CHECK: <command>` line per check, and reuse a check another step or lane already has
     instead of adding a near-duplicate. The runner runs the lines itself when the worker goes idle
     and feeds failures back (up to 3 fix rounds).
-  - include one step that adds a test hook or script so the result can be verified without looking
-    at a UI (for example `window.__app.state()`).
+  - reuse existing test hooks or scripts; add one only when needed to verify new behavior.
   - "only touch <files>", "do not ask questions", the safety rules from the template.
   - no separate self-review step: the runner's reviewer gate and your own verification cover it,
     and the worker commits only steps that work, so a "re-read and fix" step just burns time.
   - no MODEL line by default: flash builds every lane, GLM 5.3 reviews. Add `MODEL: maas/glm-5.3`
     only for very complex lanes (many files across modules, long context, hard design reasoning).
+
+Precise briefs reduce ambiguity; they cannot disable model reasoning. Keep file reads and tool
+outputs targeted, batch independent reads, and avoid rereading full files. Token savings require
+measured evidence across comparable tasks. Workers run targeted checks on changed behavior before
+committing; the runner runs final CHECK gates at idle and the lead verifies the final result.
 
 ## 4. Run and watch
 - `ca_lane_start {repo, task}` (CLI: `ca lane <repo> <task> --detach`). It returns at once.

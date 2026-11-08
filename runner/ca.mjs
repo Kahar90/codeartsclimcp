@@ -1776,7 +1776,7 @@ function validatePatch(patch) {
   const keys = Object.keys(patch);
   if (!keys.length) die(`--patch is empty; fields: ${PLAN_PATCH_HINT}`, 2);
   for (const k of keys) {
-    if (!(k in PLAN_PATCH)) die(`unknown patch field "${k}"; fields: ${PLAN_PATCH_HINT}`, 2);
+    if (!Object.hasOwn(PLAN_PATCH, k)) die(`unknown patch field "${k}"; fields: ${PLAN_PATCH_HINT}`, 2);
     if (!PLAN_PATCH[k](patch[k])) die(`patch field "${k}" has the wrong type`, 2);
   }
   return keys;
@@ -1869,7 +1869,7 @@ function cmdNote(args) {
     const p = readJSON(r.file);
     if (!p || typeof p !== 'object' || Array.isArray(p)) die(`cannot read plan JSON at ${r.file}`, 2);
     if (phase !== null) p.phase = phase;
-    if (hasNow) {
+    if (hasNow || phase !== null) {
       p.now = text; p.nowAt = at;
       pushActivity(p, { at, text, ...(phase !== null ? { phase } : {}) });
     } else {

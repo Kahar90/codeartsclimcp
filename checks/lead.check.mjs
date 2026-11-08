@@ -104,6 +104,12 @@ check('note with a missing --plan value is a usage error', r.code === 2, r.out +
 r = ca(['note', '--plan', 'sbx', '--now', 'legacy via plan']);
 check('note with an explicit --plan still works', r.code === 0, r.out + r.err);
 
+r = ca(['note', '--plan', 'sbx', '--phase', 'building', 'phase transition']);
+p = readPlan('sbx');
+check('phase-only transition refreshes activity and timestamp', r.code === 0 && p.leadActivity.at(-1).text === 'phase transition' && p.nowAt === p.leadActivity.at(-1).at, JSON.stringify(p.leadActivity.at(-1)));
+r = ca(['plan', 'update', 'sbx', '--patch', '{"toString":1}']);
+check('inherited object names are refused as unknown patch fields', r.code !== 0 && /unknown patch field/.test(r.err), r.out + r.err);
+
 // legacy plan with no timestamps: planView reports nothing rather than a false age.
 mkPlan('legacy', { title: 'Legacy', status: 'running', waves: [{ name: 'W', lanes: [] }], lanes: [] });
 ca(['plan', repos.legacy.file]);

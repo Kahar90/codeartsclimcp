@@ -10,8 +10,7 @@ progress from it). Do not ask questions; decide and keep going.
 
 Keep the brief lean: aim for 1 to 3 steps and never more than 8. Each step is a piece of behaviour
 a check can prove, not a chore. Reuse a `CHECK:` command that already exists instead of adding a
-near-duplicate, and include one step that adds a test hook or script so the result is verifiable
-without vision (for example window.__app.state()). Do not add a separate "re-read and fix"
+near-duplicate, and reuse an existing test hook or script to verify the result. Add one only if missing. Do not add a separate "re-read and fix"
 self-review step: the runner's reviewer gate and the lead's verification cover that.
 
 Safety rules (hard):
@@ -20,7 +19,7 @@ Safety rules (hard):
 - Do not launch browsers or write your own browser scripts; use only the checks below.
 - If `git commit` fails, do NOT try workarounds: stop and put the exact error in your final reply.
 
-Checks: run these before each commit. The runner also runs every check line below by itself when you finish and sends you the output if one fails.
+Checks: run targeted checks for changed behavior before committing. Do not repeat the full suite for every step. The runner runs the CHECK lines once when you finish and sends failures back for fixes.
 CHECK: <exact command, e.g. npm run typecheck>
 CHECK: <another command, e.g. npm test>
 Constraints: no em dashes anywhere. Only touch <files>. Numbers only, never print private data.
