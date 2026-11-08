@@ -2185,7 +2185,8 @@ function planView(r) {
   // The plan badge comes from what the lanes really do, never only from the hand-written status: a plan whose
   // lead said "running" but has no running lane reads as waiting (with how long), so it never looks stuck.
   const allL = waves.flatMap((w) => w.lanes); const live = allL.filter((x) => x.result !== 'dropped');
-  const fin = (x) => ['done', 'needs review'].includes(x.result);
+  // Done counts every settled lane (verified, done, or handled/merged by the lead), so a closed plan whose lanes the lead merged never reads "1/3 lanes done" under a Done badge.
+  const fin = (x) => settledKey(statusKey(x)) || ['done', 'needs review'].includes(x.result);
   const counts = { total: live.length, done: live.filter(fin).length, running: live.filter((x) => x.running).length,
     notStarted: live.filter((x) => x.health === 'planned').length, dropped: allL.length - live.length };
   const ts = (t) => { const n = typeof t === 'number' ? t : new Date(t || 0).getTime(); return Number.isFinite(n) ? n : 0; };
