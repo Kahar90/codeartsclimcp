@@ -1190,7 +1190,10 @@ function renderGlanceBubble(state) {
   b.style.left = (ox + f[0] * k) + "px";
   b.style.top = (oy + (f[1] - 26) * k) + "px";
 }
+const glanceIconCache = {};
 function glanceFavicon(meta) {
+  const key = meta.color + "|" + meta.glyph;
+  if (glanceIconCache[key]) return glanceIconCache[key];
   const c = document.createElement("canvas");
   c.width = 32; c.height = 32;
   const x = c.getContext("2d");
@@ -1209,7 +1212,9 @@ function glanceFavicon(meta) {
   x.textAlign = "center";
   x.textBaseline = "middle";
   x.fillText(meta.glyph, 16, 17);
-  return c.toDataURL("image/png");
+  const url = c.toDataURL("image/png");
+  glanceIconCache[key] = url;
+  return url;
 }
 function setGlanceIcon(href) {
   let link = document.querySelector('link[rel~="icon"]');
@@ -1218,7 +1223,8 @@ function setGlanceIcon(href) {
 }
 function applyGlanceTitle(state, meta, word, p) {
   if (state === "idle") { clearGlanceTitle(); return; }
-  document.title = meta.glyph + " " + word + " - " + ((p && (p.title || p.goal)) || "");
+  const next = meta.glyph + " " + word + " - " + ((p && (p.title || p.goal)) || "");
+  if (document.title !== next) document.title = next;
   setGlanceIcon(glanceFavicon(meta));
 }
 function clearGlanceTitle() {
