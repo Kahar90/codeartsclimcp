@@ -3,18 +3,44 @@
   "goal": "The Office room fills the whole stage on desktop (no dark bands beside or above it) while every station sprite, nameplate and the sign stay in view.",
   "lead": "Claude Opus 5.5",
   "status": "running",
-  "now": "Briefing the office-cover lane",
-  "waves": [{ "name": "Wave 1", "lanes": ["office-cover"] }],
+  "now": "office-cover lane running: cover fit plus blurred backdrop",
+  "waves": [
+    {
+      "name": "Wave 1",
+      "lanes": [
+        "office-cover"
+      ]
+    }
+  ],
   "lanes": [
     {
       "task": "office-cover",
       "repo": ".",
       "model": "flash",
       "why": "sizeStage letterboxes the room with Math.min; switch to a content-aware cover fit plus a blurred room backdrop for any remainder",
-      "files": ["runner/office.html", "checks/officefit.check.mjs"]
+      "files": [
+        "runner/office.html",
+        "checks/officefit.check.mjs"
+      ]
     }
   ],
-  "next": ["verify fit checks and screenshots at 1920x945, 2560x1440, 1366x768", "merge, release, install-local"],
-  "decisions": ["Cover the stage as far as the station content allows; any leftover band shows a blurred, dimmed copy of the room instead of the dark shell colour"],
-  "risks": ["Ultra-wide screens cannot be fully covered without cropping stations; the blurred backdrop fills that band"]
+  "next": [
+    "verify fit checks and screenshots at 1920x945, 2560x1440, 1366x768",
+    "merge, release, install-local"
+  ],
+  "decisions": [
+    "Cover the stage as far as the station content allows; any leftover band shows a blurred, dimmed copy of the room instead of the dark shell colour"
+  ],
+  "risks": [
+    "Ultra-wide screens cannot be fully covered without cropping stations; the blurred backdrop fills that band"
+  ],
+  "phase": "waiting",
+  "nowAt": "2026-11-08T14:46:12.655Z",
+  "leadActivity": [
+    {
+      "at": "2026-11-08T14:46:12.655Z",
+      "text": "office-cover lane running: cover fit plus blurred backdrop",
+      "phase": "waiting"
+    }
+  ]
 }
