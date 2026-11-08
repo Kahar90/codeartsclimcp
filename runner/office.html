@@ -160,6 +160,9 @@ body.narrow #winTail { display: none; }
 #winSteps .st-pending .mark { color: var(--faint); }
 #winLink { font-size: 14.5px; }
 #winForm { display: flex; gap: 8px; padding: 0 18px 16px; flex: none; }
+/* Bug B: the steer row sat tight against the quick-reply chips. When the chips are shown, give the
+   composer a 12 px gap and a 1 px top border separator (only there, so a chip-less lane shows neither). */
+#winChips:not([hidden]) + #winForm { margin-top: 12px; border-top: 1px solid var(--border); }
 #winInput { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--code-bg); color: var(--fg); font: 14.5px var(--font); }
 #winSend { flex: none; height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 14.5px var(--font); cursor: pointer; }
 #winSend:disabled, #winInput:disabled { opacity: 0.55; cursor: default; }
