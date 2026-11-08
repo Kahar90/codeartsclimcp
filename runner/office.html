@@ -76,6 +76,7 @@ body.narrow .np-word { display: none } body.narrow .np-mark { display: inline; f
    shows; any leftover area on stages too wide for the room is backed by #roomfill, a blurred and dimmed
    copy of the room, not a flat dark band. Narrow keeps the room at its own aspect. */
 #stage { position: relative; overflow: hidden; background: radial-gradient(140% 130% at 50% 42%, #2a2233 0%, #1d1727 55%, #120e19 100%); }
+#roomfill { position: absolute; inset: 0; background: url(/assets/workshop.png) center/cover no-repeat; filter: blur(14px) brightness(.55) saturate(1.1); transform: scale(1.08); pointer-events: none; }
 #room { position: absolute; left: 0; top: 0; image-rendering: pixelated; pointer-events: none; }
 #sprites { position: absolute; inset: 0; pointer-events: none; z-index: 1; } /* own stacking context: depth-sorted sprite z values never rise above plates */
 #sprites .px-sprite { position: absolute; }
@@ -244,6 +245,7 @@ body.narrow::-webkit-scrollbar { display: none; }
 html.narrow { scrollbar-width: none; }
 html.narrow::-webkit-scrollbar { display: none; }
 body.narrow #stagewrap { flex: none; min-height: 0; }
+body.narrow #roomfill { display: none; }
 /* states: hover, press and the open-trigger highlight */
 .plate { transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
 #plates .plate:hover { transform: translate(-50%, calc(-50% - 1px)); border-color: var(--sel); }
@@ -343,6 +345,7 @@ body.narrow .ca-top:has(.ca-update:not([hidden])) .ca-glance-tog { display: none
 <div id="hoverCard" class="ca-card" role="tooltip" hidden></div>
 <main id="stagewrap">
   <div id="stage">
+    <div id="roomfill" aria-hidden="true"></div>
     <img id="room" src="/assets/workshop.png" alt="" aria-hidden="true">
     <div id="sprites"></div>
     <div id="fx" aria-hidden="true"><div id="lamp"></div></div>
