@@ -44,8 +44,11 @@
 //                                  the lane folder; --dry-run prints the argv without spawning)
 //        ca dash [port]                    local web dashboard of all lanes (default 4777)
 //        ca gc                             forget lanes finished more than 3 days ago
+//        ca rm <lane> [--keep-logs]        delete a lane: kill its processes, unregister it and drop
+//                                  its lane logs (--keep-logs keeps the lane dir and log; the brief is always kept)
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
-//        ca plan list | close [id] [--reason t] | rm <id>   plan state; close drops unstarted lanes
+//        ca plan list | close [id] [--reason t] | rm <id> [--keep-lanes]   plan state; close drops unstarted lanes;
+//                                  rm kills and deletes the plan's lanes (--keep-lanes only unregisters)
 //        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
 //        ca lead-tokens [--plan id] [--session file]   point the plan at the lead's Claude transcript and print totals
 //        ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]
@@ -1364,6 +1367,17 @@ async function removePlan(r, { by = 'ca plan rm' } = {}) {
   } catch (err) { return { error: String((err && err.message) || err), code: 500 }; }
 }
 
+// ca rm <lane> [--keep-logs]: delete a lane for good. findLane dies (exit 2) on an unknown or
+// ambiguous lane, exactly like the other lane commands.
+async function cmdRm(args) {
+  const keep = args.includes('--keep-logs');
+  const q = args.filter((a) => !a.startsWith('--'))[0];
+  const l = findLane(q);
+  const r = await removeLane(l, { purge: !keep, by: 'ca rm' });
+  if (r.error) die(r.error, r.code || 1);
+  console.log(`removed ${r.id}; killed [${r.killed.join(', ') || '-'}]; removed ${r.removed.join(', ') || '(none)'}`);
+}
+
 // ---------- engineer workflow: setup, wait, summary, init, doctor ----------
 async function cmdSetup(args) {
   const f = path.join(HERE, 'setup.mjs');
@@ -1684,7 +1698,13 @@ async function cmdPlan(args) {
     const ri = args.indexOf('--reason'); const reason = ri >= 0 ? args.slice(ri + 1).join(' ').trim() : '';
     const q = args.slice(1, ri >= 0 ? ri : undefined).find((a) => !a.startsWith('--'));
     const r = findPlan(q); if (!r) die(`no registered plan matches ${q || '(latest)'}; ca plan list`, 2);
-    if (sub === 'rm') { fs.rmSync(path.join(PLANS, `${r.id}.json`), { force: true }); return console.log(`plan ${r.id} unregistered (its plan.json is kept: ${r.file})`); }
+    if (sub === 'rm') {
+      // rm kills and deletes the plan's lanes and marks the plan removed; --keep-lanes only unregisters.
+      if (args.includes('--keep-lanes')) { fs.rmSync(path.join(PLANS, `${r.id}.json`), { force: true }); return console.log(`plan ${r.id} unregistered (its plan.json is kept: ${r.file})`); }
+      const res = await removePlan(r, { by: 'ca plan rm' });
+      if (res.error) die(res.error, res.code || 1);
+      return console.log(`plan ${r.id} removed; lanes [${res.lanes.join(', ') || '-'}]; killed [${res.killed.join(', ') || '-'}]`);
+    }
     const v = planView(r); if (v.waves.some((w) => w.lanes.some((l) => l.running))) die(`plan ${r.id} still has a running lane; ca stop it first`, 1);
     const p = readJSON(r.file) || {}; const unstarted = new Set(v.waves.flatMap((w) => w.lanes).filter((l) => l.health === 'planned').map((l) => l.task));
     for (const pl of p.lanes || []) if (unstarted.has(pl.task)) pl.dropped = true;
@@ -2077,7 +2097,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); await updateNotice(args); process.exit(0); }
 if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
   let v = '0.0.0'; try { v = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version || v; } catch {}
