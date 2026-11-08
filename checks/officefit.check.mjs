@@ -82,9 +82,11 @@ try {
   const sc = await state();
   const hideLanes = new Set((sc && sc.lanes || []).filter((l) => l.steps === 'hide').map((l) => l.id));
   const hideSubs = [];
-  for (const s of (sc && sc.stations) || []) if (hideLanes.has(s.laneId)) hideSubs.push({ id: s.laneId, sub: s.sub, station: s.station });
+  // The plate text lives on layout().stations (state().stations has no sub): read it there so this can fail.
+  const lc = await ev('window.__office.layout()');
+  for (const s of (lc && lc.stations) || []) if (hideLanes.has(s.laneId)) hideSubs.push({ id: s.laneId, sub: String(s.sub || ''), station: s.station });
   const frac = hideSubs.filter((x) => /\d+\s*\/\s*\d+/.test(x.sub) || /step\s+\d/i.test(x.sub));
-  check('demo=closed: hide lanes seat and show no step fraction', hideSubs.length >= 1 && frac.length === 0, JSON.stringify({ hideSubs }));
+  check('demo=closed: hide lanes seat and show no step fraction', hideSubs.length >= 1 && hideSubs.every((x) => x.sub.length > 0) && frac.length === 0, JSON.stringify({ hideSubs }));
   await shot('fit-closed');
 
   // Step 4: the glance toggle hides and shows the sign, glow and bubble, keeps title and favicon, survives a reload.
