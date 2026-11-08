@@ -436,10 +436,13 @@ async function runLane(repoArg, task, opts = {}) {
   const sent = new Set();        // texts we sent (to tell TUI-typed steering apart)
   const seenUser = new Set();    // user partIDs already logged
 
+  // The worker's last reply and last tool output: the gate reads them to tell whether its commit was
+  // refused by the sandbox (then the runner commits instead of wasting a fix round that says "commit").
+  let lastWorkerReply = ''; let lastToolOutput = '';
   const flushPart = (pid) => {
     const p = parts.get(pid); if (!p || p.logged) return; p.logged = true;
     const t = (p.text || '').trim(); if (!t) return;
-    if (p.type === 'reasoning') L(`  ~ think: ${oneLine(t, 300)}`); else { L('  assistant:'); block('│ ', t); }
+    if (p.type === 'reasoning') L(`  ~ think: ${oneLine(t, 300)}`); else { lastWorkerReply = t; L('  assistant:'); block('│ ', t); }
   };
   const toolInput = (tool, inp = {}) => oneLine(inp.command ?? inp.filePath ?? inp.path ?? inp.pattern ?? inp.url ?? inp.description ?? JSON.stringify(inp), 200);
 
@@ -505,6 +508,7 @@ async function runLane(repoArg, task, opts = {}) {
           } else if ((st.status === 'completed' || st.status === 'error') && s) {
             const t = s.tools.get(key); s.tools.delete(key);
             const took = t ? ` (${dur(now() - t.since)})` : '';
+            lastToolOutput = String(st.error || st.output || '').trim();
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
             if (sid === S.activeSession) S.lastToolAt = now();
@@ -842,10 +846,43 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         S.gates.push({ at: now(), gate: 'repo writable', ok: false, detail: why }); L(`== gate repo writable: FAIL (${why})`);
         return { ok: false, write: true, what: 'repo writable', reason: why };
       }
-      S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: d.slice(0, 5).join(', ') }); L(`== gate git clean: FAIL (${d.length} changed)`);
-      return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` };
+      // The tree is dirty and the runner itself can write: if the worker's own commit was refused
+      // (its reply or tool output shows a git error), commit the work here instead of wasting a fix
+      // round on "commit"; the worker cannot fix a sandbox it is not allowed to write to.
+      const refused = commitRefused(`${lastWorkerReply}\n${lastToolOutput}`);
+      const dec = commitFallbackDecision({ dirty: true, refused, writable: true });
+      if (dec.action === 'fail') {
+        const why = dec.reason;
+        S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: why }); L(`== gate git clean: FAIL (${why})`);
+        return { ok: false, write: true, what: 'commit failed', reason: why };
+      }
+      if (dec.action === 'commit') {
+        const step = stepProgress(S).current;
+        const subject = step ? `step ${step.n}: ${oneLine(step.text, 120)}` : `step ${S.commits + 1}: the worker's uncommitted work`;
+        git(repo, 'add', '-A');
+        const cm = spawnSync('git', ['commit', '-m', subject, '-m', `committed by the runner: the worker's commit was refused (${oneLine(refused, 200)})`], { cwd: repo, encoding: 'utf8', windowsHide: true });
+        if (cm.status !== 0) {
+          const first = String((cm.stderr || '') + (cm.stdout || '')).trim().split(/\r?\n/).find((l) => l.trim()) || `exit ${cm.status}`;
+          const why = `commit failed: ${oneLine(first, 200)}`;
+          S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: why }); L(`== gate git clean: FAIL (${why})`);
+          return { ok: false, write: true, what: 'commit failed', reason: why };
+        }
+        S.interruptions.push({ at: now(), phase: 'gate', kind: 'commit-fallback', what: `${subject} (${oneLine(refused, 160)})` }); save(true);
+        L(`== commit fallback: committed "${subject}" (the worker's commit was refused)`);
+        syncCommits();
+        if (dirty().length) {
+          const why = `commit failed: git clean still failing after the runner's commit`;
+          S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: why }); L(`== gate git clean: FAIL (${why})`);
+          return { ok: false, write: true, what: 'commit failed', reason: why };
+        }
+        S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok (committed by the runner)');
+      } else {
+        S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: d.slice(0, 5).join(', ') }); L(`== gate git clean: FAIL (${d.length} changed)`);
+        return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` };
+      }
+    } else {
+      S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
     }
-    S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
     for (const c of checks) {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
       let r = await runCheck(c);
