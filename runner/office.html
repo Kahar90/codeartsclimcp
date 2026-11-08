@@ -857,12 +857,23 @@ let needsShown = -1;
 // DOM writes per poll-rebuilt region: the hover check reads window.__office.renders() and asserts these
 // stop growing while a hover card or the plan menu stays open and nothing else changes.
 const renders = { statusBadge: 0, planMenu: 0, hoverCard: 0, winSteps: 0, tokens: 0, winBadge: 0 };
+// The lead surface for the Office: phase, latest activity, age and stale flag. Staleness labels the age
+// (nothing from the lead for a while), never "the lead stopped". No timestamp means age null, not a false 0.
+const LEAD_STALE_MS = 5 * 60 * 1000;
+let leadInfo = { phase: null, activity: [], age: null, stale: false };
+const fmtAge = (ms) => ms < 60000 ? `${Math.max(0, Math.round(ms / 1000))}s` : ms < 3600000 ? `${Math.floor(ms / 60000)}m` : ms < 86400000 ? `${Math.floor(ms / 3600000)}h` : `${Math.floor(ms / 86400000)}d`;
 function renderTop() {
   const p = model.plan;
   $("planTitle").textContent = p.title || p.goal || "(no plan)";
+  const L = p.lead || {};
+  const leadAct = Array.isArray(L.activity) ? L.activity.map((a) => String((a && a.text) || "")).filter(Boolean) : [];
+  const leadAge = typeof L.age === "number" ? L.age : null;
+  leadInfo = { phase: typeof L.phase === "string" && L.phase ? L.phase : null, activity: leadAct, age: leadAge, stale: leadAge !== null && leadAge >= LEAD_STALE_MS };
   const now = fetchErr ? fetchErr + " (retrying every 2 s)" : (p.now || "");
-  $("nowLine").hidden = !now;
-  $("nowLine").textContent = now ? "Now: " + now : "";
+  const ageTxt = leadAge === null ? "" : fmtAge(leadAge) + " ago";
+  const nowText = now || (leadAct.length ? leadAct[leadAct.length - 1] : "");
+  $("nowLine").hidden = !nowText;
+  $("nowLine").textContent = nowText ? "Now: " + nowText + (ageTxt ? " \u00b7 " + ageTxt : "") : "";
   $("leadChip").hidden = !leadName(p);
   $("leadChip").textContent = leadName(p);
   const badgeHtml = planBadgeHtml(ownLanes());
@@ -2135,6 +2146,7 @@ window.__office = {
       mode,
       plan: (model && model.plan && model.plan.title) || "",
       goal: (model && model.plan && model.plan.goal) || "",
+      lead: leadInfo,
       stage: { x: r.x, y: r.y, w: r.width, h: r.height, k },
       stations: allStations,
       overflow: (() => { const ids = model ? model.lanes.filter((l) => !laneStation.has(l.id) && !laneHot.has(l.id)).map((l) => l.id) : []; return { count: ids.length, ids, open: ovOpen }; })(),
