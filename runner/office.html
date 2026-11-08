@@ -313,6 +313,8 @@ body.narrow #glanceSign .gs-detail { font-size: 11px; max-width: none; }
 .ca-glance-tog[aria-pressed="true"] .cgt-state { color: var(--run); }
 body.narrow .ca-glance-tog { padding: 0 9px; gap: 0; }
 body.narrow .ca-glance-tog .cgt-word, body.narrow .ca-glance-tog .cgt-state { display: none; }
+/* phone: a pending update outranks the toggle in a full top bar (the toggle comes back once updated) */
+body.narrow .ca-top:has(.ca-update:not([hidden])) .ca-glance-tog { display: none; }
 </style>
 </head>
 <body>

@@ -354,6 +354,8 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .ca-notify .ca-ico { width: 15px; height: 15px }
 .ca-stale { display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255, 156, 156, 0.14); border-bottom: 1px solid var(--bad); color: var(--bad); font: 650 13px var(--font); padding: 8px 14px }
 @media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l, .ca-notify #glance-l { display: none } }
+/* tablet: the Notify and Glance words go icon-only before the top bar can overflow */
+@media (max-width: 900px) { .ca-notify #notify-l, .ca-notify #glance-l { display: none } }
 
 /* ---------- glance: banner, rail dot, tab title and favicon ---------- */
 /* One state per plan (plan.glance), shown at a glance. Colours and breathing come from --glance,
