@@ -1,4 +1,3 @@
-MODEL: maas/glm-5.3
 You are working in a git repo (current directory), a dependency-free Node ESM project (the `ca` lane
 runner): runner/ca.mjs (supervisor, CLI, dashboard server), runner/controls.mjs (pure lane controls and
 buckets), runner/assets/workshop.js (shared UI helpers, `CAUI.status` / `CAUI.badge`), runner/dash.html
