@@ -350,6 +350,7 @@ const demoBig = q.get("demo") === "big";
 const demoDone = q.get("demo") === "done" || (demoBig && q.get("done") === "1");
 const demoStuck = q.get("demo") === "stuck";
 const demoCrowd = q.get("demo") === "crowd";
+const demoStatus = q.get("demo") === "status";
 const mode = q.has("demo") ? "demo" : "live";
 let STAGE_W = 1280, STAGE_H = 720;
 const HOTDESKS = [
@@ -440,6 +441,26 @@ const DEMO_BASE = {
     texts: ["Read the diffs", "Run the checks", "Review the sprites", "Write the verdict"],
     init: { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" } },
 };
+// One lane per finish state the status model adds: checks that could not run (infra), checks that
+// really failed, and a finished lane the lead acked as merged. Their badges come from l.status. This
+// lives on the ?demo=status fixture so the small ?demo=1 scene keeps its three lanes and four stations.
+const DEMO_STATUS_BASE = Object.assign({}, DEMO_BASE, {
+  "office-unverified": { phase: "build", model: "maas/glm-5.3", dur: 21, by: { build: [9000, 1200, 300, 40000, 3], review: [0, 0, 0, 0, 0], other: [120, 40, 0, 600, 1] },
+    texts: ["Data layer with demo mode", "Scene, cards and completion", "Run every CHECK line"],
+    status: { key: "unverified", label: "Unverified", tone: "warn", reason: "checks couldn't run: node --check runner/ca.mjs (exit 127)" },
+    bucket: "attention",
+    init: { dn: 3, cur: 0, health: "unverified", running: false, result: "unverified", verdict: "" } },
+  "office-failing": { phase: "build", model: "maas/glm-5.3", dur: 24, by: { build: [11000, 1800, 700, 60000, 4], review: [900, 120, 0, 3000, 1], other: [150, 60, 0, 800, 1] },
+    texts: ["String helpers", "Path joins", "Escape edge cases", "Fix the failing check"],
+    status: { key: "checks failing", label: "Checks failing", tone: "bad", reason: "checks failing: node checks/assets.check.mjs (exit 1)" },
+    bucket: "attention",
+    init: { dn: 4, cur: 0, health: "checks failing", running: false, result: "checks failing", verdict: "needs fixes" } },
+  "office-merged": { phase: "build", model: "maas/glm-5.3", dur: 18, by: { build: [14000, 2600, 900, 80000, 5], review: [1100, 200, 0, 4000, 1], other: [160, 60, 0, 900, 1] },
+    texts: ["Docs landing page", "Quick start guide", "Lead workflow page", "Run a lane page", "Publish the docs"],
+    status: { key: "handled", label: "Merged", tone: "done", reason: "merged by the lead" },
+    bucket: "ended", handled: true,
+    init: { dn: 5, cur: 0, health: "done", running: false, result: "done", verdict: "ready" } },
+});
 const DEMO_BIG_BASE = {
   "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 46, by: { build: [12100, 21400, 4800, 680000, 8], review: [2100, 900, 200, 12000, 1], other: [400, 150, 0, 2000, 1] },
     texts: ["Routes in ca.mjs", "Page shell with the goal box", "Data layer with demo mode", "Scene, cards and completion", "Links and packet animation", "Resize re-bakes geometry", "Keyboard focus and Escape", "Screenshots for the checks"],
@@ -504,7 +525,7 @@ const DEMO_KINDS = {
   "cli-dx": "code", mcp: "review", setup: "docs", onboard: "code",
   "office-motion": "art", "docs-site": "docs", "perf-pass": "code",
 };
-const DEMO_SET = demoBig ? DEMO_BIG_BASE : demoCrowd ? DEMO_CROWD_BASE : DEMO_BASE;
+const DEMO_SET = demoBig ? DEMO_BIG_BASE : demoCrowd ? DEMO_CROWD_BASE : demoStatus ? DEMO_STATUS_BASE : DEMO_BASE;
 const DEMO_STUCK_INIT = {
   "office-scene": { dn: 2, cur: 3, health: "STALLED", running: true, result: "", verdict: "" },
   "office-sprites": { dn: 1, cur: 2, health: "running", running: true, result: "", verdict: "" },
@@ -539,6 +560,8 @@ function demoControlsFor(st) {
     return { actions: ["steer", "stop", "attach", "kick", "fresh", "restart-server"], suggest: stuck ? "kick" : "", why: stuck ? "no model activity for 6m" : "" };
   }
   if (st.result === "done") return { actions: [], suggest: "", why: "" };
+  if (st.result === "checks failing") return { actions: ["resume"], suggest: "resume", why: "resume gives the worker another fix round" };
+  if (st.result === "unverified") return { actions: ["resume"], suggest: "", why: "" };
   if (st.health === "failed" || st.health === "stopped") return { actions: ["resume"], suggest: "resume", why: "gave up after 3 interruptions (transport)" };
   return { actions: [], suggest: "", why: "" };
 }
@@ -597,6 +620,7 @@ function demoModel() {
       result: st.result, verdict: st.verdict,
       commits: st.dn + "/" + b.texts.length,
       runs: b.runs || 0, continues: b.continues || [],
+      status: b.status, bucket: b.bucket, handled: b.handled,
       models: { build: b.model }, tokens: tp.tokens, tokensBy: tp.tokensBy,
       actions: ctl.actions, suggest: ctl.suggest, why: ctl.why,
       progress: { done: st.dn, total: b.texts.length, current: st.cur ? { n: st.cur, text: b.texts[st.cur - 1] } : null },
@@ -658,7 +682,7 @@ function demoModel() {
       ],
     };
   }
-  const lanes = [mk("office-scene"), mk("office-sprites"), mk("office-review")].filter((l) => !demoRemoved.has(l.id));
+  const lanes = Object.keys(DEMO_SET).map(mk).filter((l) => !demoRemoved.has(l.id));
   const byId = Object.fromEntries(lanes.map((l) => [l.id, l]));
   const pt = planTokenSums(lanes);
   return {
@@ -1147,7 +1171,7 @@ function setHotLook(hd, l) {
 }
 function laneName(l) { return l.task || l.id; }
 function stationSub(l) {
-  const st = CAUI.status(l.health);
+  const st = CAUI.laneStatus(l);
   const p = l.progress || {};
   let s = p.total ? st.label + " \u00b7 " + (p.done || 0) + "/" + p.total : st.label;
   const tt = CAUI.tokenTotal(l.tokens);
@@ -1159,7 +1183,7 @@ function holderReclaimable(id) {
   if (!l) return true;
   if (l.running) return false;
   if (l.result) return true;
-  return CAUI.status(l.health).key === "idle";
+  return CAUI.laneStatus(l).key === "idle";
 }
 function assign(id, stKey) {
   if (laneStation.has(id)) stationLane[laneStation.get(id)] = null;
@@ -1270,11 +1294,11 @@ function renderStations() {
     const id = stationLane[stKey];
     const l = id && model.lanes.find((x) => x.id === id);
     if (!l) { setStation(stKey, null); continue; }
-    setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
+    setStation(stKey, { name: laneName(l), sub: stationSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.laneStatus(l).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
   }
 }
 function hotSub(l) {
-  const st = CAUI.status(l.health);
+  const st = CAUI.laneStatus(l);
   const p = l.progress || {};
   let s = st.label;
   if (p.total) s += " " + (p.done || 0) + "/" + p.total;
@@ -1298,7 +1322,7 @@ function renderHotDesks() {
       continue;
     }
     setHotLook(hd, l);
-    setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.status(l.health).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
+    setStation(hd.key, { name: laneName(l), sub: hotSub(l), laneId: l.id, clip: CLIP_BY_KEY[CAUI.laneStatus(l).key] || "idle", suggest: l.suggest || "", why: l.why || "" });
     if (desk) desk.style.display = "";
     if (hit) { if (hit.dataset.lane !== l.id || hit.style.display === "none") hotLookDirty = true; hit.style.display = ""; hit.dataset.lane = l.id; }
     if (plate) plate.title = kindDef(l).label + " \u00b7 " + laneName(l);
@@ -1371,7 +1395,7 @@ function layoutStations() {
 }
 function ovRank(l) { return isNeedsYou(l) ? 0 : l.running ? 1 : 2; }
 function ovMeta(l) {
-  const st = CAUI.status(l.health).label;
+  const st = CAUI.laneStatus(l).label;
   const tt = CAUI.tokenTotal(l.tokens);
   return tt ? st + " \u00b7 " + CAUI.fmtTokens(tt) : st;
 }
@@ -1695,7 +1719,7 @@ function renderWinContent(keepInput) {
   if (!l) return;
   const pr = l.progress || {};
   $("winTitle").textContent = laneName(l);
-  const badgeHtml = CAUI.badge(CAUI.status(l.health));
+  const badgeHtml = CAUI.badge(CAUI.laneStatus(l));
   if ($("winBadge").innerHTML !== badgeHtml) { $("winBadge").innerHTML = badgeHtml; renders.winBadge++; }
   const mm = l.models && (l.models.build || Object.values(l.models)[0]);
   $("winMeta").textContent = [mm ? CAUI.shortModel(mm) : "", pr.total ? pr.done + " / " + pr.total + " steps" : ""].filter(Boolean).join(" \u00b7 ");
@@ -1704,7 +1728,8 @@ function renderWinContent(keepInput) {
   $("winCont").hidden = !c0;
   if (c0) $("winCont").textContent = "Run " + (l.runs || l.continues.length + 1) + " \u00b7 continues " + (c0.task || c0.id) + " (paused at " + ((c0.progress && c0.progress.done) || 0) + "/" + ((c0.progress && c0.progress.total) || 0) + ")";
   $("winGoal").hidden = true;
-  const cur = (pr.current && pr.current.text) || l.now || "";
+  // A finished lane has no current step: show why it ended (the status reason) instead of its last activity line.
+  const cur = l.running ? ((pr.current && pr.current.text) || l.now || "") : ((l.status && l.status.reason) || l.now || "");
   $("winNow").hidden = !cur;
   $("winNow").textContent = cur ? "Now: " + cur : "";
   $("winLink").hidden = false;
@@ -2058,7 +2083,7 @@ window.__office = {
       const sp = sprites[key];
       const id = key === "lead" ? "lead" : stationLane[key];
       const l = id && id !== "lead" && model ? model.lanes.find((x) => x.id === id) : null;
-      const st = key === "lead" ? (model ? CAUI.status(planStatus(model.plan, model.lanes)) : { key: "idle" }) : l ? CAUI.status(l.health) : { key: "idle" };
+      const st = key === "lead" ? (model ? CAUI.status(planStatus(model.plan, model.lanes)) : { key: "idle" }) : l ? CAUI.laneStatus(l) : { key: "idle" };
       return {
         station: key, role: key, kind: l ? laneKind(l) : null, laneId: id || null,
         name: key === "lead" ? leadName(model && model.plan) : (l ? laneName(l) : ""),
@@ -2082,7 +2107,7 @@ window.__office = {
       const f = hd.foot;
       const plate = plateEl.getBoundingClientRect();
       const sp = hotSprites[hd.key];
-      const st = CAUI.status(l.health);
+      const st = CAUI.laneStatus(l);
       const desk = desks[hd.key];
       return {
         station: hd.key, role: sp ? sp.role : hd.role, kind: laneKind(l), laneId: id, name: laneName(l),

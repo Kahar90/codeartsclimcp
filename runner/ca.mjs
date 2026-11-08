@@ -62,9 +62,9 @@
 //        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
 //        CA_MAX_LANES_PER_MODEL=maas/glm-5.3=2,default=4 (cap lanes per build model; glm 3,
 //        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
-//        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
-//        lane, 3 missing credentials, 4 needs review, 5 paused at LANE_TIMEOUT (resume with --resume),
-//        124 wait timeout.
+//        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed or checks failing,
+//        2 usage or unknown lane, 3 missing credentials, 4 needs review or unverified (a check
+//        could not run), 5 paused at LANE_TIMEOUT (resume with --resume), 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,7 +75,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
-import { laneActions, laneBucket, laneKind } from './controls.mjs';
+import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
 import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
@@ -802,10 +802,18 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
     for (const c of checks) {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
-      const r = await runCheck(c);
+      let r = await runCheck(c);
+      let kind = classifyCheck({ code: r.code, out: r.out });
+      // An infra failure is the machine, not the work: rerun that one check once, 3 s later, before
+      // deciding. A check that cannot run (missing tool, sandbox, timeout) never starts a fix round.
+      if (kind === 'infra') {
+        L(`== gate check could not run (exit ${r.code}); retrying once in 3 s`); await sleep(3000);
+        r = await runCheck(c); kind = classifyCheck({ code: r.code, out: r.out });
+      }
       const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
-      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, ms: r.ms }); save(true);
-      if (r.code !== 0) { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: `check failed: ${c}`, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check, and commit the fix.` }; }
+      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
+      if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check, and commit the fix.` }; }
       L(`== gate check ok (${dur(r.ms)})`);
     }
     return { ok: true };
@@ -837,7 +845,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   };
 
   // ---- run ----
-  let exitCode = 1, reason = '', review = null;
+  let exitCode = 1, reason = '', review = null, forcedResult = '';
   server.events(onEvent, (up) => { S.sse = up; }).catch(() => {});
   try {
     say(`lane ${id}: starting codearts server in ${repo}`);
@@ -879,14 +887,22 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('gate', 'running gates');
       const g = await gates();
       if (g.ok) { reason = ''; exitCode = 0; break; }
-      if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+      // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
+      // repair the machine), but a human must look, so exit 4 like needs review.
+      if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
+      if (++S.fixes > CFG.fixes) {
+        if (g.code !== undefined) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; }
+        else reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`;
+        exitCode = 1; break;
+      }
       say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
       phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
     }
     syncCommits();
 
-    // REVIEW (read-only plan agent, different model)
-    if (exitCode === 0 && !CFG.noReview) {
+    // REVIEW (read-only plan agent, different model). It reads code, not checks, so it still runs
+    // when the checks could not run (unverified): a reviewer asking for fixes wins over it.
+    if ((exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
       const rf = path.join(repo, 'tasks', `${task}.review.md`);
       const rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
         : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
@@ -895,7 +911,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('review', 'reviewing'); L(`== review (${REVIEW}, read-only plan agent) session ${rsid}`);
       await send(rsid, rb, REVIEW, 'plan');
       const rr = await drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
-      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; if (rr.keys) S.keysMessage = rr.keys; }
+      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
       let text = '';
       try {
         const msgs = await server.api('GET', `/session/${rr.sid}/message`);
@@ -912,6 +928,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       review = text;
     }
   } catch (err) {
+    forcedResult = '';
     if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
     else if (err && err.caStop) { reason = 'stopped'; exitCode = 1; L('== stopped while queued for a model slot'); }
     else { reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`); }
@@ -920,8 +937,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // ---- summary ----
   syncCommits();
   // A lane that reaches LANE_TIMEOUT is paused, not failed: the safeguard worked and `--resume` continues it in place.
-  S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done') : (reason === 'stopped' ? 'stopped' : reason === 'timeout' ? 'paused' : 'failed');
-  const finalExit = S.result === 'needs review' ? 4 : S.result === 'paused' ? 5 : exitCode;
+  S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done')
+    : forcedResult === 'unverified' && exitCode === 4 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'unverified')
+    : (forcedResult || (reason === 'stopped' ? 'stopped' : reason === 'timeout' ? 'paused' : 'failed'));
+  const finalExit = S.result === 'needs review' ? 4 : S.result === 'paused' ? 5 : S.result === 'unverified' ? 4 : S.result === 'checks failing' ? 1 : exitCode;
   S.reason = reason; S.exitCode = finalExit; S.phase = 'finished'; S.activity = S.result; S.busy = false; S.finishedAt = now();
   const log = git(repo, 'log', '--oneline', `${START}..HEAD`);
   const left = dirty();
@@ -944,6 +963,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ...(S.errors.length ? [`errors: ${S.errors.slice(-3).map((x) => x.msg).join(' / ')}`] : []),
     '--- review ---', reviewBody || '(no review)', `VERDICT: ${S.verdict || 'none'}`,
     ...(S.result === 'paused' ? [`paused at the time limit (LANE_TIMEOUT ${CFG.laneTimeout}s). Continue in place: ca lane ${repo} ${task} --resume   (optional lead notes: tasks/${task}.resume.md)`] : []),
+    ...(S.result === 'unverified' ? [`checks could not run (a machine problem, not a test failure): fix the environment, then rerun them. ca resume ${id}`] : []),
+    ...(S.result === 'checks failing' ? [`a check still fails after ${S.fixes} fix rounds. Fix it or resume for another round: ca resume ${id}`] : []),
     `files: ${dir} (live.log, review.md, events.jsonl)`,
   ].join('\n');
   fs.writeFileSync(path.join(dir, 'summary.md'), md + '\n');
@@ -1058,6 +1079,13 @@ function bucketFor(l) {
   return r;
 }
 function bucketOf(l) { return bucketFor(l).bucket; }
+// The one status a person sees for this lane, shown the same way in the CLI, MCP and both views.
+// bucketFor already decides whether a finished needs-you lane was acknowledged (handled): pass
+// that through so an acked lane reads Handled (or Merged) and everything else keeps its own status.
+function laneStatusOf(l, s = l.s) {
+  const r = bucketFor(l);
+  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '' });
+}
 // Lane kind for the Office characters; the brief is read once per change (mtime), not on every poll.
 const kindCache = new Map();
 function kindOf(l) {
@@ -1076,7 +1104,7 @@ const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 477
 // A status row for scripts: every laneRow field plus identity, result, progress and file paths.
 function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
-  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '',
+  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', status: laneStatusOf(l),
     progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
     summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
@@ -1149,7 +1177,7 @@ function cmdSummary(args) {
   const text = fs.existsSync(sm) ? fs.readFileSync(sm, 'utf8') : '';
   if (args.includes('--json')) {
     const pg = stepProgress(s);
-    console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', verdict: s.verdict || '',
+    console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', status: laneStatusOf(l), reason: s.reason || '', verdict: s.verdict || '',
       elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), commits: s.commitLog || [], steps: pg.list,
       gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
     return;
@@ -1418,6 +1446,7 @@ async function cmdOnboard(args) {
 function laneExit(s) {
   if (s.result === 'done') return !s.verdict || s.verdict === 'ready' ? 0 : 4;
   if (s.result === 'needs review') return 4;
+  if (s.result === 'unverified') return 4;
   if (resultOf(s) === 'paused') return 5;
   if (s.result === 'failed' && s.exitCode === 3) return 3;
   return 1;
@@ -1450,7 +1479,7 @@ async function cmdWait(args) {
       if (last.get(l.id) !== key) { last.set(l.id, key); if (!quiet) note(l, s); }
     }
     if (states.every(({ s }) => s.result)) {
-      const objs = states.map(({ l, s }) => ({ lane: l.id, result: s.result, verdict: s.verdict || '', exit: laneExit(s),
+      const objs = states.map(({ l, s }) => ({ lane: l.id, result: s.result, status: laneStatusOf(l, s), verdict: s.verdict || '', exit: laneExit(s),
         summaryPath: fs.existsSync(path.join(l.dir, 'summary.md')) ? path.join(l.dir, 'summary.md') : null }));
       for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
       if (asJson) process.stdout.write(JSON.stringify({ lanes: objs }) + '\n');
@@ -1834,7 +1863,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
-    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
+    actions, suggest, why, bucket, bucketWhy, status: laneStatusOf(l), project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1883,6 +1912,13 @@ function leadView(p) {
   if (!Object.keys(out).length) { const m = (typeof p.lead === 'string' && p.lead) || 'lead'; out[m] = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0, total: null, who: 'lead', source: 'none' }; }
   return out;
 }
+// A lane status key (from laneView/laneStatusOf), falling back to the raw result for a lane that
+// never got one. Plan and wave badges read these so the new results show up correctly.
+const statusKey = (x) => (x && x.status && x.status.key) || (x && x.result) || '';
+// Settled: nothing is left for a human (the new Verified, a plain Done, or an acked Handled lane).
+const settledKey = (k) => k === 'verified' || k === 'done' || k === 'handled';
+// Anything a human must look at, plus the ended-without-a-result states the old badge read the same way.
+const attnKey = (k) => ['checks failing', 'failed', 'unverified', 'stopped', 'killed'].includes(k);
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
@@ -1893,9 +1929,12 @@ function planView(r) {
     if (!fs.existsSync(bf)) bf = path.join(base, 'tasks', `${pl.task}.md`);
     const old = l ? null : laneFromLog(path.join(base, 'tasks', `${pl.task}.lane.log`), { id, task: pl.task, repo, dir: path.join(repo, 'tasks', `${pl.task}.lane`) }, bf);
     const v = l ? laneView(l) : old ? { ...laneView(old), archived: true } : { id, task: pl.task, repo, health: 'planned', phase: 'planned', running: false, result: '',
+      status: { key: 'planned', label: 'Planned', tone: 'idle', reason: 'planned, not started' },
       progress: { done: 0, total: briefSteps(bf).length, current: null } };
     // "dropped": true marks a planned lane the lead decided not to run; it never counts as open work.
-    const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
+    const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped',
+      status: { key: 'dropped', label: 'Dropped', tone: 'idle', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' },
+      reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
     if (pl.kind && ['code', 'art', 'review', 'docs'].includes(String(pl.kind).toLowerCase())) v.kind = String(pl.kind).toLowerCase(); // plan override
     return { ...v, ...d, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
   });
@@ -1904,7 +1943,9 @@ function planView(r) {
   for (const pl of (p.lanes || []).filter((x) => x && !x.removed)) {
     const old = pl.continues && byTask.get(pl.continues), nu = byTask.get(pl.task);
     if (old && nu && old.result && old.result !== 'done') {
-      Object.assign(old, { health: 'continued', result: 'continued', continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
+      Object.assign(old, { health: 'continued', result: 'continued',
+        status: { key: 'continued', label: 'Continued', tone: 'idle', reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` },
+        continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
       // One agent, one station: the successor carries the earlier run(s); views show them as history, not as another lane.
       nu.continues = [...(old.continues || []), { id: old.id, task: old.task, reason: old.reason, commits: old.commits, progress: old.progress, elapsed: old.elapsed }];
       nu.runs = (nu.runs || 1) + (old.runs || 1);
@@ -1914,8 +1955,8 @@ function planView(r) {
   const waves = (p.waves && p.waves.length ? p.waves : [{ name: 'Lanes', lanes: planned.map((x) => x.task) }]).map((w) => {
     const all = (w.lanes || []).map((t) => byTask.get(t)).filter(Boolean);
     const ls = all.filter((x) => !x.folded); const act = ls.filter((x) => x.result !== 'dropped');
-    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => ['done', 'needs review'].includes(x.result)) ? 'done' : act.some((x) => x.running) ? 'running'
-      : act.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : act.some((x) => x.result === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
+    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => settledKey(statusKey(x))) ? 'done' : act.some((x) => x.running) ? 'running'
+      : act.some((x) => attnKey(statusKey(x))) ? 'attention' : act.some((x) => statusKey(x) === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
     return { name: w.name, note: w.note || w.after || '', status: st, lanes: ls, folded: all.length && !ls.length };
   }).filter((w) => !w.folded).map(({ folded, ...w }) => w); // a wave whose lanes all continued elsewhere is history, not a stage
   // The plan badge comes from what the lanes really do, never only from the hand-written status: a plan whose
@@ -1927,9 +1968,10 @@ function planView(r) {
   const ts = (t) => { const n = typeof t === 'number' ? t : new Date(t || 0).getTime(); return Number.isFinite(n) ? n : 0; };
   const lastActivity = Math.max(r.mtime || 0, ...allL.map((x) => Math.max(ts(x.finishedAt), ts(x.startedAt))));
   const closed = /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || '');
+  const allSettled = live.length > 0 && live.every((x) => settledKey(statusKey(x)));
   const state = counts.running ? 'running' : closed ? (counts.done === counts.total ? 'done' : 'closed')
-    : live.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : live.some((x) => x.result === 'paused') ? 'paused'
-    : counts.total && counts.done === counts.total ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
+    : live.some((x) => attnKey(statusKey(x))) ? 'attention' : live.some((x) => statusKey(x) === 'paused') ? 'paused'
+    : allSettled ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
   const idle = Date.now() - lastActivity; const dur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
   const bits = [`${counts.done}/${counts.total} lanes done`];
   if (counts.running) bits.push(`${counts.running} running`);

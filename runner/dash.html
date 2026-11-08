@@ -566,6 +566,9 @@ function demoLanes() {
     dLane('demo-repo--orphan', 'orphan', { bucket: 'ended', bucketWhy: 'stopped by the operator', project: D_PROJ_A, health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', ...dTokBy(dTok(900, 80), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
     dLane('demo-repo--chaos', 'chaos', { bucket: 'attention', bucketWhy: 'needs review: two fixes asked', project: D_PROJ_A, health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', ...dTokBy(dTok(7300, 1060), dTok(2200, 300), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
     dLane('demo-repo--archive', 'archive', { bucket: 'ended', bucketWhy: 'archived after cleanup', project: D_PROJ_A, health: 'idle', phase: 'finished', result: 'archived', elapsed: '12m 40s', commits: '2/2', ...dTokBy(dTok(5200, 400), dTok(0, 0), dTok(0, 0)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 6 * 86400000, progress: { done: 2, total: 2, current: null } }),
+    dLane('demo-repo--unverified', 'unverified', { bucket: 'attention', bucketWhy: "checks couldn't run: node --check runner/ca.mjs (exit 127)", project: D_PROJ_B, health: 'unverified', phase: 'finished', result: 'unverified', reason: "checks couldn't run: node --check runner/ca.mjs (exit 127)", status: { key: 'unverified', label: 'Unverified', tone: 'warn', reason: "checks couldn't run: node --check runner/ca.mjs (exit 127)" }, elapsed: '4m 12s', commits: '3/3', ...dTokBy(dTok(9000, 1200), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 420000, progress: { done: 3, total: 3, current: null } }),
+    dLane('demo-repo--checks-failing', 'checks-failing', { bucket: 'attention', bucketWhy: 'checks failing: node checks/assets.check.mjs (exit 1)', project: D_PROJ_B, health: 'checks failing', phase: 'finished', result: 'checks failing', reason: 'checks failing: node checks/assets.check.mjs (exit 1)', status: { key: 'checks failing', label: 'Checks failing', tone: 'bad', reason: 'checks failing: node checks/assets.check.mjs (exit 1)' }, elapsed: '6m 40s', commits: '4/4', ...dTokBy(dTok(11000, 1800), dTok(900, 120), dTok(0, 0)), actions: ['resume'], suggest: 'resume', why: 'resume gives the worker another fix round', finishedAt: DEMO_T0 - 300000, progress: { done: 4, total: 4, current: null } }),
+    dLane('demo-repo--merged', 'merged', { bucket: 'ended', bucketWhy: 'merged by the lead', project: D_PROJ_A, health: 'done', phase: 'finished', result: 'done', verdict: 'ready', status: { key: 'handled', label: 'Merged', tone: 'done', reason: 'merged by the lead' }, elapsed: '9m 20s', commits: '5/5', ...dTokBy(dTok(14000, 2600), dTok(1100, 200), dTok(0, 0)), actions: [], suggest: '', why: '', handled: true, finishedAt: DEMO_T0 - 1500000, progress: { done: 5, total: 5, current: null } }),
   ].filter((l) => !demoRemoved.has(l.id) && !gone.has(l.id));
   for (const l of ls) {
     l.seen = dSeen.has(l.id);
@@ -1055,7 +1058,7 @@ function renderRail() {
   const loose = lanes.filter((l) => !inPlan.has(l.id));
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
   const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
-  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.status(l.health))}${delBtn('lane', l.id, `Delete lane ${l.task}`, l.running)}</div>`;
+  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.laneStatus(l))}${delBtn('lane', l.id, `Delete lane ${l.task}`, l.running)}</div>`;
   const attention = lanes.filter((l) => laneBucket(l) === 'attention').length;
   let h = `<div class="rail-card cr${route.kind === '' ? ' sel' : ''}" data-go="/">
     <div class="rail-row"><span class="ca-dot" style="color:var(--sel)"></span><span class="rail-title">Control room</span>${attention ? `<span class="ca-badge s-bad">${attention}</span>` : ''}</div>
@@ -1084,9 +1087,10 @@ function curBand(l) {
   if (l.running && l.progress?.current) return `<div class="curband"><span class="lbl">Current step ${l.progress.current.n}/${l.progress.total}</span><div class="t1">${md(l.progress.current.text)}</div>${chips}</div>`;
   if (l.running) return `<div class="curband"><span class="lbl">${esc(l.phase)}</span><div class="t1">${esc(l.now || 'running')}</div>${chips}</div>`;
   if (l.health === 'dropped') return `<div class="curband"><span class="lbl">Dropped</span><div class="t2">${esc(l.reason || 'never started')}</div>${chips}</div>`;
-  if (l.health === 'planned') return `<div class="curband"><span class="lbl">${esc(CAUI.status(l.health, l.result).label)}</span><div class="t2">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>${chips}</div>`;
-  const tail = [l.verdict ? 'review: ' + l.verdict : '', l.reason].filter(Boolean).join(' · ');
-  return `<div class="curband"><span class="lbl">${esc(CAUI.status(l.health, l.result).label)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
+  if (l.health === 'planned') return `<div class="curband"><span class="lbl">${esc(CAUI.laneStatus(l).label)}</span><div class="t2">${l.plan?.briefExists ? 'brief written, not started' : 'brief not written yet'}</div>${chips}</div>`;
+  const st = CAUI.laneStatus(l);
+  const tail = [l.verdict ? 'review: ' + l.verdict : '', st.reason || l.reason].filter(Boolean).join(' · ');
+  return `<div class="curband"><span class="lbl">${esc(st.label)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
 }
 const stepIc = (s, running) => s.state === 'done' ? '&#10003;' : s.state === 'current' ? (running ? '<span class="step-spin" aria-hidden="true"></span>' : '&#9654;') : '&#9675;';
 const stepLi = (s, running) => `<li class="st-${s.state}"><span class="n">${s.n}</span><span class="ic">${stepIc(s, running)}</span><span class="txt">${md(s.text)}${s.commit ? ` <code>${esc(s.commit)}</code>` : ''}</span></li>`;
@@ -1186,14 +1190,14 @@ function renderLane(d, keep) {
   const hadFocus = keep && document.activeElement?.id === 'msg';
   const t = d.tokens || {}; const plan = plans.find((p) => p.waves.some((w) => w.lanes.some((l) => l.id === d.id)));
   const wl = plan ? plan.waves.flatMap((w) => w.lanes).find((l) => l.id === d.id) : null; // the plan wave entry carries continues/runs when the detail does not
-  const st = CAUI.status(d.health, d.result);
+  const st = CAUI.laneStatus(d);
   const na = (v) => (v == null || v === '' || v === '-') ? 'n/a' : esc(v);
   const metric = (lb, val, title) => `<span class="m"${title ? ` title="${esc(title)}"` : ''}><span class="lb">${lb}</span><b>${val}</b></span>`;
   const tokens = CAUI.fmtTokens(CAUI.tokenTotal(t));
   const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed))}${metric('Idle', na(d.idle))}${metric('Tokens', tokens, CAUI.tokenDetail(t))}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
   const tokRows = (() => { const rows = CAUI.tokenSplit(d.tokensBy); const max = Math.max(1, ...rows.map((r) => r.total)); return `<div class="tokby">${rows.map((r) => `<div class="tokrow" data-role="${r.role}" data-total="${r.total}" title="${esc(r.label)}: ${esc(CAUI.tokenDetail(r.t))}"><span class="tk-lb">${esc(r.label)}</span><span class="tk-n">${CAUI.fmtTokens(r.total)}</span><span class="tk-bar"><i class="${r.role}" style="width:${Math.round((100 * r.total) / max)}%"></i></span></div>`).join('')}</div>`; })();
   const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
-  const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
+  const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(st.label)}${(st.reason || d.reason) ? ' &middot; ' + esc(st.reason || d.reason) : ''}`;
   const justDone = (s) => !!(prevSt && prevSt.get(s.n) && prevSt.get(s.n) !== 'done' && s.state === 'done' && (window.PixelSprites?.motion() ?? true));
   const stepRow = (s) => { const key = `${d.id}:${s.n}`, x = stepOpen.has(key); return `<div class="steprow s-${s.state}${x ? ' x' : ''}${justDone(s) ? ' flash' : ''}" data-step="${esc(key)}"><span class="n">${s.n}</span><span class="ic">${stepIc(s, !!d.running)}</span><span class="txt">${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</div>`; };
   const steps = d.steps.length ? d.steps.map(stepRow).join('') : '<div class="small">The brief has no numbered steps.</div>';

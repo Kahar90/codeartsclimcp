@@ -67,6 +67,8 @@ summaries, not transcripts.
   2 usage or unknown lane, 3 keys missing or rejected (ask the human to run `ca auth`; never ask
   for keys in chat), 5 paused at the time limit (`ca_resume` continues it), 124 still running.
   `ca_wait` returns a `next` hint for each.
+- A finished lane whose CHECK lines could not run (missing tool, sandbox) is `unverified` (exit
+  4); one whose CHECK ran and still failed after the fix rounds is `checks failing` (exit 1).
 - Rate limits, network drops and a crowded model are waited out by the runner; a lane that shows
   `rate limited`, `offline` or `queued` needs nothing from you.
 - `ca_summary {lane}`: commits, gates, fix rounds, interruptions, steering, outside-repo access,
