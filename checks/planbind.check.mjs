@@ -12,11 +12,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 240) : ''}`);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const free = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
+let sock = null;
 const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ca-planbind-')));
 const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg);
 const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSON.stringify({ security: { trustedFolders: [] } }));
@@ -125,9 +127,10 @@ else {
   const dp = await free(), cp = await free();
   const dash = spawn(process.execPath, [CA, 'dash', String(dp)], { stdio: 'ignore', env });
   const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cp}`, `--user-data-dir=${chromeProfileDir('planbind')}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
+  guard({ children: [dash, chrome] });
   try {
     let ws = null; for (let i = 0; i < 60 && !ws; i++) { await wait(250); try { ws = (await (await fetch(`http://127.0.0.1:${cp}/json/list`)).json()).find((x) => x.type === 'page')?.webSocketDebuggerUrl; } catch {} }
-    const sock = new WebSocket(ws); await new Promise((rr) => sock.addEventListener('open', rr));
+    sock = new WebSocket(ws); await new Promise((rr) => sock.addEventListener('open', rr)); guard({ socket: sock });
     let n = 0; const pend = new Map(); sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pend.has(m.id)) { pend.get(m.id)(m.result); pend.delete(m.id); } });
     const send = (method, params = {}) => new Promise((rr) => { const i = ++n; pend.set(i, rr); sock.send(JSON.stringify({ id: i, method, params })); });
     const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }))?.result?.value;
@@ -157,9 +160,10 @@ else {
     check('the new plan is in the picker', !!(await ev(`[...document.getElementById('planSel').options].some((o) => /Gamma plan/.test(o.textContent))`)));
     sock.close();
   } catch (e) { check('office part ran', false, String(e && e.stack || e)); }
-  try { chrome.kill(); } catch {} try { dash.kill(); } catch {}
+  await settle({ socket: sock, children: [dash, chrome], code: 0 });
 }
-try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+process.exitCode = fails ? 1 : 0;
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }

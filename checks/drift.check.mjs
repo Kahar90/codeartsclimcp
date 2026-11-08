@@ -9,12 +9,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 240) : ''}`);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const free = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const H = 3600e3, t = Date.now();
+let sock = null;
 
 function setup() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-drift-'));
@@ -82,9 +84,10 @@ else {
   const dp = await free(), cp = await free();
   const dash = spawn(process.execPath, [CA, 'dash', String(dp)], { stdio: 'ignore', env });
   const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cp}`, `--user-data-dir=${chromeProfileDir('drift')}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
+  guard({ children: [dash, chrome] });
   try {
     let ws = null; for (let i = 0; i < 60 && !ws; i++) { await wait(250); try { ws = (await (await fetch(`http://127.0.0.1:${cp}/json/list`)).json()).find((x) => x.type === 'page')?.webSocketDebuggerUrl; } catch {} }
-    const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+    sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
     let n = 0; const pend = new Map(); sock.addEventListener('message', (e) => { const mm = JSON.parse(e.data); if (mm.id && pend.has(mm.id)) { pend.get(mm.id)(mm.result); pend.delete(mm.id); } });
     const send = (method, params = {}) => new Promise((r) => { const i = ++n; pend.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
     const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }))?.result?.value;
@@ -112,10 +115,11 @@ else {
     check('after the bulk action Needs you shows 1 and no old group', after && String(after.count).trim() === '1' && after.old === false, JSON.stringify(after));
     sock.close();
   } catch (e) { check('dashboard part ran', false, String(e && e.stack || e)); }
-  try { chrome.kill(); } catch {} try { dash.kill(); } catch {}
-  fs.rmSync(tmp, { recursive: true, force: true });
+  await settle({ socket: sock, children: [dash, chrome], code: 0 });
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }
 }
 
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+process.exitCode = fails ? 1 : 0;

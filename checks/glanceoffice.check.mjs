@@ -7,7 +7,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
-import { settle } from './lib/exit.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chromePath = findChrome();
 if (!chromePath) { console.log('SKIP glance: no Chrome found (set CHROME_PATH)'); process.exit(0); }
@@ -20,6 +20,7 @@ const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash
 const base = `http://127.0.0.1:${dashPort}`;
 const profile = chromeProfileDir('glance');
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
+guard({ children: [chrome, dash] });
 let sock = null; let finished = false;
 const finish = (code) => { if (finished) return Promise.resolve(); finished = true; return settle({ socket: sock, children: [chrome, dash], code }); };
 const timer = setTimeout(() => { console.log('FAIL timeout after 120 s'); finish(1); }, 120000);
@@ -30,7 +31,7 @@ try {
   check('GET /office serves the page', page.ok && /glanceSign/.test(html) && /<title>/.test(html), String(page.status));
 
   let ws; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); const p = t.find((x) => x.type === 'page'); if (p) ws = p.webSocketDebuggerUrl; } catch {} }
-  sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+  sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
   let id = 0; const pending = new Map(); const errors = [];
   sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });

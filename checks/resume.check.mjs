@@ -8,6 +8,7 @@ import net from 'node:net';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-resume-'));
@@ -48,6 +49,7 @@ fs.writeFileSync(plan, JSON.stringify({ title: 'p', lanes: [{ task: 'first' }, {
 ca(['plan', plan]);
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const dash = spawn(process.execPath, [CA, 'dash', String(port)], { stdio: 'ignore', env });
+guard({ children: [dash] });
 try {
   let plans = null; for (let i = 0; i < 40 && !plans; i++) { await new Promise((x) => setTimeout(x, 250)); try { plans = await (await fetch(`http://127.0.0.1:${port}/api/plans`)).json(); } catch {} }
   const p = (plans || []).find((x) => x.title === 'p');
@@ -56,7 +58,7 @@ try {
   check('continued lane is folded into its successor (one station)', p && !tasks.includes('first') && tasks.includes('second'), JSON.stringify(tasks));
   check('a wave whose lanes all continued is dropped', p && p.waves.length === 1 && p.waves[0].name === 'W2', p && p.waves.map((w) => w.name).join(','));
   check('successor carries the earlier run', second && second.continues && second.continues[0].task === 'first' && second.runs === 2, JSON.stringify(second && { c: second.continues, runs: second.runs }));
-} finally { dash.kill(); }
+} finally { await settle({ children: [dash], code: 0 }); }
 
 // shared UI labels
 const ctx = { window: {}, document: { addEventListener() {}, hidden: false }, localStorage: { getItem() { return null; }, setItem() {} }, matchMedia: () => ({ matches: false, addEventListener() {} }), performance, requestAnimationFrame: () => 0, fetch: () => Promise.reject(new Error('x')), Image: function () {} };
@@ -68,5 +70,5 @@ check('CAUI: continued is neutral Continued', S('continued').key === 'idle' && S
 console.log(results.join('\n'));
 const bad = results.filter((x) => x.startsWith('FAIL')).length;
 console.log(bad ? `${bad} FAILED` : `all ${results.length} passed`);
-fs.rmSync(tmp, { recursive: true, force: true });
-process.exit(bad ? 1 : 0);
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }
+process.exitCode = bad ? 1 : 0;

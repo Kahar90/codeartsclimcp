@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const chromePath = findChrome();
@@ -47,12 +48,14 @@ const mcpRes = mcpCall('ca_plan_update', { id: 'uiproj', patch: { goal: 'Revised
 const dp = await free(), cp = await free();
 const dash = spawn(process.execPath, [CA, 'dash', String(dp)], { stdio: 'ignore', env });
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cp}`, `--user-data-dir=${chromeProfileDir('leadui')}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
-const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} };
-const timer = setTimeout(() => { console.log('FAIL timeout'); cleanup(); process.exit(1); }, 150000);
+let sock = null;
+const finish = (code) => settle({ socket: sock, children: [chrome, dash], code });
+guard({ children: [chrome, dash] });
+const timer = setTimeout(() => { console.log('FAIL timeout'); finish(1); }, 150000);
 try {
   check('MCP ca_plan_update published the goal before render', !mcpRes?.result?.isError, JSON.stringify(mcpRes && mcpRes.result && mcpRes.result.content).slice(0, 160));
   let ws = null; for (let i = 0; i < 60 && !ws; i++) { await wait(250); try { ws = (await (await fetch(`http://127.0.0.1:${cp}/json/list`)).json()).find((x) => x.type === 'page')?.webSocketDebuggerUrl; } catch {} }
-  const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+  sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
   let n = 0; const pend = new Map(); sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pend.has(m.id)) { pend.get(m.id)(m.result); pend.delete(m.id); } });
   const send = (method, params = {}) => new Promise((r) => { const i = ++n; pend.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
   const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }))?.result?.value;
@@ -107,8 +110,9 @@ try {
 
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
-clearTimeout(timer); cleanup();
-try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+clearTimeout(timer);
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+await finish(fails ? 1 : 0);
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }

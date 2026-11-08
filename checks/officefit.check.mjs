@@ -8,6 +8,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chromePath = findChrome();
 if (!chromePath) { console.log('SKIP officefit: no Chrome found (set CHROME_PATH)'); process.exit(0); }
@@ -20,9 +21,10 @@ const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash
 const base = `http://127.0.0.1:${dashPort}`;
 const profile = chromeProfileDir('officefit');
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
-const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} };
-process.on('exit', cleanup);
-const timer = setTimeout(() => { console.log('FAIL timeout after 180 s'); cleanup(); process.exit(1); }, 180000);
+let sock = null;
+const finish = (code) => settle({ socket: sock, children: [chrome, dash], code });
+guard({ children: [chrome, dash] });
+const timer = setTimeout(() => { console.log('FAIL timeout after 180 s'); finish(1); }, 180000);
 // A rect is inside another when its box sits within, allowing one pixel of rounding.
 const inside = (r, s, tol = 1) => !!r && !!s && r.x >= s.x - tol && r.y >= s.y - tol && r.x + r.w <= s.x + s.w + tol && r.y + r.h <= s.y + s.h + tol;
 const overlaps = (a, b) => !!a && !!b && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -33,7 +35,7 @@ try {
   check('GET /office serves the page', page.ok && /glanceToggle/.test(html) && /glanceSign/.test(html), String(page.status));
 
   let ws; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); const p = t.find((x) => x.type === 'page'); if (p) ws = p.webSocketDebuggerUrl; } catch {} }
-  const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+  sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
   let id = 0; const pending = new Map(); const errors = [];
   sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
@@ -121,7 +123,8 @@ try {
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
-clearTimeout(timer); cleanup();
+clearTimeout(timer);
 console.log(results.join('\n'));
 const fails = results.filter((r) => r.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+await finish(fails ? 1 : 0);

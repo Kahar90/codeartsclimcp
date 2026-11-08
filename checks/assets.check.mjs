@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
-import { settle } from './lib/exit.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const A = path.join(ROOT, 'runner', 'assets');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + info : ''}`);
@@ -20,6 +20,7 @@ for (const role of ['lead', 'builder', 'artist', 'reviewer']) {
 check('scene.json has four stations', Object.keys(JSON.parse(fs.readFileSync(path.join(A, 'scene.json'), 'utf8')).stations).length === 4);
 const port = await new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(port)], { stdio: 'ignore', env: { ...process.env, CA_DASH: '0' } });
+guard({ children: [dash] });
 const base = `http://127.0.0.1:${port}`;
 try {
   let up = false; for (let i = 0; i < 40 && !up; i++) { await new Promise((r) => setTimeout(r, 250)); try { up = (await fetch(base + '/api/lanes')).ok; } catch {} }

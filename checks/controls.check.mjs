@@ -7,6 +7,7 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-controls-'));
@@ -127,6 +128,7 @@ fs.writeFileSync(plan, JSON.stringify({ title: 'tok', lanes: [{ task: 'live' }, 
 ca(['plan', plan]);
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const dash = spawn(process.execPath, [CA, 'dash', String(port)], { stdio: 'ignore', env });
+guard({ children: [dash, sleeper] });
 const base = `http://127.0.0.1:${port}`;
 const post = async (id, what, body, json = true) => { const res = await fetch(`${base}/api/lane/${encodeURIComponent(id)}/${what}`, { method: 'POST', headers: json ? { 'content-type': 'application/json' } : { 'content-type': 'text/plain' }, body: JSON.stringify(body || {}) }); let j = {}; try { j = await res.json(); } catch {} return { status: res.status, j }; };
 try {
@@ -159,7 +161,7 @@ try {
   check('POST resume on a DEAD lane marks it stopped and resumes', x.status === 200 && ds.result === 'stopped', `${x.status} ${ds.result}`);
   let pj = {}; try { pj = JSON.parse(fs.readFileSync(plan, 'utf8')); } catch {}
   check('dashboard resume is logged as a plan decision', (pj.decisions || []).some((d) => /resum/i.test(d.text) && /paused/.test(d.text)), JSON.stringify(pj.decisions));
-} finally { dash.kill(); sleeper.kill(); }
+} finally { await settle({ children: [dash, sleeper], code: 0 }); }
 
 // ---------- runner wiring (source level; a real lane proves the rest) ----------
 const src = fs.readFileSync(CA, 'utf8');
@@ -176,5 +178,5 @@ check('MCP has ca_kick and ca_resume tools', /name: 'ca_kick'/.test(mcp) && /nam
 console.log(results.join('\n'));
 const bad = results.filter((x) => x.startsWith('FAIL')).length;
 console.log(bad ? `${bad} FAILED` : `all ${results.length} passed`);
-fs.rmSync(tmp, { recursive: true, force: true });
-process.exit(bad ? 1 : 0);
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }
+process.exitCode = bad ? 1 : 0;
