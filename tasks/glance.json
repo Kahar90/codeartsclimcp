@@ -1,0 +1,17 @@
+{
+  "title": "Glance status: done, failed or needs you at a glance",
+  "goal": "From across the room, tell if the work is running, done, failed or waiting on the human, in both views, keeping the Pixel Workshop look.",
+  "lead": "Claude Opus 5.5",
+  "status": "running",
+  "phase": "building",
+  "now": "Three lanes start: server glance state, Office sign and room light, Lanes banner.",
+  "waves": [{ "name": "Wave 1 - Glance", "lanes": ["glance-core", "glance-office", "glance-lanes"] }],
+  "lanes": [
+    { "task": "glance-core", "repo": "../codeartsclimcp-wt-glance-core", "why": "One glance state per plan on /api/plans, plus the asking lead phase", "files": ["runner/ca.mjs", "runner/mcp.mjs", "templates/claude-skill.md"] },
+    { "task": "glance-office", "repo": "../codeartsclimcp-wt-glance-office", "why": "Hanging status sign, room edge light, lead bubble, tab and favicon", "files": ["runner/office.html"] },
+    { "task": "glance-lanes", "repo": "../codeartsclimcp-wt-glance-lanes", "why": "Glance banner, rail dots, tab, favicon and notifications", "files": ["runner/dash.html"] }
+  ],
+  "next": ["Run the three lanes", "Merge into main and run every check", "Copy finished runner files to the live skill"],
+  "decisions": [{ "at": "2026-11-08", "text": "Server computes one glance per plan so both views agree; new lead phase asking marks a question for the human." }],
+  "risks": ["Quiet heuristic (15 min without lead update) can fire during a long silent verification"]
+}
