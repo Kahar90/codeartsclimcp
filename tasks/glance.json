@@ -2,9 +2,9 @@
   "title": "Glance status: done, failed or needs you at a glance",
   "goal": "From across the room, tell if the work is running, done, failed or waiting on the human, in both views, keeping the Pixel Workshop look.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "phase": "building",
-  "now": "Folder access fixed; Office and Lanes lanes resumed from their wip commits. Core glance work is committed.",
+  "status": "done",
+  "phase": "done",
+  "now": "Closed: Done: glance status (both views), asking phase, repo writable probe, blocked lanes fail fast, ca wait --any, install-local; 0.4.0 installed and pushed",
   "waves": [
     {
       "name": "Wave 1 - Glance",
@@ -82,6 +82,10 @@
     {
       "at": "2026-11-08T11:15:19.197Z",
       "text": "Resumed codeartsclimcp-wt-glance-lanes--glance-lanes from the ca resume"
+    },
+    {
+      "at": "2026-11-08T12:15:20.777Z",
+      "text": "Plan closed: Done: glance status (both views), asking phase, repo writable probe, blocked lanes fail fast, ca wait --any, install-local; 0.4.0 installed and pushed."
     }
   ],
   "risks": [
@@ -89,7 +93,7 @@
   ],
   "revision": 2,
   "updatedAt": "2026-11-08T11:48:06.820Z",
-  "nowAt": "2026-11-08T11:15:22.601Z",
+  "nowAt": "2026-11-08T12:15:20.546Z",
   "leadActivity": [
     {
       "at": "2026-11-08T11:14:25.496Z",
@@ -100,6 +104,11 @@
       "at": "2026-11-08T11:15:22.601Z",
       "text": "Folder access fixed; Office and Lanes lanes resumed from their wip commits. Core glance work is committed.",
       "phase": "building"
+    },
+    {
+      "at": "2026-11-08T12:15:20.546Z",
+      "text": "Glance status and write guard merged, released as 0.4.0, installed locally and pushed to origin.",
+      "phase": "done"
     }
   ]
 }
