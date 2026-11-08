@@ -1,6 +1,6 @@
 // Lightweight README contract check: Node only, no browser, no network, no dependencies.
 // Verifies that every local image/link target in README.md exists, that the one-prompt
-// INSTALL.md URL is still present, and that Quick install precedes the dashboard screenshots.
+// INSTALL.md URL is still present, and that Office leads the page and Quick install precedes the Lanes screenshots.
 // Usage: node tools/check-readme.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const README = path.join(ROOT, 'README.md');
 const INSTALL_URL = 'https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md';
-// The dashboard screenshots the tour shows; Quick install must come before all of them.
+// Office leads the page; Quick install comes before the Lanes tour.
 const DASHBOARD_SHOTS = [
   'docs/images/lanes-control-room.png',
   'docs/images/lanes.png',
@@ -54,7 +54,7 @@ for (const t of targets) {
 check('every local image/link target in README exists', missing.length === 0, missing.join('; '));
 check('README references at least one local image and one local link', localCount >= 2, String(localCount));
 
-// 2. Quick install must precede the dashboard screenshots.
+// 2. Office comes first, followed by Quick install and the Lanes tour.
 const qi = md.search(/^##\s+Quick install\s*$/m);
 check('README has a "## Quick install" section', qi >= 0);
 
@@ -62,9 +62,13 @@ const dashPos = DASHBOARD_SHOTS.map((shot) => ({ shot, i: md.indexOf(shot) })).f
 check('README references every dashboard screenshot', dashPos.length === DASHBOARD_SHOTS.length,
   DASHBOARD_SHOTS.filter((s) => !dashPos.some((d) => d.shot === s)).join(', ') || 'all present');
 
-const firstDash = dashPos.length ? Math.min(...dashPos.map((d) => d.i)) : Infinity;
-check('Quick install precedes the dashboard screenshots', qi >= 0 && qi < firstDash,
-  `Quick install @${qi}, first dashboard shot @${firstDash === Infinity ? 'none' : firstDash}`);
+const officePos = md.indexOf('docs/images/office.png');
+const firstImage = targets.filter((t) => t.kind === 'image').sort((a, b) => a.at - b.at)[0];
+check('Office is the first image and precedes the introduction',
+  firstImage?.target === 'docs/images/office.png' && officePos < md.indexOf('**Hand coding work'));
+const lanesPos = dashPos.filter((d) => d.shot !== 'docs/images/office.png');
+check('Quick install follows Office and precedes the Lanes screenshots',
+  officePos >= 0 && officePos < qi && lanesPos.every((d) => qi < d.i));
 
 // 3. The tour must label its screenshots as built-in demo data.
 check('README labels the tour screenshots as built-in demo data', /built-in demo data|demo=1/i.test(md));

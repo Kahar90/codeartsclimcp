@@ -1,5 +1,9 @@
 # CodeArts lanes
 
+![The Office view: the lead, builder and reviewer at work with a live lane window](docs/images/office.png)
+
+*The Office view, running on built-in demo data. Follow the lead, builder and reviewer as lanes work.*
+
 **Hand coding work to the Huawei CodeArts agent from the coding agent you already use.**
 
 Your agent (Claude Code, Kiro, Cursor, Codex, opencode, VS Code) plans the work. A CodeArts
@@ -70,13 +74,6 @@ recorded, so you can follow a goal from brief to done.
 
 Open any lane for its live transcript, the brief it is following, a box to steer it mid-run, and
 the checks the runner ran before reporting done.
-
-### Office: the whole workshop at a glance
-
-![The Office view: the lead, builder and reviewer at work with a live lane window](docs/images/office.png)
-
-The Office view shows who is working on what, step by step, with a window per lane. It is a
-calmer way to keep an eye on several lanes at once.
 
 ## Reference
 
