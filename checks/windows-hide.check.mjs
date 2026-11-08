@@ -127,6 +127,25 @@ run('dashboard Open TUI keeps a visible console window', () => {
   check('dashboard Open TUI keeps a visible console window', !!c && c.fn === 'spawn' && c.file === 'cmd.exe' && c.options.windowsHide !== true && c.options.detached === true && c.options.windowsVerbatimArguments === true, JSON.stringify(c && c.options));
 });
 
+// 8. catch-all: no spawn/spawnSync/execFileSync site in the runner may omit windowsHide, except the
+// two intentional interactive windows (ca attach, the dashboard Open TUI). Keeps a future launch from
+// silently reintroducing the empty-window bug.
+run('no unattended launch is left unhidden', () => {
+  const bad = [];
+  for (const name of ['spawn', 'spawnSync', 'execFileSync', 'execSync']) {
+    let i = -1;
+    while ((i = src.indexOf(name + '(', i + 1)) >= 0) {
+      const lineStart = src.lastIndexOf('\n', i - 1) + 1;
+      if (src.slice(lineStart, i).includes('//')) continue; // a comment, not a call
+      let text; try { text = src.slice(i, i + name.length) + balanced(i + name.length, '(', ')'); } catch { continue; }
+      if (text.includes('windowsHide')) continue;
+      if (text.includes("'attach'") || text.includes("'cmd.exe'")) continue; // intentional interactive windows
+      bad.push(text.replace(/\s+/g, ' ').slice(0, 80));
+    }
+  }
+  check('no unattended launch is left unhidden', bad.length === 0, bad.join(' | '));
+});
+
 // restore the real functions before this process exits
 cp.spawn = orig.spawn; cp.spawnSync = orig.spawnSync; cp.execFileSync = orig.execFileSync; cp.execSync = orig.execSync; syncBuiltinESMExports();
 
