@@ -2,8 +2,8 @@
   "title": "Office fills the stage: no black bars",
   "goal": "The Office room fills the whole stage on desktop (no dark bands beside or above it) while every station sprite, nameplate and the sign stay in view.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "office-cover lane running: cover fit plus blurred backdrop",
+  "status": "done",
+  "now": "Closed: office-cover merged on main plus lead margin fix; all checks pass; 0.5.1 installed",
   "waves": [
     {
       "name": "Wave 1",
@@ -29,7 +29,11 @@
     "merge, release, install-local"
   ],
   "decisions": [
-    "Cover the stage as far as the station content allows; any leftover band shows a blurred, dimmed copy of the room instead of the dark shell colour"
+    "Cover the stage as far as the station content allows; any leftover band shows a blurred, dimmed copy of the room instead of the dark shell colour",
+    {
+      "at": "2026-11-08T15:08:58.694Z",
+      "text": "Plan closed: office-cover merged on main plus lead margin fix; all checks pass; 0.5.1 installed."
+    }
   ],
   "risks": [
     "Ultra-wide screens cannot be fully covered without cropping stations; the blurred backdrop fills that band"
