@@ -47,9 +47,12 @@
 //        ca rm <lane> [--keep-logs]        delete a lane: kill its processes, unregister it and drop
 //                                  its lane logs (--keep-logs keeps the lane dir and log; the brief is always kept)
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
-//        ca plan list | close [id] [--reason t] | rm <id> [--keep-lanes]   plan state; close drops unstarted lanes;
-//                                  rm kills and deletes the plan's lanes (--keep-lanes only unregisters)
-//        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
+//        ca plan list [--json] | close [id] [--reason t] | rm <id> [--keep-lanes]   plan state; close drops unstarted
+//                                  lanes; rm kills and deletes the plan's lanes (--keep-lanes only unregisters)
+//        ca plan update <id> --patch <json>   change plan fields (title, goal, now, status, phase, next, waves,
+//                                  lanes, risks); bumps revision and updatedAt; refuses unknown fields
+//        ca note [--now] [--plan <id>] [--phase <phase>] <text>   log a lead decision (--now: set the "lead is
+//                                  doing" line; --phase: planning|building|waiting|verifying|done)
 //        ca lead-tokens [--plan id] [--session file]   point the plan at the lead's Claude transcript and print totals
 //        ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]
 //                                  report the lead's own token use on the plan (any harness; --add accumulates)
@@ -1745,6 +1748,39 @@ function openPlanFor(repo, task) {
   }
   return null;
 }
+// The lead phase a note may report: a small closed set the views render as a badge.
+const LEAD_PHASES = ['planning', 'building', 'waiting', 'verifying', 'done'];
+// Bounded activity: keep only the newest entries so a long lead session cannot grow plan.json forever.
+const ACTIVITY_MAX = 20;
+function pushActivity(p, entry) {
+  const a = Array.isArray(p.leadActivity) ? p.leadActivity : [];
+  a.push(entry); p.leadActivity = a.slice(-ACTIVITY_MAX);
+}
+// ca plan update: only these fields may be patched, each with the type the views expect. An unknown field
+// or a wrong type is refused with the field name, never silently dropped, so a typo cannot corrupt a plan.
+const PLAN_PATCH = {
+  title: (v) => typeof v === 'string', goal: (v) => typeof v === 'string', now: (v) => typeof v === 'string',
+  status: (v) => typeof v === 'string', phase: (v) => typeof v === 'string' && LEAD_PHASES.includes(v),
+  next: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string' || (!!x && typeof x === 'object' && typeof x.text === 'string')),
+  // Waves and lanes are rendered by planView, which reads w.name / w.lanes and l.task / l.repo: a non-object
+  // entry (or one missing its required string) would make a view throw, so the shape is checked, not just the type.
+  waves: (v) => Array.isArray(v) && v.every((w) => !!w && typeof w === 'object' && !Array.isArray(w) && typeof w.name === 'string'
+    && (w.lanes === undefined || (Array.isArray(w.lanes) && w.lanes.every((t) => typeof t === 'string')))),
+  lanes: (v) => Array.isArray(v) && v.every((l) => !!l && typeof l === 'object' && !Array.isArray(l) && typeof l.task === 'string'
+    && (l.repo === undefined || typeof l.repo === 'string')),
+  risks: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string'),
+};
+const PLAN_PATCH_HINT = Object.keys(PLAN_PATCH).join(', ');
+function validatePatch(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) die(`--patch must be a JSON object; fields: ${PLAN_PATCH_HINT}`, 2);
+  const keys = Object.keys(patch);
+  if (!keys.length) die(`--patch is empty; fields: ${PLAN_PATCH_HINT}`, 2);
+  for (const k of keys) {
+    if (!(k in PLAN_PATCH)) die(`unknown patch field "${k}"; fields: ${PLAN_PATCH_HINT}`, 2);
+    if (!PLAN_PATCH[k](patch[k])) die(`patch field "${k}" has the wrong type`, 2);
+  }
+  return keys;
+}
 // ca plan [file] registers; ca plan list | close [id] [--reason t] | rm <id> manage registered plans.
 const findPlan = (q) => {
   const all = plans();
@@ -1756,9 +1792,31 @@ const findPlan = (q) => {
 async function cmdPlan(args) {
   const sub = args[0];
   if (sub === 'list' || sub === 'ls') {
-    const all = plans().map(planView); if (!all.length) return console.log('no plan registered (ca plan <repo>/tasks/plan.json)');
+    const all = plans().map(planView);
+    if (args.includes('--json')) return console.log(JSON.stringify(all, null, 2));
+    if (!all.length) return console.log('no plan registered (ca plan <repo>/tasks/plan.json)');
     for (const p of all) console.log(`${p.id.padEnd(24)} ${p.state.padEnd(10)} ${p.title}  (${p.summary})`);
     return;
+  }
+  if (sub === 'update') {
+    const pi = args.indexOf('--patch'); const raw = pi >= 0 ? args[pi + 1] : undefined;
+    const q = args.slice(1).find((a) => !a.startsWith('--') && a !== raw);
+    if (!q || raw === undefined) die('usage: ca plan update <id> --patch <json>', 2);
+    let patch; try { patch = JSON.parse(raw); } catch { die(`--patch is not valid JSON: ${oneLine(raw, 80)}`, 2); }
+    validatePatch(patch);
+    const r = findPlan(q); if (!r) die(`no registered plan matches "${q}"; ca plan list`, 2);
+    const res = withPlanLock(r.file, () => {
+      const p = readJSON(r.file);
+      if (!p || typeof p !== 'object' || Array.isArray(p)) die(`cannot read plan JSON at ${r.file}`, 2);
+      if (p.removed === true) die(`plan ${r.id} was removed; ca plan list`, 2);
+      if (planClosed(p)) die(`plan ${r.id} is closed; reopen a plan before editing it`, 1);
+      Object.assign(p, patch);
+      p.revision = (Number(p.revision) || 0) + 1;
+      p.updatedAt = new Date().toISOString();
+      writeAtomic(r.file, JSON.stringify(p, null, 2) + '\n');
+      return p;
+    });
+    return console.log(`plan ${r.id} updated (revision ${res.revision})`);
   }
   if (sub === 'close' || sub === 'rm') {
     const ri = args.indexOf('--reason'); const reason = ri >= 0 ? args.slice(ri + 1).join(' ').trim() : '';
@@ -1787,15 +1845,39 @@ async function cmdPlan(args) {
   console.log(`plan ${id} registered: ${p.title || p.goal || f}${u ? '. Dashboard: ' + u : ''}`);
 }
 function cmdNote(args) {
-  const nowFlag = args.includes('--now'); const pi = args.indexOf('--plan'); const pq = pi >= 0 ? args[pi + 1] : null;
-  const text = args.filter((a, i) => a !== '--now' && !(pi >= 0 && (i === pi || i === pi + 1))).join(' ').trim();
-  if (!text) die('usage: ca note [--now] [--plan <id>] <text>', 2);
-  const all = plans(); const r = pq ? all.find((x) => x.id === pq || x.id.includes(pq)) : all[0];
-  if (!r) die('no plan registered (ca plan <repo>/tasks/plan.json)', 2);
-  const p = readJSON(r.file) || {};
-  if (nowFlag) p.now = text; else (p.decisions ||= []).push({ at: new Date().toISOString(), text });
-  fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n');
-  console.log(`${nowFlag ? 'now' : 'decision'} noted on plan ${r.id}`);
+  const hasNow = args.includes('--now');
+  const pi = args.indexOf('--plan'); const pq = pi >= 0 ? args[pi + 1] : null;
+  if (pi >= 0 && (!pq || pq.startsWith('--'))) die('usage: ca note [--now] [--plan <id>] [--phase <phase>] <text>', 2);
+  const hi = args.indexOf('--phase'); const phase = hi >= 0 ? args[hi + 1] : null;
+  if (hi >= 0 && (!phase || phase.startsWith('--'))) die(`--phase needs one of: ${LEAD_PHASES.join(', ')}`, 2);
+  if (phase !== null && !LEAD_PHASES.includes(phase)) die(`unknown phase "${phase}"; use one of: ${LEAD_PHASES.join(', ')}`, 2);
+  const skip = new Set();
+  if (hasNow) skip.add(args.indexOf('--now'));
+  if (pi >= 0) { skip.add(pi); skip.add(pi + 1); }
+  if (hi >= 0) { skip.add(hi); skip.add(hi + 1); }
+  const text = args.filter((a, i) => !skip.has(i)).join(' ').trim();
+  if (!text) die('usage: ca note [--now] [--plan <id>] [--phase <phase>] <text>', 2);
+  // Resolve like every other plan command: an explicit id goes through findPlan (ambiguous ids are refused,
+  // never guessed); a bare note defaults to the newest plan. A closed or removed plan is never written to.
+  const r = pq ? findPlan(pq) : plans()[0];
+  if (!r) die(`no registered plan matches "${pq || '(latest)'}"; ca plan list`, 2);
+  const pre = readJSON(r.file);
+  if (pre && pre.removed === true) die(`plan ${r.id} was removed; ca plan list`, 2);
+  if (pre && planClosed(pre)) die(`plan ${r.id} is closed; reopen a plan before noting on it`, 1);
+  const at = new Date().toISOString();
+  withPlanLock(r.file, () => {
+    const p = readJSON(r.file);
+    if (!p || typeof p !== 'object' || Array.isArray(p)) die(`cannot read plan JSON at ${r.file}`, 2);
+    if (phase !== null) p.phase = phase;
+    if (hasNow) {
+      p.now = text; p.nowAt = at;
+      pushActivity(p, { at, text, ...(phase !== null ? { phase } : {}) });
+    } else {
+      (p.decisions ||= []).push({ at, text });
+    }
+    writeAtomic(r.file, JSON.stringify(p, null, 2) + '\n');
+  });
+  console.log(`${hasNow ? 'now' : 'decision'} noted on plan ${r.id}`);
 }
 // ca lead-tokens [--plan id] [--session file]         point the plan at the lead's transcript, print totals
 // ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]  report numbers
@@ -1995,8 +2077,17 @@ function planView(r) {
   // unknown rather than a false 0, so a lane that never reported usage is not silently dropped from the total.
   const tokens = sumTok([sumTokens(planned.map((x) => x.tokens)), ...Object.values(leadModel).filter((e) => e.source !== 'none')]);
   tokens.complete = missing.length === 0; tokens.missing = missing; tokens.count = Object.keys(tokensByModel).length;
+  // The lead surface: phase, revision and bounded activity, plus the age of the last lead update. Freshness
+  // is the newest of updatedAt (an update) and nowAt (a --now note), so a note refreshes it too. A plan with
+  // neither reports updatedAt/age as null (never a false age), so a legacy plan is not mistaken for stale.
+  const atMs = (v) => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : 0);
+  const freshMs = Math.max(atMs(p.updatedAt), atMs(p.nowAt)) || null;
+  const lead = { tokensByModel: leadModel, phase: typeof p.phase === 'string' ? p.phase : null,
+    revision: Number(p.revision) || 0, updatedAt: freshMs ? new Date(freshMs).toISOString() : null, nowAt: typeof p.nowAt === 'string' ? p.nowAt : null,
+    age: freshMs ? Date.now() - freshMs : null,
+    activity: Array.isArray(p.leadActivity) ? p.leadActivity.slice(-ACTIVITY_MAX) : [] };
   return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
-    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead: { tokensByModel: leadModel },
+    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead,
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
 }

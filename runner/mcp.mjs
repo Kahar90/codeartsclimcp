@@ -139,6 +139,13 @@ const needNum = (v, name) => {
   return String(Math.round(n));
 };
 const optStr = (a, name) => (a[name] === undefined || a[name] === null ? [] : [needStr(a[name], name)]);
+// A `--flag value` pair when the value is present, nothing otherwise (for optional string flags).
+const optStrPair = (flag, v) => (v === undefined || v === null || v === '' ? [] : [flag, needStr(v, flag.replace(/^--/, ''))]);
+// The patch must be a plain object: JSON.stringify of anything else is a client error, not a bad argv.
+const needPatch = (v) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new ArgError('patch');
+  return v;
+};
 const needLanes = (v) => {
   if (!Array.isArray(v) || v.length < 1 || !v.every((x) => typeof x === 'string' && x.trim())) throw new ArgError('lanes');
   return v.map((x) => x.trim());
@@ -394,18 +401,35 @@ const TOOLS = [
   },
   {
     name: 'ca_note',
-    description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use it to keep the dashboard current while lanes run.',
+    description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use set_phase to report the lead phase (planning, building, waiting, verifying, done); a now note is timestamped and kept in a bounded recent-activity history the dashboard shows. Use it to keep the dashboard current while lanes run.',
     inputSchema: {
       type: 'object',
       properties: {
         text: { type: 'string', description: 'the decision, or the current activity with now true' },
-        now: { type: 'boolean', description: 'true: set the "lead is doing" line instead of appending a decision' },
+        now: { type: 'boolean', description: 'true: set the "lead is doing" line (timestamped) instead of appending a decision' },
+        plan: { type: 'string', description: 'plan id to write to (default: the newest registered plan)' },
+        phase: { type: 'string', description: 'lead phase to report: planning, building, waiting, verifying or done' },
       },
       required: ['text'],
     },
     ok: [0],
     timeout: 30000,
-    build: (a) => ['note', ...(a.now ? ['--now'] : []), needStr(a.text, 'text')],
+    build: (a) => ['note', ...(a.now ? ['--now'] : []), ...optStrPair('--plan', a.plan), ...optStrPair('--phase', a.phase), needStr(a.text, 'text')],
+  },
+  {
+    name: 'ca_plan_update',
+    description: 'Update fields of a registered plan (ca plan update <id> --patch <json>) without touching the rest: patch a subset of title, goal, now, status, phase, next, waves, lanes and risks. Bumps the revision and updatedAt; an unknown field, a wrong type, a closed plan or an ambiguous id is refused. Use it to publish a changed goal, next tasks or lanes before starting new work.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'registered plan id (as in ca_plan_list); must be unambiguous' },
+        patch: { type: 'object', description: 'object with the fields to change; only title, goal, now, status, phase, next, waves, lanes, risks are allowed' },
+      },
+      required: ['id', 'patch'],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['plan', 'update', needStr(a.id, 'id'), '--patch', JSON.stringify(needPatch(a.patch))],
   },
   {
     name: 'ca_lead_tokens',
