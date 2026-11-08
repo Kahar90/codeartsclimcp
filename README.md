@@ -82,6 +82,9 @@ the checks the runner ran before reporting done.
 - **Checked, not trusted:** your test commands are run by the runner itself when the agent
   says it is done. Failures go back to the agent (up to 3 rounds), and uncommitted work is
   never reported as done.
+- **Honest about checks:** a finished lane that could not run its checks reads `unverified`
+  (exit 4), one whose checks still fail reads `checks failing` (exit 1); only a real breakdown
+  reads `failed`.
 - **Never silently stuck:** a watchdog tells running from stuck, resumes stalled sessions and
   backs off when the model service has problems. Rate limits, network drops and a sleeping
   laptop are waited out; a lane that shows `rate limited`, `offline` or `queued` continues by itself.
