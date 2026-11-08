@@ -99,6 +99,11 @@ a { text-decoration: none }
 .steplist li { display: flex; gap: 9px; padding: 4px 0; font-size: 12.5px; align-items: flex-start }
 .steplist .n { font: 11.5px var(--mono); color: var(--faint); flex: none; width: 20px; text-align: right; margin-top: 1px }
 .steplist .ic { flex: none; width: 15px; text-align: center; font-size: 11px }
+/* Bug C: a running lane's current step shows a CSS-only spinning ring where its mark sat, so the list
+   looks alive; a paused/failed/stopped lane keeps its static mark, and reduced motion freezes the ring. */
+.steplist .ic .step-spin, .steprow .ic .step-spin { display: inline-block; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--sel); border-top-color: transparent; vertical-align: middle; animation: spin 0.9s linear infinite }
+@keyframes spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .steplist .ic .step-spin, .steprow .ic .step-spin { animation: none } }
 .steplist .st-done .ic { color: var(--run) } .steplist .st-current .ic { color: var(--sel) }
 .steplist .st-pending .ic, .steplist .st-open .ic { color: var(--faint) }
 .steplist .st-done .txt { color: var(--muted) } .steplist .st-current .txt { color: var(--fg); font-weight: 600 }
@@ -775,6 +780,9 @@ const evScroll = new Map(); // "laneId:tab" -> evidence scroll top
 let inFlight = null; // {what, laneId} while a steer/stop/attach/control POST runs
 const ctlNotes = new Map(); // laneId -> { action, text } while an inline note box is open
 const tget = (id) => { let s = tstate.get(id); if (!s) { s = { html: '', pos: 0, rendered: 0, follow: true, top: 0, atBottom: true }; tstate.set(id, s); } return s; };
+// Poll-driven renders leave the DOM alone when nothing changed: a rebuilt node drops hover, title
+// tooltips, selection and scroll. railSig/viewSig hold the last signature; the counters feed the check hook.
+let railSig = '', viewSig = '', railRenders = 0, viewRenders = 0;
 
 function toast(msg, err) {
   CAUI.toast(msg, { tone: err ? 'bad' : 'info' });
@@ -950,12 +958,16 @@ function renderControl() {
     [...crProjectKeys()].map(([k, n]) => { const a = lanes.filter((l) => projKey(l) === k && laneBucket(l) === 'attention').length; return `<button type="button" class="cr-chip${crProject === k ? ' on' : ''}" data-crproj="${esc(k)}" aria-pressed="${crProject === k}">${esc(n)}${a ? ` <span class="ca-badge s-bad">${a}</span>` : ''}</button>`; }).join('');
   const groups = ['status', 'project'].map((g) => `<button type="button" class="cr-gbtn${crGroup === g ? ' on' : ''}" data-crgroup="${g}" aria-pressed="${crGroup === g}">${g === 'status' ? 'By status' : 'By project'}</button>`).join('');
   const body = crGroup === 'project' ? crProjectView(shown) : crStatusView(shown);
-  $('view').innerHTML = `<div class="pad">
+  const html = `<div class="pad">
     <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · ${crGroup === 'project' ? 'by project' : 'by status'}</div></div>
     <div class="crtiles" role="group" aria-label="Lane buckets">${tiles}</div>
     <div class="cr-controls"><div class="cr-group" role="group" aria-label="Group lanes">${groups}</div><div class="cr-chips">${chips}</div></div>
     <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div>
     <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(crModels())}</div></div>`;
+  const sig = JSON.stringify([lanes, crFilter, crProject, crGroup, crSeenOpen, crOldOpen, route.kind, route.id]);
+  if (sig === viewSig) { syncBarPad(); return; }
+  viewSig = sig; viewRenders++;
+  $('view').innerHTML = html;
   for (const t of $('view').querySelectorAll('[data-cr]')) t.onclick = () => { crFilter = crFilter === t.dataset.cr ? '' : t.dataset.cr; lsSet('ca-cr-filter', crFilter); renderControl(); };
   for (const h of $('view').querySelectorAll('[data-crsec]')) h.onclick = () => { const k = h.dataset.crsec; const open = !crOpen.has(k); open ? crOpen.add(k) : crOpen.delete(k); lsSet('ca-cr-open', [...crOpen].join(',')); const sec = h.closest('.cr-sec'); if (sec) sec.classList.toggle('open', open); h.setAttribute('aria-expanded', String(open)); };
   for (const h of $('view').querySelectorAll('[data-crseen]')) h.onclick = () => { crSeenOpen = !crSeenOpen; lsSet('ca-cr-seen', crSeenOpen ? '1' : ''); renderControl(); };
@@ -1053,6 +1065,8 @@ function renderRail() {
   h += '<div class="rail-div"></div><div class="rail-h">' + (plans.length ? 'Other lanes' : 'Lanes') + '</div>';
   h += act.length ? act.map(row).join('') : '<div class="rail-none"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="9" cy="9" r="6.5"/></svg>None running</div>';
   if (fin.length) h += '<div class="rail-div"></div><div class="rail-h">Finished</div>' + fin.map(row).join('');
+  if (h === railSig) return;
+  railSig = h; railRenders++;
   $('railBody').innerHTML = h;
   for (const c of $('railBody').querySelectorAll('[data-go]')) c.onclick = (e) => { if (e.target.closest('[data-del]')) return; go(c.dataset.go); };
 }
@@ -1068,14 +1082,14 @@ function curBand(l) {
   const tail = [l.verdict ? 'review: ' + l.verdict : '', l.reason].filter(Boolean).join(' · ');
   return `<div class="curband"><span class="lbl">${esc(CAUI.status(l.health, l.result).label)}</span><div class="t2">${esc(tail)}</div>${chips}</div>`;
 }
-const stepIc = (s) => s.state === 'done' ? '&#10003;' : s.state === 'current' ? '&#9654;' : '&#9675;';
-const stepLi = (s) => `<li class="st-${s.state}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}${s.commit ? ` <code>${esc(s.commit)}</code>` : ''}</span></li>`;
+const stepIc = (s, running) => s.state === 'done' ? '&#10003;' : s.state === 'current' ? (running ? '<span class="step-spin" aria-hidden="true"></span>' : '&#9654;') : '&#9675;';
+const stepLi = (s, running) => `<li class="st-${s.state}"><span class="n">${s.n}</span><span class="ic">${stepIc(s, running)}</span><span class="txt">${md(s.text)}${s.commit ? ` <code>${esc(s.commit)}</code>` : ''}</span></li>`;
 function stepsBlock(l) {
   const cached = stepsCache.get(l.id);
   const n = cached?.length || l.progress?.total || 0;
   if (!n) return '';
   const open = stepsOpen.has(l.id);
-  const body = !open ? '' : cached ? `<ul class="steplist">${cached.map(stepLi).join('')}</ul>` : '<div class="small" style="margin-top:6px">loading steps...</div>';
+  const body = !open ? '' : cached ? `<ul class="steplist">${cached.map((s) => stepLi(s, !!l.running)).join('')}</ul>` : '<div class="small" style="margin-top:6px">loading steps...</div>';
   return `<div class="stepsdisc"><button type="button" data-steps="${esc(l.id)}" aria-expanded="${open}"><span class="tri">&#9654;</span>${n} step${n === 1 ? '' : 's'}</button>${body}</div>`;
 }
 async function toggleSteps(id) {
@@ -1109,7 +1123,7 @@ function renderPlan(p) {
   const dec = p.decisions.length ? `<ul class="plain dec">${[...p.decisions].reverse().map((d) => `<li><span class="at">${esc(clock(d.at))}</span><span class="dv"></span><span class="tx">${esc(d.text)}</span></li>`).join('')}</ul>` : '<div class="small">None yet</div>';
   const pRows = CAUI.tokenSplit(p.tokensBy);
   const planTokTitle = pRows.map((r) => `${r.label} ${CAUI.fmtTokens(r.total)}`).join(' / ');
-  $('view').innerHTML = `<div class="pad">
+  const html = `<div class="pad">
     <div class="plan-head">
       <div class="plan-head-row"><h1>${esc(p.title)}</h1>${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
@@ -1125,6 +1139,10 @@ function renderPlan(p) {
       <div class="box"><h4>Planned next (lead)</h4>${next}${risks}</div>
       <div class="box"><h4>Decisions log</h4>${dec}</div>
     </div></div>`;
+  const sig = JSON.stringify([p, route.kind, route.id, [...waveCollapsed.keys()], [...stepsOpen.keys()], [...stepsCache.keys()], [...ctlNotes.keys()]]);
+  if (sig === viewSig) { syncBarPad(); return; }
+  viewSig = sig; viewRenders++;
+  $('view').innerHTML = html;
   for (const b of $('view').querySelectorAll('[data-wave]')) b.onclick = () => { waveCollapsed.has(b.dataset.wave) ? waveCollapsed.delete(b.dataset.wave) : waveCollapsed.set(b.dataset.wave, true); renderPlan(curPlan); };
   for (const b of $('view').querySelectorAll('[data-steps]')) b.onclick = () => toggleSteps(b.dataset.steps);
   applyEntryRise();
@@ -1149,6 +1167,15 @@ function pipeline(d) {
   return `<div class="pipe">${st.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="step"' : ''}>${ic(c)}${esc(n)}</span>`).join('')}</div>`;
 }
 function renderLane(d, keep) {
+  // A step-done flash class is added on one render and must be dropped by the next poll render, so the
+  // set of rows still flashing is part of the signature: when it empties the next render is not skipped.
+  const prevSt = prevSteps.get(d.id);
+  const flashPending = (prevSt && (window.PixelSprites?.motion() ?? true))
+    ? d.steps.filter((s) => prevSt.get(s.n) && prevSt.get(s.n) !== 'done' && s.state === 'done').map((s) => s.n)
+    : [];
+  const sig = JSON.stringify([d, tab, route.id, ctlNotes.has(d.id), flashPending]);
+  if (sig === viewSig) return;
+  viewSig = sig; viewRenders++;
   const vtop = keep ? $('view')?.scrollTop : 0;
   const hadFocus = keep && document.activeElement?.id === 'msg';
   const t = d.tokens || {}; const plan = plans.find((p) => p.waves.some((w) => w.lanes.some((l) => l.id === d.id)));
@@ -1161,9 +1188,8 @@ function renderLane(d, keep) {
   const tokRows = (() => { const rows = CAUI.tokenSplit(d.tokensBy); const max = Math.max(1, ...rows.map((r) => r.total)); return `<div class="tokby">${rows.map((r) => `<div class="tokrow" data-role="${r.role}" data-total="${r.total}" title="${esc(r.label)}: ${esc(CAUI.tokenDetail(r.t))}"><span class="tk-lb">${esc(r.label)}</span><span class="tk-n">${CAUI.fmtTokens(r.total)}</span><span class="tk-bar"><i class="${r.role}" style="width:${Math.round((100 * r.total) / max)}%"></i></span></div>`).join('')}</div>`; })();
   const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
   const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
-  const prevSt = prevSteps.get(d.id);
   const justDone = (s) => !!(prevSt && prevSt.get(s.n) && prevSt.get(s.n) !== 'done' && s.state === 'done' && (window.PixelSprites?.motion() ?? true));
-  const stepRow = (s) => { const key = `${d.id}:${s.n}`, x = stepOpen.has(key); return `<div class="steprow s-${s.state}${x ? ' x' : ''}${justDone(s) ? ' flash' : ''}" data-step="${esc(key)}"><span class="n">${s.n}</span><span class="ic">${stepIc(s)}</span><span class="txt">${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</div>`; };
+  const stepRow = (s) => { const key = `${d.id}:${s.n}`, x = stepOpen.has(key); return `<div class="steprow s-${s.state}${x ? ' x' : ''}${justDone(s) ? ' flash' : ''}" data-step="${esc(key)}"><span class="n">${s.n}</span><span class="ic">${stepIc(s, !!d.running)}</span><span class="txt">${md(s.text)}</span>${s.commit ? `<span class="hash">${esc(s.commit)}</span>` : s.state === 'open' ? '<span class="hash">no commit</span>' : ''}</div>`; };
   const steps = d.steps.length ? d.steps.map(stepRow).join('') : '<div class="small">The brief has no numbered steps.</div>';
   const extraCommits = d.commits.filter((c) => !d.steps.some((s) => s.commit === c.hash));
   const todos = d.todos.length ? `<h4 style="margin-top:14px">Worker's own todo list</h4><ul class="plain">${d.todos.map((x) => `<li class="st-${x.status === 'completed' ? 'done' : x.status === 'in_progress' ? 'current' : 'pending'}"><span class="ic">${x.status === 'completed' ? '&#10003;' : x.status === 'in_progress' ? '&#9654;' : '&#9675;'}</span><span style="min-width:0">${esc(x.text)}</span></li>`).join('')}</ul>` : '';
@@ -1464,6 +1490,7 @@ async function renderOnboard() {
   if ($('onboard') && html === lastOnbHtml) return;
   const wasOpen = !!$('onb-byhand')?.open;
   lastOnbHtml = html;
+  viewSig = '';
   $('view').innerHTML = html;
   if (wasOpen && $('onb-byhand')) $('onb-byhand').open = true;
   syncBarPad();
@@ -1506,7 +1533,9 @@ onboard: () => {
   return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
 }, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; },
 // ids deleted in the fixture, for the check harness: a removed plan or lane never comes back
-removed: () => [...demoRemoved] };
+removed: () => [...demoRemoved],
+// DOM writes per poll-rebuilt region: the hover check asserts these stop growing while nothing changed
+renders: () => ({ rail: railRenders, view: viewRenders }) };
 
 // ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
 let lastOkAt = 0, firstFailAt = 0, staleOn = false;
@@ -1566,10 +1595,10 @@ async function refresh(full) {
   document.title = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
   diffNotify();
   renderRail();
-  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else $('view').innerHTML = '<div class="empty">Plan not found</div>'; }
+  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else { viewSig = ''; $('view').innerHTML = '<div class="empty">Plan not found</div>'; } }
   else if (route.kind === 'lane') {
     try { const d = await api(`/api/lane/${encodeURIComponent(route.id)}/detail`); if (d.error) throw new Error(d.error); const first = full || !detail || detail.id !== d.id; detail = d; first ? renderLane(d) : patchLane(d); }
-    catch (e) { $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    catch (e) { viewSig = ''; $('view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }
   else if (!plans.length && !lanes.length) await renderOnboard();
   else renderControl();

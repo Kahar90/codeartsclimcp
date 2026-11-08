@@ -157,9 +157,18 @@ body.narrow #winTail { display: none; }
 #winSteps .st-done .mark { color: var(--run); }
 #winSteps .st-current { font-weight: 700; }
 #winSteps .st-current .mark { color: var(--sel); }
+/* Bug C: the running lane's current step shows a CSS-only spinning ring where its dot sat, so the row
+   looks alive; a paused/failed/stopped lane keeps the static dot, and reduced motion freezes the ring. */
+#winSteps .st-spin { display: inline-block; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--sel); border-top-color: transparent; vertical-align: middle; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+body.no-motion #winSteps .st-spin { animation: none; }
+@media (prefers-reduced-motion: reduce) { #winSteps .st-spin { animation: none; } }
 #winSteps .st-pending .mark { color: var(--faint); }
 #winLink { font-size: 14.5px; }
 #winForm { display: flex; gap: 8px; padding: 0 18px 16px; flex: none; }
+/* Bug B: the steer row sat tight against the quick-reply chips. When the chips are shown, give the
+   composer a 12 px gap and a 1 px top border separator (only there, so a chip-less lane shows neither). */
+#winChips:not([hidden]) + #winForm { margin-top: 12px; border-top: 1px solid var(--border); }
 #winInput { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--code-bg); color: var(--fg); font: 14.5px var(--font); }
 #winSend { flex: none; height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--fg); font: 600 14.5px var(--font); cursor: pointer; }
 #winSend:disabled, #winInput:disabled { opacity: 0.55; cursor: default; }
@@ -821,6 +830,9 @@ function demoPlanOptions() {
   return [{ id: p.id, title: p.title, closed: !!p.closed }];
 }
 let needsShown = -1;
+// DOM writes per poll-rebuilt region: the hover check reads window.__office.renders() and asserts these
+// stop growing while a hover card or the plan menu stays open and nothing else changes.
+const renders = { statusBadge: 0, planMenu: 0, hoverCard: 0, winSteps: 0, tokens: 0, winBadge: 0 };
 function renderTop() {
   const p = model.plan;
   $("planTitle").textContent = p.title || p.goal || "(no plan)";
@@ -830,7 +842,7 @@ function renderTop() {
   $("leadChip").hidden = !leadName(p);
   $("leadChip").textContent = leadName(p);
   const badgeHtml = planBadgeHtml(ownLanes());
-  if ($("statusBadge").innerHTML !== badgeHtml) $("statusBadge").innerHTML = badgeHtml;
+  if ($("statusBadge").innerHTML !== badgeHtml) { $("statusBadge").innerHTML = badgeHtml; renders.statusBadge++; }
   const attn = model.lanes.filter((l) => laneBucket(l) === "attention").length;
   const pill = $("needsPill");
   if (pill) {
@@ -876,7 +888,7 @@ function renderTop() {
 }
 
 // Plan picker: a styled listbox over the hidden #planSel (which keeps the value and fires change).
-let planMenuActive = -1;
+let planMenuActive = -1, planMenuHtml = "";
 function planRunning(id) {
   if (mode === "demo") return !!(model && model.lanes.some((l) => l.running));
   const p = plansArr.find((x) => x.id === id);
@@ -903,7 +915,10 @@ function renderPlanMenu() {
   if (views.length && plans.length) html += '<li class="pm-sep" role="presentation"></li>';
   if (plans.length) html += '<li class="pm-head" role="presentation">Plans</li>' + plans.map(row).join("");
   const m = $("planMenu");
-  m.innerHTML = html;
+  // Compare with the markup we last wrote, not with m.innerHTML: the browser re-serializes self-closing
+  // SVG (<path .../> becomes <path ...></path>), so a readback comparison never matches and the menu
+  // would rebuild every poll, dropping a hovered Delete button. Same idea as the dash rail's railSig.
+  if (planMenuHtml !== html) { planMenuHtml = html; m.innerHTML = html; renders.planMenu++; }
   if (planMenuActive >= 0) m.setAttribute("aria-activedescendant", "pm-" + planMenuActive); else m.removeAttribute("aria-activedescendant");
 }
 function placeFloat(el, anchor, align) {
@@ -996,11 +1011,11 @@ function showHoverCard(id) {
   const anchor = $(id), card = $("hoverCard");
   if (!model || !anchor || anchor.hidden || !$("planMenu").hidden) return hideHoverCard();
   const html = id === "tokenChip" ? tokenCard(model.plan) : outcomeCard(ownLanes());
-  if (card.innerHTML !== html) card.innerHTML = html;
+  if (card.innerHTML !== html) { card.innerHTML = html; renders.hoverCard++; }
+  const wasHidden = card.hidden;
   hoverOn = id; card.hidden = false;
   placeFloat(card, anchor, "center");
-  card.classList.remove("card-in");
-  if (!winInstant()) { void card.offsetWidth; card.classList.add("card-in"); }
+  if (wasHidden) { card.classList.remove("card-in"); if (!winInstant()) { void card.offsetWidth; card.classList.add("card-in"); } }
 }
 function hideHoverCard() { hoverOn = null; const card = $("hoverCard"); card.hidden = true; card.classList.remove("card-in"); }
 
@@ -1526,16 +1541,17 @@ let winFor = null, winAnchor = null, winCloseTimer = 0, sendInFlight = false;
 
 function winInstant() { return !PixelSprites.motion(); }
 function setTriggerAria(el, on) { if (el && el.setAttribute) el.setAttribute("aria-expanded", on ? "true" : "false"); }
-function renderChecklist(steps) {
-  $("winSteps").innerHTML = (steps || []).map((s) => {
+function renderChecklist(steps, running) {
+  const html = (steps || []).map((s) => {
     const st = s.state || "pending";
-    const mark = st === "done" ? "\u2713" : st === "current" ? "\u25cf" : "\u25cb";
+    const mark = st === "done" ? "\u2713" : st === "current" ? (running ? '<span class="st-spin" aria-hidden="true"></span>' : "\u25cf") : "\u25cb";
     // Brief steps are paragraphs: show the step title (text before the first ": " or ". "), the full text on hover.
     const full = String(s.text || "");
     const m = full.match(/^(.{4,80}?)(?::\s|\.\s|$)/);
     const short = m ? m[1] : full.slice(0, 80);
     return '<li class="st-' + st + '" title="' + CAUI.esc(full) + '"><span class="mark">' + mark + '</span><span class="st-text">' + CAUI.esc(short) + '</span></li>';
   }).join("");
+  if ($("winSteps").innerHTML !== html) { $("winSteps").innerHTML = html; renders.winSteps++; }
 }
 function syncComposer(l) {
   const run = !!(l && l.running);
@@ -1650,14 +1666,17 @@ function renderTokensRow(tokens, by) {
   const parts = CAUI.tokenSplit(by);
   const sum = parts.reduce((a, p) => a + p.total, 0) || 1;
   const cls = (r) => (r === "build" ? "b" : r === "review" ? "r" : "o");
-  $("tkBar").innerHTML = parts.map((p) => '<i class="tk-seg ' + cls(p.role) + '" style="width:' + (p.total / sum) * 100 + '%"></i>').join("");
-  $("tkLegend").innerHTML = parts.filter((p) => p.total > 0).map((p) => '<span><i class="tk-key ' + cls(p.role) + '"></i>' + CAUI.esc(p.label) + " " + CAUI.fmtTokens(p.total) + "</span>").join("");
+  const barHtml = parts.map((p) => '<i class="tk-seg ' + cls(p.role) + '" style="width:' + (p.total / sum) * 100 + '%"></i>').join("");
+  if ($("tkBar").innerHTML !== barHtml) { $("tkBar").innerHTML = barHtml; renders.tokens++; }
+  const legendHtml = parts.filter((p) => p.total > 0).map((p) => '<span><i class="tk-key ' + cls(p.role) + '"></i>' + CAUI.esc(p.label) + " " + CAUI.fmtTokens(p.total) + "</span>").join("");
+  if ($("tkLegend").innerHTML !== legendHtml) { $("tkLegend").innerHTML = legendHtml; renders.tokens++; }
 }
 function renderWinContent(keepInput) {
   if (winFor === "lead") {
     const p = model.plan;
     $("winTitle").textContent = leadName(p);
-    $("winBadge").innerHTML = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+    const badgeHtml = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+    if ($("winBadge").innerHTML !== badgeHtml) { $("winBadge").innerHTML = badgeHtml; renders.winBadge++; }
     $("winMeta").textContent = "Orchestrator";
     renderTokensRow(p.tokens, p.tokensBy);
     hideControls();
@@ -1666,7 +1685,7 @@ function renderWinContent(keepInput) {
     $("winGoal").textContent = p.goal || "";
     $("winNow").hidden = !p.now;
     $("winNow").textContent = p.now ? "Now: " + p.now : "";
-    renderChecklist((p.next || []).map((x) => ({ text: x.text, state: x.done ? "done" : "pending" })));
+    renderChecklist((p.next || []).map((x) => ({ text: x.text, state: x.done ? "done" : "pending" })), false);
     $("winLink").hidden = true;
     $("winForm").hidden = true;
     $("winErr").hidden = true;
@@ -1676,7 +1695,8 @@ function renderWinContent(keepInput) {
   if (!l) return;
   const pr = l.progress || {};
   $("winTitle").textContent = laneName(l);
-  $("winBadge").innerHTML = CAUI.badge(CAUI.status(l.health));
+  const badgeHtml = CAUI.badge(CAUI.status(l.health));
+  if ($("winBadge").innerHTML !== badgeHtml) { $("winBadge").innerHTML = badgeHtml; renders.winBadge++; }
   const mm = l.models && (l.models.build || Object.values(l.models)[0]);
   $("winMeta").textContent = [mm ? CAUI.shortModel(mm) : "", pr.total ? pr.done + " / " + pr.total + " steps" : ""].filter(Boolean).join(" \u00b7 ");
   renderTokensRow(l.tokens, l.tokensBy);
@@ -1698,7 +1718,7 @@ function renderWinContent(keepInput) {
   if (!keepInput) $("winInput").value = drafts.get(l.id) || "";
   syncComposer(l);
   const c = detailCache.get(l.id);
-  renderChecklist(mode === "demo" ? (l.steps || []) : ((c && c.v && c.v.steps) || (l.steps || [])));
+  renderChecklist(mode === "demo" ? (l.steps || []) : ((c && c.v && c.v.steps) || (l.steps || [])), !!l.running);
 }
 async function fetchDetail(id) {
   const c = detailCache.get(id);
@@ -1837,7 +1857,7 @@ function showWin(id, anchor, kb) {
   win.classList.remove("win-in", "win-out");
   if (!wasOpen && !winInstant()) { void win.offsetWidth; win.classList.add("win-in"); }
   if (kb) $("winX").focus();
-  if (mode !== "demo" && id !== "lead") fetchDetail(id).then((d) => { if (winFor === id && !$("win").hidden && d && d.steps) renderChecklist(d.steps); });
+  if (mode !== "demo" && id !== "lead") fetchDetail(id).then((d) => { if (winFor === id && !$("win").hidden && d && d.steps) renderChecklist(d.steps, !!(model.lanes.find((x) => x.id === id) || {}).running); });
 }
 function closeWin(toFocus) {
   openSeq++;
@@ -1873,7 +1893,7 @@ function updateWin() {
   const l = model.lanes.find((x) => x.id === winFor);
   if (!l) { closeWin(false); focusFallback(); return; }
   renderWinContent(true);
-  if (mode !== "demo") fetchDetail(winFor).then((d) => { if (winFor && !$("win").hidden && d && d.steps) renderChecklist(d.steps); });
+  if (mode !== "demo") fetchDetail(winFor).then((d) => { if (winFor && !$("win").hidden && d && d.steps) renderChecklist(d.steps, !!l.running); });
 }
 winHooks.open = (id, anchor, kb) => {
   if (winFor === id && !$("win").hidden) { closeWin(false); return; }
@@ -2118,6 +2138,8 @@ window.__office = {
   demoFail,
   // ids deleted through the Delete controls, for the check harness
   removed: () => [...demoRemoved],
+  // DOM writes per poll-rebuilt region: the hover check asserts these stop growing while nothing changed
+  renders: () => ({ ...renders }),
 };
 
 $("planBtn").addEventListener("click", () => ($("planMenu").hidden ? openPlanMenu() : closePlanMenu(true)));
