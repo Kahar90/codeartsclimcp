@@ -1609,6 +1609,11 @@ const planStamp = (d = new Date()) => `${d.getFullYear()}${String(d.getMonth() +
 // A plan the lead wrote is only ever appended to; a lane already listed is not added twice.
 function ensurePlan(repo, task, briefText) {
   if (process.env.CA_NO_PLAN === '1') return null;
+  // A lane already listed in another registered OPEN plan (a lead plan for the same work, perhaps in
+  // a separate clone) must not create or register a second plan: dedup by the same id resolution
+  // planView and noteResume use, and leave the local tasks/plan.json untouched.
+  const owner = openPlanFor(repo, task);
+  if (owner) return owner.file;
   const main = projectOf(repo).key;
   const planFile = path.join(main, 'tasks', 'plan.json');
   const rel = (path.relative(main, repo) || '.').split(path.sep).join('/') || '.';
@@ -1667,10 +1672,13 @@ function ensurePlan(repo, task, briefText) {
     return planFile;
   });
 }
-// True when the lane is already listed in its repo's open plan (a resume must not rewrite that plan).
+// True when the lane is already listed in an open plan: its repo's own plan, or another registered
+// open plan that lists it (a resume must not rewrite or duplicate a plan).
 function laneAlreadyPlanned(repo, task) {
-  try { const main = projectOf(repo).key; const p = readJSON(path.join(main, 'tasks', 'plan.json')); return !!(p && !planClosed(p) && planListsLane(p, main, repo, task)); }
-  catch { return false; }
+  try {
+    if (openPlanFor(repo, task)) return true;
+    const main = projectOf(repo).key; const p = readJSON(path.join(main, 'tasks', 'plan.json')); return !!(p && !planClosed(p) && planListsLane(p, main, repo, task));
+  } catch { return false; }
 }
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
@@ -1678,6 +1686,18 @@ function plans() {
     // A plan whose file is marked removed: true was deleted: never list it again.
     .filter((r) => { const p = readJSON(r.file); return !(p && p.removed === true); })
     .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+}
+// The registered open plan that already lists this lane, resolving each lane entry's repo the same
+// way planView and noteResume do (the plan file's folder, then p.repo, then the lane entry repo).
+function openPlanFor(repo, task) {
+  const id = laneId(repo, task);
+  for (const r of plans()) {
+    const p = readJSON(r.file) || {};
+    if (planClosed(p) || p.removed) continue;
+    const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+    if ((p.lanes || []).some((pl) => pl && laneId(path.resolve(base, pl.repo || '.'), pl.task) === id)) return r;
+  }
+  return null;
 }
 // ca plan [file] registers; ca plan list | close [id] [--reason t] | rm <id> manage registered plans.
 const findPlan = (q) => {
