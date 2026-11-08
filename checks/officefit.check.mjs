@@ -1,4 +1,5 @@
-// End-to-end check for the Office view fit and one-truth status work: whole room always visible, every
+// End-to-end check for the Office view fit and one-truth status work: the room fills the stage (it
+// covers the stage, or the blurred #roomfill backs any leftover), every
 // station sprite and label inside the stage, the sign covering none of them, the header pill matching the
 // sign, the glance toggle, and the server-shaped lane clips. Starts `ca dash`, drives /office in headless
 // Chrome over CDP. Usage: node checks/officefit.check.mjs [outDir]   (screenshots go to outDir, default checks/out)
@@ -49,6 +50,8 @@ try {
   const glance = () => ev('window.__office && window.__office.glance()');
   const state = () => ev('window.__office && window.__office.state()');
   const surf = () => ev(`(function(){var s=document.getElementById("glanceSign"),g=document.getElementById("glanceGlow"),b=document.getElementById("glanceBubble");return { sign:!!(s&&!s.hidden), glow:!!(g&&!g.hidden), bubble:!!(b&&!b.hidden) };})()`);
+  // The blurred room copy that backs any stage area the room cannot cover, so no flat dark band shows.
+  const fillShown = () => ev('(function(){var f=document.getElementById("roomfill");if(!f)return false;var r=f.getBoundingClientRect();return getComputedStyle(f).display!=="none"&&r.width>0&&r.height>0;})()');
 
   // Make sure a previous run's toggle choice cannot hide the sign for the fit shots.
   await nav(base + '/office?demo=1&still=1');
@@ -61,7 +64,17 @@ try {
     await nav(base + '/office?demo=1&still=1');
     const L = await layout();
     if (!L || !L.stage) { check(`${w}x${h}: layout hook`, false, JSON.stringify(L)); continue; }
-    check(`${w}x${h}: room fully visible`, inside(L.room, L.stage), JSON.stringify({ room: L.room, stage: L.stage }));
+    const covers = inside(L.stage, L.room);
+    if (w === 2560 && h === 1440) {
+      // 16:9 ultra-large: the room may still cover; if it cannot, the blurred #roomfill backs the leftover.
+      check(`${w}x${h}: room covers the stage or #roomfill shows`, covers || (await fillShown()), JSON.stringify({ room: L.room, stage: L.stage }));
+    } else if (covers) {
+      check(`${w}x${h}: room covers the stage`, true, JSON.stringify({ room: L.room, stage: L.stage }));
+    } else {
+      // A stage wider than the room's 16:9 (for example 1920x945 once the header is subtracted) cannot be
+      // covered without scaling a station off the stage, so #roomfill backs the leftover, not a dark band.
+      check(`${w}x${h}: room covers the stage or #roomfill shows`, await fillShown(), JSON.stringify({ room: L.room, stage: L.stage }));
+    }
     let outCount = 0, badSprites = [], badLabels = [];
     for (const s of L.stations) {
       if (s.sprite && !inside(s.sprite, L.stage)) { badSprites.push(s.station); outCount++; }
