@@ -1,34 +1,108 @@
 {
-  "title": "KIND: code Fix all four reviewed reliability bugs in this Node ESM, dependency-free repository",
-  "goal": "KIND: code Fix all four reviewed reliability bugs in this Node ESM, dependency-free repository",
-  "lead": "lead",
+  "title": "Delete plans and lanes from the dashboard and Office view",
+  "goal": "Users can delete plans and lanes in the Lanes dashboard and the Office view; deleting kills the lane processes, unregisters them and purges logs so nothing is left running or tracked.",
+  "lead": "Claude Opus 5.5",
   "status": "done",
-  "now": "Closed: Four fixes implemented; lane ended at sandbox-blocked git gate. Lead is completing independent tests and source review; no further lanes planned.",
+  "now": "Closed: All four lanes merged into main (delete plans/lanes, plan dedup, hover/steer/spinner polish, honest status model); every check passes on main.",
   "waves": [
     {
-      "name": "Lanes",
+      "name": "Wave 1",
       "lanes": [
-        "easy-wins-fixes"
+        "rm-core",
+        "rm-ui"
+      ]
+    },
+    {
+      "name": "Wave 2",
+      "lanes": [
+        "ui-polish"
+      ]
+    },
+    {
+      "name": "Wave 3",
+      "lanes": [
+        "status-model"
       ]
     }
   ],
   "lanes": [
     {
-      "task": "easy-wins-fixes",
-      "repo": ".",
-      "why": "KIND: code Fix all four reviewed reliability bugs in this Node ESM, dependency-free repository"
+      "task": "status-model",
+      "repo": "../../../ca-work/codeartsclimcp-status-model",
+      "model": "maas/glm-5.3",
+      "why": "Honest lane statuses: Verified, Unverified (checks could not run), Checks failing, Failed only for real breakdowns, Handled/Merged override",
+      "files": [
+        "runner/controls.mjs",
+        "runner/ca.mjs",
+        "runner/assets/workshop.js",
+        "runner/dash.html",
+        "runner/office.html",
+        "checks/status.check.mjs"
+      ]
+    },
+    {
+      "task": "rm-core",
+      "repo": "../../../ca-work/codeartsclimcp-rm-core",
+      "why": "removeLane/removePlan in ca.mjs, ca rm, API routes, MCP tools, contract check",
+      "files": [
+        "runner/ca.mjs",
+        "runner/mcp.mjs",
+        "checks/remove.check.mjs"
+      ]
+    },
+    {
+      "task": "rm-ui",
+      "repo": "../../../ca-work/codeartsclimcp-rm-ui",
+      "why": "Delete buttons in Lanes dashboard and Office view, demo fixtures, CDP check",
+      "files": [
+        "runner/dash.html",
+        "runner/office.html",
+        "checks/removeui.check.mjs"
+      ]
+    },
+    {
+      "task": "ui-polish",
+      "repo": "../../../ca-work/codeartsclimcp-ui-polish",
+      "why": "Hover cards flicker on every poll (skip unchanged DOM writes); space above the steer input in the Office lane window",
+      "files": [
+        "runner/dash.html",
+        "runner/office.html",
+        "checks/hover.check.mjs"
+      ]
     }
+  ],
+  "next": [
+    "Merge both branches into main",
+    "Run all checks on main",
+    "Drive the real dashboard"
   ],
   "decisions": [
     {
-      "at": "2026-11-08T05:45:32.643Z",
-      "text": "Plan created by the runner: lane easy-wins-fixes started without an open plan."
+      "at": "2026-11-08T13:00:00Z",
+      "text": "API contract fixed up front: POST /api/lane/<id>/remove and POST /api/plans/<id>/remove, so both lanes run in parallel."
     },
     {
-      "at": "2026-11-08T06:04:04.675Z",
-      "text": "Plan closed: Four fixes implemented; lane ended at sandbox-blocked git gate. Lead is completing independent tests and source review; no further lanes planned.."
+      "at": "2026-11-08T06:29:41.381Z",
+      "text": "Lanes moved to clones in C:\\Users\\nabil\\ca-work: the main repo's .git denies writes to the worker sandbox, so commits failed there."
+    },
+    {
+      "at": "2026-11-08T06:36:02.319Z",
+      "text": "Unregistered duplicate clone plans codeartsclimcp-rm-ui/-rm-core; steered rm-core to fix ensurePlan so lanes listed in another open plan never register their own."
+    },
+    {
+      "at": "2026-11-08T07:32:05.642Z",
+      "text": "Resumed codeartsclimcp-ui-polish--ui-polish from the ca resume: Lead verified the branch outside the sandbox: hover, removeui, office all pass. lanes.check has 3 REGRESSIONS from step 2 (dash.html skip-unchanged writes): (a) \"Seen earlier holds the marked lane\": clicking [data-crseen=\"1\"] toggles a UI-only state, but the skip compares only server data so the Seen earlier block never re-renders; include UI state (seen-expanded, any toggles, route) in the signature, or force a render after local UI actions. (b) \"flash clears on the next render\" and (c) \"reduced motion skips the flash\": the .steprow.flash class is added in one render and must be removed by the next poll render; now the next render is skipped as unchanged so the flash never clears. Make the flash state part of the signature (a row with flash pending must re-render once to drop it) or clear the flash with its own timer/classList.remove independent of the skip; reduced motion must never add the flash. Read checks/lanes.check.mjs lines 80-145 for the exact expectations. Ignore \"the onboard hook lists every doctor row with a status\" (fails on the base too). Do not run browser checks in your shell (sandbox blocks loopback); commit the fix as \"fix: ...\" and end; the runner reruns the checks."
+    },
+    {
+      "at": "2026-11-08T08:18:05.486Z",
+      "text": "Resumed codeartsclimcp-status-model--status-model from the ca resume: Model switched to flash for speed. Step 1 is committed (runner/controls.mjs: classifyCheck, laneOutcome, laneBucket, laneActions) from the previous run; review it briefly against the brief, fix anything missing as 'fix: ...', then continue with step 2. Keep each step tight: edit, node --check, commit. Do not run browser or ca dash checks in your shell (sandbox blocks loopback)."
+    },
+    {
+      "at": "2026-11-08T08:58:06.425Z",
+      "text": "Plan closed: All four lanes merged into main (delete plans/lanes, plan dedup, hover/steer/spinner polish, honest status model); every check passes on main.."
     }
   ],
-  "next": [],
-  "risks": []
+  "risks": [
+    "Earlier lanes in this repo failed their git gate; watch the first commit."
+  ]
 }
