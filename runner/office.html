@@ -888,7 +888,7 @@ function renderTop() {
 }
 
 // Plan picker: a styled listbox over the hidden #planSel (which keeps the value and fires change).
-let planMenuActive = -1;
+let planMenuActive = -1, planMenuHtml = "";
 function planRunning(id) {
   if (mode === "demo") return !!(model && model.lanes.some((l) => l.running));
   const p = plansArr.find((x) => x.id === id);
@@ -915,7 +915,10 @@ function renderPlanMenu() {
   if (views.length && plans.length) html += '<li class="pm-sep" role="presentation"></li>';
   if (plans.length) html += '<li class="pm-head" role="presentation">Plans</li>' + plans.map(row).join("");
   const m = $("planMenu");
-  if (m.innerHTML !== html) { m.innerHTML = html; renders.planMenu++; }
+  // Compare with the markup we last wrote, not with m.innerHTML: the browser re-serializes self-closing
+  // SVG (<path .../> becomes <path ...></path>), so a readback comparison never matches and the menu
+  // would rebuild every poll, dropping a hovered Delete button. Same idea as the dash rail's railSig.
+  if (planMenuHtml !== html) { planMenuHtml = html; m.innerHTML = html; renders.planMenu++; }
   if (planMenuActive >= 0) m.setAttribute("aria-activedescendant", "pm-" + planMenuActive); else m.removeAttribute("aria-activedescendant");
 }
 function placeFloat(el, anchor, align) {
