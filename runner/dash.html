@@ -354,6 +354,23 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .ca-stale { display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255, 156, 156, 0.14); border-bottom: 1px solid var(--bad); color: var(--bad); font: 650 13px var(--font); padding: 8px 14px }
 @media (max-width: 640px) { .ca-fresh, .ca-notify #notify-l { display: none } }
 
+/* ---------- glance: banner, rail dot, tab title and favicon ---------- */
+/* One state per plan (plan.glance), shown at a glance. Colours and breathing come from --glance,
+   the state colour set inline from the contract's table. */
+.glance-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; box-sizing: border-box; margin: 0 0 16px; padding: 10px 16px; border-left: 6px solid var(--glance, var(--sel)); background: color-mix(in srgb, var(--glance, var(--sel)) 14%, var(--panel)); border-radius: var(--radius-sm) }
+.glance-banner .glance-glyph { font: 700 28px/1 var(--font-display); color: var(--glance, var(--sel)); flex: none }
+.glance-banner .glance-word { font: 700 28px/1.1 var(--font-display); color: var(--fg); flex: none }
+.glance-banner .glance-detail { color: var(--muted); font-size: 13.5px; min-width: 0; overflow-wrap: anywhere }
+.glance-banner .glance-track { flex: 1 1 120px; min-width: 80px; height: 6px; background: var(--raise); border-radius: 3px; overflow: hidden }
+.glance-banner .glance-track > i { display: block; height: 100%; background: var(--glance, var(--sel)) }
+.glance-banner .glance-link { margin-left: auto; color: var(--sel-ink); font: 700 13.5px var(--font); white-space: nowrap }
+.glance-banner .glance-link:hover { text-decoration: underline }
+.glance-dot { width: 9px; height: 9px; flex: none; border-radius: 50%; background: var(--glance, var(--faint)); display: inline-block }
+@keyframes glanceBreathe { 0%, 100% { opacity: 1 } 50% { opacity: .5 } }
+.glance-banner[data-state="needs-you"], .glance-banner[data-state="failed"] { animation: glanceBreathe 2.4s var(--ease-out) infinite }
+@media (prefers-reduced-motion: reduce) { .glance-banner[data-state="needs-you"], .glance-banner[data-state="failed"] { animation: none } }
+@media (max-width: 640px) { .glance-banner { gap: 8px; padding: 9px 12px } .glance-banner .glance-glyph, .glance-banner .glance-word { font-size: 22px } }
+
 /* ---------- button feel ---------- */
 button.btn, .chip, .crtile, .ca-tab, .rail-card, .rail-fin, .etab, .cr-gbtn, .cr-chip, .ca-notify, .qchip {
   transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
@@ -501,6 +518,112 @@ function modelTable(byModel) {
 }
 function tokLabel(tokens) { return `${tokens && tokens.complete === false ? 'Known' : 'Tokens'} ${CAUI.fmtTokens(CAUI.tokenTotal(tokens))}`; }
 function tokTitle(tokens) { const miss = (tokens && tokens.missing) || []; return miss.length ? `not reported by ${miss.map(short).join(', ')}` : ''; }
+
+// ---------- glance: one state per plan, shown at a glance ----------
+// Contract (tasks/glance-contract.txt): plan.glance = { state, word, detail, at }. Colours, glyphs
+// (written as JS unicode escapes) and the worst-first priority live here so the banner, the rail dot,
+// the tab title, the favicon and the notifications all read the same state. If plan.glance is missing
+// (or its state is unknown) every glance surface stays hidden.
+const GLANCE = {
+  working: { word: 'Working', glyph: '\u25CF', color: '#5ee0f0' },
+  'needs-you': { word: 'Needs you', glyph: '!', color: '#ffb547' },
+  failed: { word: 'Failed', glyph: '\u2715', color: '#ff6b6b' },
+  done: { word: 'Done', glyph: '\u2713', color: '#6ee7a0' },
+  quiet: { word: 'Check Claude', glyph: '?', color: '#ffb547' },
+  idle: { word: 'Idle', glyph: '\u2013', color: '#9a93a8' },
+};
+const GLANCE_RANK = { 'needs-you': 0, failed: 1, quiet: 2, working: 3, done: 4, idle: 5 };
+const glanceMeta = (state) => GLANCE[state] || GLANCE.idle;
+const glanceOf = (p) => { const g = p && p.glance; return (g && GLANCE[g.state]) ? g : null; };
+const glanceWord = (g) => (g && g.word) || glanceMeta(g && g.state).word;
+const glanceGlyph = (state) => glanceMeta(state).glyph;
+const glanceColor = (state) => glanceMeta(state).color;
+// Worst glance over the open plans (closed plans are skipped) by the contract priority.
+function worstOpenGlance() {
+  let best = null;
+  for (const p of plans) {
+    if (p.closed) continue;
+    const g = glanceOf(p); if (!g) continue;
+    const r = GLANCE_RANK[g.state] ?? 9;
+    if (!best || r < best.r) best = { plan: p, glance: g, r };
+  }
+  return best;
+}
+// The glance the current route shows: the plan's own glance, the worst over open plans on the Control
+// room, and on a lane detail the glance of the plan that owns the lane.
+function shownGlance() {
+  if (route.kind === 'plan') { const p = curPlan || plans.find((x) => x.id === route.id); const g = glanceOf(p); return g ? { plan: p, glance: g } : null; }
+  if (route.kind === 'lane') { const p = plans.find((x) => x.waves.some((w) => w.lanes.some((l) => l.id === route.id))); const g = glanceOf(p); return g ? { plan: p, glance: g } : null; }
+  return worstOpenGlance();
+}
+// Needs-you lanes in the current view: the tab title keeps their count when it is above zero.
+function viewNeedsYou() {
+  const attn = (l) => laneBucket(l) === 'attention';
+  if (route.kind === 'plan') { const p = curPlan || plans.find((x) => x.id === route.id); return p ? p.waves.flatMap((w) => w.lanes).filter(attn).length : 0; }
+  if (route.kind === 'lane') { const l = lanes.find((x) => x.id === route.id) || (detail && detail.id === route.id ? detail : null); return l && attn(l) ? 1 : 0; }
+  return lanes.filter(attn).length;
+}
+// Tab title: "<glyph> <word> (<needs-you lanes>) - <plan title>", the count only when above zero;
+// an idle glance keeps the view's plain title.
+function glanceTitle(shown) {
+  if (!shown) return 'Lanes';
+  const g = shown.glance, st = g.state;
+  if (st === 'idle') return 'Lanes';
+  const n = viewNeedsYou();
+  const head = `${glanceGlyph(st)} ${glanceWord(g)}${n > 0 ? ` (${n})` : ''}`;
+  return shown.plan ? `${head} - ${shown.plan.title}` : head;
+}
+// A 32x32 canvas favicon: rounded square in the state colour with the glyph in dark #1a1424.
+const favCache = new Map();
+function roundedRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function faviconFor(state) {
+  if (favCache.has(state)) return favCache.get(state);
+  const meta = glanceMeta(state);
+  let url = '';
+  try {
+    const c = document.createElement('canvas'); c.width = 32; c.height = 32;
+    const ctx = c.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = meta.color; roundedRect(ctx, 1, 1, 30, 30, 7); ctx.fill();
+      ctx.fillStyle = '#1a1424'; ctx.font = '700 21px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(meta.glyph, 16, 17);
+      url = c.toDataURL('image/png');
+    }
+  } catch { url = ''; }
+  favCache.set(state, url);
+  return url;
+}
+function setFavicon(url) {
+  let l = document.querySelector('link[rel="icon"]');
+  if (!l) { l = document.createElement('link'); l.rel = 'icon'; document.head.appendChild(l); }
+  if (url) l.href = url;
+}
+function applyDocumentGlance(shown) {
+  document.title = glanceTitle(shown);
+  if (shown && shown.glance.state !== 'idle') setFavicon(faviconFor(shown.glance.state));
+}
+// The banner markup, shared by the plan home and the Control room. opts.link adds the plan title as a
+// link (Control room), and a working glance gets the thin done/total lanes bar.
+function glanceBannerHtml(shown, opts) {
+  if (!shown) return '';
+  const g = shown.glance, st = g.state;
+  const word = glanceWord(g), glyph = glanceGlyph(st), col = glanceColor(st);
+  let bar = '';
+  if (st === 'working' && shown.plan) {
+    const ls = shown.plan.waves.flatMap((w) => w.lanes);
+    const total = ls.length, done = ls.filter((l) => CAUI.laneStatus(l).key === 'done').length;
+    bar = `<span class="glance-track" title="${done}/${total} lanes done"><i style="width:${total ? Math.round((100 * done) / total) : 0}%"></i></span>`;
+  }
+  const link = (opts && opts.link && shown.plan) ? `<a class="glance-link" href="#/plan/${esc(shown.plan.id)}">${esc(shown.plan.title)}</a>` : '';
+  return `<div id="glanceBanner" class="glance-banner" data-state="${esc(st)}" role="status" aria-live="polite" style="--glance:${col}"><span class="glance-glyph" aria-hidden="true">${glyph}</span><span class="glance-word">${esc(word)}</span><span class="glance-detail">${esc(g.detail || '')}</span>${bar}${link}</div>`;
+}
+// A small dot in the glance colour, placed before each plan name in the plans rail.
+function glanceDot(p) {
+  const g = glanceOf(p); if (!g) return '';
+  return `<span class="glance-dot" style="--glance:${glanceColor(g.state)}" title="${esc(glanceWord(g))}"></span>`;
+}
+// A compact signature so a glance change re-renders the Control room (its sig otherwise only tracks lanes).
+function glanceSig() { const s = shownGlance(); return s ? `${s.plan.id}:${s.glance.state}:${s.glance.detail || ''}:${viewNeedsYou()}` : ''; }
 
 // ---------- demo fixture (?demo=1): one fetch-layer swap used for every /api call ----------
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -978,12 +1101,13 @@ function renderControl() {
   const groups = ['status', 'project'].map((g) => `<button type="button" class="cr-gbtn${crGroup === g ? ' on' : ''}" data-crgroup="${g}" aria-pressed="${crGroup === g}">${g === 'status' ? 'By status' : 'By project'}</button>`).join('');
   const body = crGroup === 'project' ? crProjectView(shown) : crStatusView(shown);
   const html = `<div class="pad">
+    ${glanceBannerHtml(worstOpenGlance(), { link: true })}
     <div class="cr-head"><h1>Control room</h1><div class="cr-sub">${lanes.length} lane${lanes.length === 1 ? '' : 's'} · ${crGroup === 'project' ? 'by project' : 'by status'}</div></div>
     <div class="crtiles" role="group" aria-label="Lane buckets">${tiles}</div>
     <div class="cr-controls"><div class="cr-group" role="group" aria-label="Group lanes">${groups}</div><div class="cr-chips">${chips}</div></div>
     <div class="cr-list">${body || '<div class="small" style="padding:10px 0">No lanes.</div>'}</div>
     <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(crModels())}</div></div>`;
-  const sig = JSON.stringify([lanes, crFilter, crProject, crGroup, crSeenOpen, crOldOpen, route.kind, route.id]);
+  const sig = JSON.stringify([lanes, crFilter, crProject, crGroup, crSeenOpen, crOldOpen, route.kind, route.id, glanceSig()]);
   if (sig === viewSig) { syncBarPad(); return; }
   viewSig = sig; viewRenders++;
   $('view').innerHTML = html;
@@ -1077,7 +1201,7 @@ function renderRail() {
   h += plans.length ? plans.map((p) => {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
-      <div class="rail-row">${dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
+      <div class="rail-row">${dot(st)}${glanceDot(p)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
@@ -1159,7 +1283,9 @@ function renderPlan(p) {
   const dec = p.decisions.length ? `<ul class="plain dec">${[...p.decisions].reverse().map((d) => `<li><span class="at">${esc(clock(d.at))}</span><span class="dv"></span><span class="tx">${esc(d.text)}</span></li>`).join('')}</ul>` : '<div class="small">None yet</div>';
   const pRows = CAUI.tokenSplit(p.tokensBy);
   const planTokTitle = pRows.map((r) => `${r.label} ${CAUI.fmtTokens(r.total)}`).join(' / ');
+  const glanceShown = glanceOf(p) ? { plan: p, glance: glanceOf(p) } : null;
   const html = `<div class="pad">
+    ${glanceBannerHtml(glanceShown)}
     <div class="plan-head">
       <div class="plan-head-row"><h1>${esc(p.title)}</h1>${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="plan-sub">${CAUI.badge(CAUI.status(planState(p)))} ${esc(planSummary(p))} · plan by ${esc(leadName(p))} · updated ${ago(p.updatedAt)}</div>
@@ -1555,7 +1681,7 @@ window.__lanes = { state: () => {
       filter: crFilter,
       sections: [...document.querySelectorAll('.cr-sec[data-bucket]')].map((s) => ({ bucket: s.dataset.bucket, ids: [...s.querySelectorAll('[data-lane]')].map((x) => x.dataset.lane) })),
       projects: [...document.querySelectorAll('.cr-sec[data-project]')].map((s) => s.dataset.project),
-      title: document.title,
+      title: legacyTitle,
       banner: staleOn,
     },
     polish: { toast: !!document.querySelector('.ca-toast'), updatePill: !!document.querySelector('.ca-update') },
@@ -1577,6 +1703,7 @@ renders: () => ({ rail: railRenders, view: viewRenders }) };
 // ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
 let lastOkAt = 0, firstFailAt = 0, staleOn = false;
 let demoFailAt = 0; // check hook: window.__lanes.fail(true) forces every /api call to fail
+let legacyTitle = 'Lanes'; // the aggregate title the check harness expects, kept even when a glance owns document.title
 let notifyOn = false, notifyPrimed = false;
 const notifyWas = new Map(); // laneId -> bucket at the previous poll, so we only notify on a change
 const clockS = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -1629,7 +1756,8 @@ async function refresh(full) {
   markFresh();
   $('counts').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`;
   const attn = lanes.filter((l) => laneBucket(l) === 'attention').length;
-  document.title = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
+  legacyTitle = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
+  document.title = legacyTitle;
   diffNotify();
   renderRail();
   if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else { viewSig = ''; $('view').innerHTML = '<div class="empty">Plan not found</div>'; } }
