@@ -25,12 +25,20 @@ export function modelHost(base = process.env.MAAS_BASE_URL || 'https://api-ap-so
   catch { return 'api-ap-southeast-1.modelarts-maas.com'; }
 }
 
-// Default liveness probe: resolve the model host, then a HEAD request with a 5 s timeout. A DNS
-// failure or a thrown fetch means offline; any HTTP answer (even 404/503) means the network is up.
+// The scheme://host[:port] of the configured endpoint, so a proxy or test double on a custom
+// protocol or port is probed where it actually listens. Falls back to the public MaaS origin.
+export function modelOrigin(base = process.env.MAAS_BASE_URL || 'https://api-ap-southeast-1.modelarts-maas.com/openai/v1') {
+  try { return new URL(base).origin || 'https://api-ap-southeast-1.modelarts-maas.com'; }
+  catch { return 'https://api-ap-southeast-1.modelarts-maas.com'; }
+}
+
+// Default liveness probe: resolve the model host, then a HEAD request with a 5 s timeout. The
+// request uses the configured endpoint origin (scheme and port included); DNS uses the hostname
+// only. A DNS failure or a thrown fetch means offline; any HTTP answer (even 404/503) means up.
 export async function defaultProbe() {
   const host = modelHost();
   try { await dns.promises.lookup(host); } catch { return false; }
-  try { const r = await fetch(`https://${host}/`, { method: 'HEAD', signal: AbortSignal.timeout(5000) }); return !!r; }
+  try { const r = await fetch(`${modelOrigin()}/`, { method: 'HEAD', signal: AbortSignal.timeout(5000) }); return !!r; }
   catch { return false; }
 }
 

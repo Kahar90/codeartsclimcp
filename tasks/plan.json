@@ -1,32 +1,32 @@
 {
-  "title": "You are working in a git repo (current directory)",
-  "goal": "You are working in a git repo (current directory)",
+  "title": "KIND: code Fix all four reviewed reliability bugs in this Node ESM, dependency-free repository",
+  "goal": "KIND: code Fix all four reviewed reliability bugs in this Node ESM, dependency-free repository",
   "lead": "lead",
   "status": "done",
-  "now": "Closed: README refresh accepted by lead after image inspection and README/Office checks. Runner Bash lacks node; no reviewer verdict. Two existing onboarding doctor-row assertions fail. No remaining implementation work.",
+  "now": "Closed: Four fixes implemented; lane ended at sandbox-blocked git gate. Lead is completing independent tests and source review; no further lanes planned.",
   "waves": [
     {
       "name": "Lanes",
       "lanes": [
-        "readme-refresh"
+        "easy-wins-fixes"
       ]
     }
   ],
   "lanes": [
     {
-      "task": "readme-refresh",
+      "task": "easy-wins-fixes",
       "repo": ".",
-      "why": "You are working in a git repo (current directory)"
+      "why": "KIND: code Fix all four reviewed reliability bugs in this Node ESM, dependency-free repository"
     }
   ],
   "decisions": [
     {
-      "at": "2026-11-08T05:06:25.395Z",
-      "text": "Plan created by the runner: lane readme-refresh started without an open plan."
+      "at": "2026-11-08T05:45:32.643Z",
+      "text": "Plan created by the runner: lane easy-wins-fixes started without an open plan."
     },
     {
-      "at": "2026-11-08T05:19:53.136Z",
-      "text": "Plan closed: README refresh accepted by lead after image inspection and README/Office checks. Runner Bash lacks node; no reviewer verdict. Two existing onboarding doctor-row assertions fail. No remaining implementation work.."
+      "at": "2026-11-08T06:04:04.675Z",
+      "text": "Plan closed: Four fixes implemented; lane ended at sandbox-blocked git gate. Lead is completing independent tests and source review; no further lanes planned.."
     }
   ],
   "next": [],

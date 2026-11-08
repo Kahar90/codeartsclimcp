@@ -2,6 +2,8 @@
 // waits for the network to come back (injectable probe), detects a sleep gap between watchdog ticks
 // and caps concurrent lanes per model; runner/ca.mjs uses all four. Pure functions plus static wiring.
 import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,6 +32,34 @@ if (fn('waitOnline')) {
   r = await m.waitOnline({ probe: async () => false, intervalMs: 60000, timeoutMs: 60000, shouldStop: () => stop });
   check('waitOnline: shouldStop ends a long wait within about a second (ca stop during an outage)', r && r.stopped === true && r.online === false && Date.now() - t1 < 3000, JSON.stringify(r));
   check('waitOnline has a default probe (DNS or HTTPS to the model host) when none is given', /lookup|resolve|https?\.request|fetch\(/.test(fs.readFileSync(path.join(ROOT, 'runner', 'netwait.mjs'), 'utf8')));
+}
+if (fn('defaultProbe')) {
+  const savedBase = process.env.MAAS_BASE_URL;
+  const free = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  const closedPort = await free();
+  let server = null; let mode = 'ok'; const seen = [];
+  try {
+    server = http.createServer((req, res) => {
+      seen.push({ method: req.method, url: req.url, host: req.headers.host });
+      if (mode === 'error') { res.writeHead(503); res.end('nope'); return; }
+      res.writeHead(200); res.end('ok');
+    });
+    const port = await new Promise((res) => server.listen(0, '127.0.0.1', () => res(server.address().port)));
+    process.env.MAAS_BASE_URL = `http://127.0.0.1:${port}/openai/v1`;
+    let online = await m.defaultProbe();
+    check('defaultProbe probes MAAS_BASE_URL over its own scheme and port (custom http + port honored)', online === true && seen.length > 0 && seen[0].host === `127.0.0.1:${port}`, `online=${online} ${JSON.stringify(seen)}`);
+
+    seen.length = 0; mode = 'error';
+    online = await m.defaultProbe();
+    check('defaultProbe counts any HTTP answer as online (a 503 is still a live network)', online === true && seen.some((s) => s.method === 'HEAD'), `online=${online} ${JSON.stringify(seen)}`);
+
+    process.env.MAAS_BASE_URL = `http://127.0.0.1:${closedPort}/openai/v1`;
+    online = await m.defaultProbe();
+    check('defaultProbe returns false for an unreachable endpoint', online === false, `port ${closedPort} online=${online}`);
+  } finally {
+    if (server) await new Promise((res) => server.close(res));
+    if (savedBase === undefined) delete process.env.MAAS_BASE_URL; else process.env.MAAS_BASE_URL = savedBase;
+  }
 }
 if (fn('detectSleep')) {
   check('detectSleep: normal 2 s tick is not sleep', m.detectSleep(1000, 3000, 2000) === false);
