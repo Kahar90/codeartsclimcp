@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const A = path.join(ROOT, 'runner', 'assets');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + info : ''}`);
@@ -27,8 +28,8 @@ try {
     const r = await fetch(base + p); check(`GET ${p}`, r.ok && (r.headers.get('content-type') || '').startsWith(type), `${r.status} ${r.headers.get('content-type')}`);
   }
   for (const p of ['/assets/../ca.mjs', '/assets/%2e%2e/ca.mjs', '/assets/build_sprites.py', '/assets/nope.png']) { const r = await fetch(base + p); check(`GET ${p} refused`, r.status === 404, String(r.status)); }
-} finally { dash.kill(); }
+} catch (e) { check('check script ran', false, String((e && e.stack) || e)); }
 console.log(results.join('\n'));
 const bad = results.filter((r) => r.startsWith('FAIL')).length;
 console.log(bad ? `${bad} FAILED` : `all ${results.length} passed`);
-process.exit(bad ? 1 : 0);
+await settle({ children: [dash], code: bad ? 1 : 0 });

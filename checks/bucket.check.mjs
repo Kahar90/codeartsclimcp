@@ -8,6 +8,7 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-bucket-'));
@@ -96,10 +97,10 @@ try {
   check('/api/overview counts the buckets', ov && ov.counts && ov.counts.attention === 1 && ov.counts.running === 1 && ov.counts.ended === 1 && ov.counts.done === 0, JSON.stringify(ov?.counts));
   check('/api/overview skips lanes finished over 3 days ago', Array.isArray(ov?.lanes) && ov.lanes.length === 3 && !ov.lanes.some((x) => x.task === 'old'), JSON.stringify((ov?.lanes || []).map((x) => x.task)));
   check('/api/overview lanes carry bucket and project', (ov?.lanes || []).every((x) => x.bucket && x.project?.key), '');
-} finally { dash.kill(); sleeper.kill(); }
+} catch (e) { check('the dashboard API section ran to the end', false, String((e && e.stack) || e)); }
 
 console.log(results.join('\n'));
 const bad = results.filter((x) => x.startsWith('FAIL')).length;
 console.log(bad ? `${bad} FAILED` : `all ${results.length} passed`);
 fs.rmSync(tmp, { recursive: true, force: true });
-process.exit(bad ? 1 : 0);
+await settle({ children: [dash, sleeper], code: bad ? 1 : 0 });
