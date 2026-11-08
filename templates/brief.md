@@ -20,7 +20,7 @@ Safety rules (hard):
 - Do not launch browsers or write your own browser scripts; use only the checks below.
 - If `git commit` fails, do NOT try workarounds: stop and put the exact error in your final reply.
 
-Checks: run targeted checks for changed behavior before committing. Do not repeat the full suite for every step. The runner runs the CHECK lines once when you finish and sends failures back for fixes.
+Checks: run targeted checks for changed behavior before committing. Run each check in the foreground with a timeout (for example `timeout 600 node checks/x.check.mjs`); never sleep-poll a background job (`sleep N; cat log`), because every idle turn replays the whole context. Do not repeat the full suite for every step. The runner runs the CHECK lines once when you finish and sends failures back for fixes.
 CHECK: <exact command, e.g. npm run typecheck>
 CHECK: <another command, e.g. npm test>
 Constraints: no em dashes anywhere. Only touch <files>. Numbers only, never print private data.

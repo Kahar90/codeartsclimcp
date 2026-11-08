@@ -17,50 +17,74 @@ export function classifyCheck({ code, out }) {
 // colour); reason: one human line for tooltips and the "Now:" line. Live lanes keep their health
 // states. It reads legacy states too: "failed (gates still failing)" was both a check that could
 // not run and a check that really failed; the last failed gate tells them apart.
-export function laneOutcome({ s, health, handled, note }) {
+// Besides { key, label, tone, reason } it carries { attention, steps, glyph } (status contract part 1).
+export function laneOutcome({ s, health, handled, note, closed }) {
   const res = s.result === 'failed' && s.reason === 'timeout' ? 'paused' : s.result; // legacy pause
+  let o;
   if (handled && res) {
     const merged = /merg/i.test(note || '');
-    return { key: 'handled', label: merged ? 'Merged' : 'Handled', tone: merged ? 'done' : 'idle', reason: note || 'handled by the lead' };
-  }
-  if (!res) {
+    o = { key: 'handled', label: merged ? 'Merged' : 'Handled by lead', tone: merged ? 'done' : 'idle', reason: note || 'handled by the lead' };
+  } else if (!res) {
     const h = String(health || '');
-    if (/^dead/i.test(h)) return { key: 'failed', label: 'Supervisor died', tone: 'bad', reason: 'the supervisor died; resume restarts the lane in place' };
-    if (/^stalled/i.test(h)) return { key: 'running', label: 'Stalled', tone: 'bad', reason: 'stalled: no model activity for a while' };
-    if (/^thinking/i.test(h)) return { key: 'running', label: 'Thinking', tone: 'warn', reason: h };
-    if (/^quiet/i.test(h)) return { key: 'running', label: 'Quiet', tone: 'warn', reason: h };
-    return { key: 'running', label: 'Running', tone: 'run', reason: String(s.activity || h || 'running') };
+    if (/^dead/i.test(h)) o = { key: 'failed', label: 'Supervisor died', tone: 'bad', reason: 'the supervisor died; resume restarts the lane in place' };
+    else if (/^stalled/i.test(h)) o = { key: 'running', label: 'Stalled', tone: 'bad', reason: 'stalled: no model activity for a while' };
+    else if (/^thinking/i.test(h)) o = { key: 'running', label: 'Thinking', tone: 'warn', reason: h };
+    else if (/^quiet/i.test(h)) o = { key: 'running', label: 'Quiet', tone: 'warn', reason: h };
+    else o = { key: 'running', label: 'Running', tone: 'run', reason: String(s.activity || h || 'running') };
+  } else {
+    const gates = Array.isArray(s.gates) ? s.gates : [];
+    const isCheck = (g) => !!g && g.gate !== 'git clean';
+    const isInfra = (g) => !!g && (g.code === 126 || g.code === 127 || g.kind === 'infra');
+    const lastFail = [...gates].reverse().find((g) => isCheck(g) && g.ok === false);
+    if (res === 'done') {
+      // Verified only when the last gate round really ran the checks and they all passed; a brief
+      // without CHECK lines (or a lane rebuilt from its log, which keeps no gates) stays plain Done.
+      const i = gates.map((g) => g && g.gate).lastIndexOf('git clean');
+      const round = (i >= 0 ? gates.slice(i + 1) : gates).filter(isCheck);
+      o = round.length && round.every((g) => g.ok)
+        ? { key: 'verified', label: 'Verified', tone: 'done', reason: 'every check ran and passed' }
+        : { key: 'done', label: 'Done', tone: 'done', reason: 'finished' };
+    } else if (res === 'unverified') o = { key: 'unverified', label: 'Unverified', tone: 'warn', reason: s.reason || 'checks could not run' };
+    else if (res === 'checks failing') o = { key: 'checks failing', label: 'Checks failing', tone: 'bad', reason: s.reason || 'a check still fails after the fix rounds' };
+    else if (res === 'failed' && /gates still failing/i.test(s.reason || '')) {
+      o = isInfra(lastFail)
+        ? { key: 'unverified', label: 'Unverified', tone: 'warn', reason: `checks couldn't run: ${lastFail.gate} (exit ${lastFail.code})` }
+        : { key: 'checks failing', label: 'Checks failing', tone: 'bad', reason: lastFail ? `checks failing: ${lastFail.gate} (exit ${lastFail.code})` : `checks failing: ${s.reason}` };
+    } else if (res === 'needs review') o = { key: 'needs review', label: 'Needs review', tone: 'warn', reason: 'the reviewer asked for fixes' };
+    else if (res === 'paused') o = { key: 'paused', label: 'Paused', tone: 'warn', reason: 'paused at the time limit; resume continues it in place' };
+    else if (res === 'stopped') { const byLead = /stopped/i.test(`${s.reason || ''} ${s.activity || ''}`); o = { key: 'stopped', label: byLead ? 'Stopped by lead' : 'Stopped', tone: 'idle', reason: byLead ? 'stopped by the lead' : 'Stopped' }; }
+    else if (res === 'killed') o = { key: 'killed', label: 'Killed', tone: 'idle', reason: 'killed' };
+    else if (res === 'continued') o = { key: 'continued', label: 'Continued', tone: 'idle', reason: s.reason || 'continued in another lane' };
+    else if (res === 'dropped') o = { key: 'dropped', label: 'Dropped', tone: 'idle', reason: s.reason || 'dropped by the lead, never started' };
+    else if (res === 'failed') {
+      o = (s.exitCode === 3 || /auth/i.test(s.reason || ''))
+        ? { key: 'failed', label: 'Failed', tone: 'bad', reason: 'missing credentials: run ca auth' }
+        : { key: 'failed', label: 'Failed', tone: 'bad', reason: `failed: ${s.reason || 'see the summary'}` };
+    } else o = { key: res, label: res.charAt(0).toUpperCase() + res.slice(1), tone: 'idle', reason: s.reason || res };
   }
-  const gates = Array.isArray(s.gates) ? s.gates : [];
-  const isCheck = (g) => !!g && g.gate !== 'git clean';
-  const lastFail = [...gates].reverse().find((g) => isCheck(g) && g.ok === false);
-  const infra = (g) => !!g && (g.code === 126 || g.code === 127 || g.kind === 'infra');
-  if (res === 'done') {
-    // Verified only when the last gate round really ran the checks and they all passed; a brief
-    // without CHECK lines (or a lane rebuilt from its log, which keeps no gates) stays plain Done.
-    const i = gates.map((g) => g && g.gate).lastIndexOf('git clean');
-    const round = (i >= 0 ? gates.slice(i + 1) : gates).filter(isCheck);
-    return round.length && round.every((g) => g.ok)
-      ? { key: 'verified', label: 'Verified', tone: 'done', reason: 'every check ran and passed' }
-      : { key: 'done', label: 'Done', tone: 'done', reason: 'finished' };
-  }
-  if (res === 'unverified') return { key: 'unverified', label: 'Unverified', tone: 'warn', reason: s.reason || 'checks could not run' };
-  if (res === 'checks failing') return { key: 'checks failing', label: 'Checks failing', tone: 'bad', reason: s.reason || 'a check still fails after the fix rounds' };
-  if (res === 'failed' && /gates still failing/i.test(s.reason || '')) {
-    if (infra(lastFail)) return { key: 'unverified', label: 'Unverified', tone: 'warn', reason: `checks couldn't run: ${lastFail.gate} (exit ${lastFail.code})` };
-    return { key: 'checks failing', label: 'Checks failing', tone: 'bad', reason: lastFail ? `checks failing: ${lastFail.gate} (exit ${lastFail.code})` : `checks failing: ${s.reason}` };
-  }
-  if (res === 'needs review') return { key: 'needs review', label: 'Needs review', tone: 'warn', reason: 'the reviewer asked for fixes' };
-  if (res === 'paused') return { key: 'paused', label: 'Paused', tone: 'warn', reason: 'paused at the time limit; resume continues it in place' };
-  if (res === 'stopped') return { key: 'stopped', label: 'Stopped', tone: 'idle', reason: /stopped/i.test(`${s.reason || ''} ${s.activity || ''}`) ? 'stopped by the lead' : 'Stopped' };
-  if (res === 'killed') return { key: 'killed', label: 'Killed', tone: 'idle', reason: 'killed' };
-  if (res === 'continued') return { key: 'continued', label: 'Continued', tone: 'idle', reason: s.reason || 'continued in another lane' };
-  if (res === 'dropped') return { key: 'dropped', label: 'Dropped', tone: 'idle', reason: s.reason || 'dropped by the lead, never started' };
-  if (res === 'failed') {
-    if (s.exitCode === 3 || /auth/i.test(s.reason || '')) return { key: 'failed', label: 'Failed', tone: 'bad', reason: 'missing credentials: run ca auth' };
-    return { key: 'failed', label: 'Failed', tone: 'bad', reason: `failed: ${s.reason || 'see the summary'}` };
-  }
-  return { key: res, label: res.charAt(0).toUpperCase() + res.slice(1), tone: 'idle', reason: s.reason || res };
+  return withStatusFields(o, { res, handled, closed });
+}
+
+// The glance glyphs (status contract part 1): the one marker a person reads at a glance.
+export const GLYPHS = { working: '\u25CF', 'needs-you': '!', failed: '\u2715', done: '\u2713', idle: '\u2013' };
+
+// Add the three contract fields to a lane status: attention (the human must act), steps (live |
+// complete | hide) and glyph (one glance glyph). A lane the lead handled, and every ended lane of a
+// closed plan, is never attention: nothing is left for the human.
+export function withStatusFields(o, { res, handled, closed } = {}) {
+  const attention = !(handled || (closed && res)) && (o.key === 'failed' || o.key === 'checks failing'
+    || o.key === 'unverified' || o.key === 'needs review' || o.key === 'paused' || (o.key === 'running' && o.label === 'Stalled'));
+  const merged = o.key === 'handled' && o.tone === 'done';
+  const stoppedHandled = !!handled && res === 'stopped';
+  const steps = o.key === 'running' || o.key === 'planned' ? 'live'
+    : o.key === 'done' || o.key === 'verified' || merged ? 'complete' : 'hide';
+  let glyph;
+  if (o.key === 'failed' || o.key === 'checks failing' || o.key === 'killed') glyph = GLYPHS.failed;
+  else if (attention) glyph = GLYPHS['needs-you'];
+  else if (o.key === 'running' || o.key === 'planned') glyph = GLYPHS.working;
+  else if (o.key === 'done' || o.key === 'verified' || (o.key === 'handled' && !stoppedHandled)) glyph = GLYPHS.done;
+  else glyph = GLYPHS.idle;
+  return { ...o, attention, steps, glyph };
 }
 
 // actions: what may be done now. suggest: one action worth trying first ('' when all is
