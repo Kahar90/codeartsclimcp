@@ -169,11 +169,12 @@ function writeProbe(repo) {
   if (String(process.env.CA_WRITE_PROBE_FAIL || '') === '1') return { ok: false, where: 'write probe (test hook)', error: 'CA_WRITE_PROBE_FAIL=1 forces a write failure' };
   const sh = workerShell();
   const shell = sh && fs.existsSync(sh) ? sh : (process.platform === 'win32' ? 'bash' : (process.env.SHELL || 'sh'));
-  const gitdir = git(repo, 'rev-parse', '--absolute-git-dir') || path.join(repo, '.git');
+  // A folder that is not a git repo yet is fine (onboard or git init makes it one): probe only its root.
+  const gitdir = git(repo, 'rev-parse', '--absolute-git-dir');
   const spots = [
     { where: `repo root (${repo})`, file: path.join(repo, '.ca-write-probe') },
-    { where: `git dir (${gitdir})`, file: path.join(gitdir, '.ca-write-probe') },
-    { where: `git dir lock (${gitdir})`, file: path.join(gitdir, 'ca-probe.lock') },
+    ...(gitdir ? [{ where: `git dir (${gitdir})`, file: path.join(gitdir, '.ca-write-probe') },
+      { where: `git dir lock (${gitdir})`, file: path.join(gitdir, 'ca-probe.lock') }] : []),
   ];
   for (const s of spots) {
     const f = String(s.file).replace(/\\/g, '/');
@@ -1533,6 +1534,7 @@ async function cmdWait(args) {
       const running = states.filter(({ s }) => !s.result).map(({ l }) => l);
       for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
       if (asJson) process.stdout.write(JSON.stringify(any ? { lanes: objs, any: true, running: running.map(statusRow) } : { lanes: objs }) + '\n');
+      else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
     }
     if (now() >= deadline) {
