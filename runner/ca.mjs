@@ -439,6 +439,19 @@ async function runLane(repoArg, task, opts = {}) {
   // The worker's last reply and last tool output: the gate reads them to tell whether its commit was
   // refused by the sandbox (then the runner commits instead of wasting a fix round that says "commit").
   let lastWorkerReply = ''; let lastToolOutput = '';
+  // Sleep-polling wastes tokens: the model replays its whole context on every idle turn. Reject a
+  // permission for it and queue at most one steer per lane telling the worker to run the check in
+  // the foreground instead. Every sighting is recorded as an interruption.
+  let sleepPollSteered = false;
+  const flagSleepPoll = (where) => {
+    S.interruptions.push({ at: now(), phase: S.phase, kind: 'sleep-poll', what: where });
+    save(true);
+  };
+  const queueSleepSteer = () => {
+    if (sleepPollSteered) return; sleepPollSteered = true;
+    try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-sleep.txt`), 'Do not sleep-poll: run the check in the foreground with a timeout and read its output once.'); } catch {}
+    save(true);
+  };
   const flushPart = (pid) => {
     const p = parts.get(pid); if (!p || p.logged) return; p.logged = true;
     const t = (p.text || '').trim(); if (!t) return;
@@ -499,6 +512,7 @@ async function runLane(repoArg, task, opts = {}) {
             for (const k of parts.keys()) flushPart(k);
             s.tools.set(key, { tool: part.tool, since: now(), input: toolInput(part.tool, st.input) });
             L(`  > ${part.tool}  ${toolInput(part.tool, st.input)}`);
+            { const n = sleepPoll(st.input?.command); if (n) { L(`  ! sleep-poll: ${part.tool} waits sleep ${n}`); flagSleepPoll(`${part.tool}: sleep ${n}`); queueSleepSteer(); } }
             // Global CodeArts permissions may allow external reads/writes; at least make them visible.
             const fp = st.input?.filePath ?? st.input?.path;
             if (typeof fp === 'string' && path.isAbsolute(fp) && !insideRepo(fp)) {
@@ -546,7 +560,9 @@ async function runLane(repoArg, task, opts = {}) {
     const kind = p.permission || p.type || 'unknown';
     const pats = [].concat(p.patterns || p.pattern || []).map(String);
     let reply = 'once', why = '';
-    if (kind === 'external_directory' && !(pats.length && pats.every(insideRepo))) { reply = 'reject'; why = `Stay inside the repo ${repo}; do not touch other folders.`; }
+    const sp = sleepPoll([p.command, p.pattern, pats.join(' '), p.title, JSON.stringify(p.metadata || {})].filter(Boolean).join(' '));
+    if (sp) { reply = 'reject'; why = 'Do not sleep-poll: run the check in the foreground with a timeout and read its output once.'; flagSleepPoll(`permission ${kind}: sleep ${sp}`); }
+    else if (kind === 'external_directory' && !(pats.length && pats.every(insideRepo))) { reply = 'reject'; why = `Stay inside the repo ${repo}; do not touch other folders.`; }
     else if (kind === 'doom_loop') { reply = 'reject'; why = 'You repeated the same tool call several times. Stop, think about why it fails, and try a different approach.'; }
     else if (kind === 'read' && pats.some((x) => /\.env/i.test(x))) { reply = 'reject'; why = 'Do not read .env files.'; }
     S.permissions.push({ at: now(), kind, patterns: pats.slice(0, 3), reply });
