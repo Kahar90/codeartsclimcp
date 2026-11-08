@@ -50,7 +50,7 @@ if (C) {
   const paused = A({ s: { result: 'paused', phase: 'finished' }, alive: false, health: 'paused', canResume: true });
   check('paused lane suggests resume', has(paused.actions, 'resume') && paused.suggest === 'resume', JSON.stringify(paused));
   const failed = A({ s: { result: 'failed', reason: 'gave up after 3 interruptions (last: transport: fetch failed)', phase: 'finished' }, alive: false, health: 'failed', canResume: true });
-  check('failed lane suggests resume', has(failed.actions, 'resume') && failed.suggest === 'resume', JSON.stringify(failed));
+  check('failed lane offers resume but does not suggest it', has(failed.actions, 'resume') && failed.suggest === '' && failed.why === '', JSON.stringify(failed));
   const cred = A({ s: { result: 'failed', exitCode: 3, reason: 'auth', phase: 'finished' }, alive: false, health: 'failed', canResume: true });
   check('credential failure does not suggest resume and says why', cred.suggest !== 'resume' && /auth|credential/i.test(cred.why), JSON.stringify(cred));
   const nr = A({ s: { result: 'needs review', phase: 'finished' }, alive: false, health: 'needs review', canResume: true });

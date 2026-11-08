@@ -59,7 +59,7 @@ try {
   check('the popover has an Update now button', btn);
   await click('[data-test-update]'); await wait(300);
   const busy = await ev(`(document.querySelector('.ca-update-pop') || document.body).textContent`);
-  check('Update now shows progress (Updating or Restarting)', /Updating|Restarting/i.test(busy), busy.slice(0, 160));
+  check('Update now shows progress (Installing or Restarting)', /Installing|Restarting/i.test(busy), busy.slice(0, 160));
   await send('Page.captureScreenshot', { format: 'png' }).then((r) => r && r.data && fs.writeFileSync(path.join(OUT, 'update-restarting.png'), Buffer.from(r.data, 'base64')));
   // the dashboard restarts on the same port; the page reloads by itself
   let back = null; for (let i = 0; i < 80; i++) { await wait(250); try { const j = await (await fetch(`http://127.0.0.1:${dp}/api/update`)).json(); if (j.pid && j.pid !== dash.pid) { back = j; break; } } catch {} }
