@@ -19,7 +19,7 @@
 //                                  --resume: continue a paused/stopped/failed lane in place, same id and step count,
 //                                  plus the lead's notes from tasks/<task>.resume.md if present)
 //        ca status [--json] [--all]        table of lanes (--json adds id, task, repo, result, progress)
-//        ca wait <lane...> [--timeout S] [--json] [--quiet]  block until lanes end; exit = worst lane
+//        ca wait <lane...> [--any] [--timeout S] [--json] [--quiet]  block until lanes end (--any: first); exit = worst lane
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
@@ -158,6 +158,34 @@ function workerShell() {
   const cands = [process.env.CA_SHELL, (process.env.SHELL || '').replace(/\\usr\\bin\\bash\.exe$/i, '\\bin\\bash.exe'),
     path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe')];
   return cands.find((c) => c && /\\bin\\bash\.exe$/i.test(c) && !/\\usr\\bin\\/i.test(c) && fs.existsSync(c)) || process.env.SHELL;
+}
+// A repo a lane cannot write to (Windows Controlled Folder Access, a sandbox ACL, a read-only disk)
+// fails every commit, so a fix round can never help: probe the repo root, the git dir and a lock file
+// in the git dir through the worker shell (Git Bash) before a lane starts. The git dir comes from
+// `git rev-parse --absolute-git-dir`, so a worktree probes its own .git/worktrees/<name> dir. Returns
+// { ok, where, error } with error the first line of the failing output. CA_WRITE_PROBE_FAIL=1 forces a
+// failure for tests.
+function writeProbe(repo) {
+  if (String(process.env.CA_WRITE_PROBE_FAIL || '') === '1') return { ok: false, where: 'write probe (test hook)', error: 'CA_WRITE_PROBE_FAIL=1 forces a write failure' };
+  const sh = workerShell();
+  const shell = sh && fs.existsSync(sh) ? sh : (process.platform === 'win32' ? 'bash' : (process.env.SHELL || 'sh'));
+  // A folder that is not a git repo yet is fine (onboard or git init makes it one): probe only its root.
+  const gitdir = git(repo, 'rev-parse', '--absolute-git-dir');
+  const spots = [
+    { where: `repo root (${repo})`, file: path.join(repo, '.ca-write-probe') },
+    ...(gitdir ? [{ where: `git dir (${gitdir})`, file: path.join(gitdir, '.ca-write-probe') },
+      { where: `git dir lock (${gitdir})`, file: path.join(gitdir, 'ca-probe.lock') }] : []),
+  ];
+  for (const s of spots) {
+    const f = String(s.file).replace(/\\/g, '/');
+    const r = spawnSync(shell, ['-c', `: > "${f}" && rm -f "${f}"`], { cwd: repo, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+    if (r.status !== 0) {
+      const out = String((r.stderr || '') + (r.stdout || '')).trim();
+      const first = out.split(/\r?\n/).find((l) => l.trim()) || (r.error ? String(r.error.message) : `exit ${r.status}`);
+      return { ok: false, where: s.where, error: first };
+    }
+  }
+  return { ok: true, where: '', error: '' };
 }
 // Huawei Cloud ModelArts MaaS as a CodeArts custom provider ("maas/<model>"). CodeArts only
 // enables providers named in CUSTOM_PROVIDER_KEYS; the config goes in OPENCODE_CONFIG_CONTENT
@@ -799,6 +827,14 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   async function gates() {
     const d = dirty();
     if (d.length) {
+      // A dirty tree that cannot be written is a blocked disk, not a code problem: the worker can never
+      // commit it, so end the build loop at once (no fix round) with the same reason as the start probe.
+      const wp = writeProbe(repo);
+      if (!wp.ok) {
+        const why = `repo not writable: ${wp.where}: ${wp.error}`;
+        S.gates.push({ at: now(), gate: 'repo writable', ok: false, detail: why }); L(`== gate repo writable: FAIL (${why})`);
+        return { ok: false, write: true, what: 'repo writable', reason: why };
+      }
       S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: d.slice(0, 5).join(', ') }); L(`== gate git clean: FAIL (${d.length} changed)`);
       return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` };
     }
@@ -851,6 +887,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   let exitCode = 1, reason = '', review = null, forcedResult = '';
   server.events(onEvent, (up) => { S.sse = up; }).catch(() => {});
   try {
+    // Probe before the codearts server: a repo the lane cannot write to will fail every commit, so end
+    // the lane at once as failed instead of starting a server and spending model calls on a blocked disk.
+    const wp = writeProbe(repo);
+    if (!wp.ok) { L(`  ! repo not writable: ${wp.where}: ${wp.error}`); throw Object.assign(new Error('repo not writable'), { caWrite: true, where: wp.where, wpError: wp.error }); }
     say(`lane ${id}: starting codearts server in ${repo}`);
     await server.start();
     S.server = { url: server.url, pw: server.pw, pid: server.child.pid, version: server.version }; save(true);
@@ -890,6 +930,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('gate', 'running gates');
       const g = await gates();
       if (g.ok) { reason = ''; exitCode = 0; break; }
+      // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
+      if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`repo not writable; no fix round (${g.what})`); break; }
       // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
       // repair the machine), but a human must look, so exit 4 like needs review.
       if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
@@ -932,7 +974,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     }
   } catch (err) {
     forcedResult = '';
-    if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
+    if (err && err.caWrite) { reason = `repo not writable: ${err.where}: ${err.wpError}`; exitCode = 1; L(`! ${reason}`); }
+    else if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
     else if (err && err.caStop) { reason = 'stopped'; exitCode = 1; L('== stopped while queued for a model slot'); }
     else { reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`); }
   }
@@ -1458,11 +1501,14 @@ const exitRank = (c) => ({ 1: 4, 3: 3, 5: 2, 4: 1 }[c] ?? 0);
 const worstExit = (codes) => codes.reduce((a, b) => (exitRank(b) > exitRank(a) ? b : a), 0);
 async function cmdWait(args) {
   const asJson = args.includes('--json'); const quiet = args.includes('--quiet');
+  // --any returns as soon as one lane has a result, so a lead watching parallel lanes sees an early
+  // failure at once instead of waiting for the slowest lane. Others are listed as still running.
+  const any = args.includes('--any');
   const ti = args.indexOf('--timeout');
   const timeoutS = ti >= 0 ? Number(args[ti + 1]) : NaN;
-  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--timeout S] [--json] [--quiet]', 2);
+  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--quiet]', 2);
   const qs = args.filter((a, i) => !a.startsWith('--') && !(ti >= 0 && i === ti + 1));
-  if (!qs.length) die('usage: ca wait <lane...> [--timeout S] [--json] [--quiet]', 2);
+  if (!qs.length) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--quiet]', 2);
   const targets = qs.map((q) => findLane(q)); // resolve every lane first: unknown -> exit 2
   const deadline = Number.isFinite(timeoutS) && timeoutS > 0 ? now() + timeoutS * 1000 : Infinity;
   const last = new Map(); let lastBeat = 0;
@@ -1481,11 +1527,14 @@ async function cmdWait(args) {
       const key = `${health(s)}|${s.phase}|${pg.current?.n ?? ''}`;
       if (last.get(l.id) !== key) { last.set(l.id, key); if (!quiet) note(l, s); }
     }
-    if (states.every(({ s }) => s.result)) {
-      const objs = states.map(({ l, s }) => ({ lane: l.id, result: s.result, status: laneStatusOf(l, s), verdict: s.verdict || '', exit: laneExit(s),
+    const finished = states.filter(({ s }) => s.result);
+    if (any ? finished.length > 0 : states.every(({ s }) => s.result)) {
+      const objs = finished.map(({ l, s }) => ({ lane: l.id, result: s.result, status: laneStatusOf(l, s), verdict: s.verdict || '', exit: laneExit(s),
         summaryPath: fs.existsSync(path.join(l.dir, 'summary.md')) ? path.join(l.dir, 'summary.md') : null }));
+      const running = states.filter(({ s }) => !s.result).map(({ l }) => l);
       for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
-      if (asJson) process.stdout.write(JSON.stringify({ lanes: objs }) + '\n');
+      if (asJson) process.stdout.write(JSON.stringify(any ? { lanes: objs, any: true, running: running.map(statusRow) } : { lanes: objs }) + '\n');
+      else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
     }
     if (now() >= deadline) {
@@ -1557,6 +1606,13 @@ async function doctorData(repoArg) {
   const sh = workerShell();
   const shOk = !!(sh && fs.existsSync(sh));
   add('shell', shOk ? 'ok' : 'fail', sh || 'no SHELL set', shOk ? '' : 'set SHELL or CA_SHELL to Git bash (Git\\bin\\bash.exe)');
+
+  // A repo the lane cannot write to fails every commit, so nothing else works: fail the row hard.
+  const wp = writeProbe(repo);
+  add('repo writable', wp.ok ? 'ok' : 'fail', wp.ok ? `wrote and removed a probe in ${repo}` : `${wp.where}: ${wp.error}`,
+    wp.ok ? '' : process.platform === 'win32'
+      ? 'Windows Controlled Folder Access or a sandbox ACL is blocking writes: allow git, Git Bash and node in Defender (Controlled Folder Access, Allow an app) or move the repo out of Documents'
+      : 'check the folder permissions');
 
   try {
     const r = await fetch(`${dashUrl()}/api/lanes`, { signal: AbortSignal.timeout(1500) });

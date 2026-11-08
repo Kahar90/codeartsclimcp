@@ -26,6 +26,13 @@ not a heartbeat, and never paste private reasoning or chat.
   `ca_note {now: true, phase: 'asking', text: '<the question in one line>'}`; when work resumes,
   post the next phase. The dashboard shows it as Needs you.
 
+Preflight: run `ca_doctor` before the first lane. A `repo writable` fail row stops everything (on
+Windows allow git, Git Bash and node in Defender's Controlled Folder Access, or move the repo out of
+Documents), otherwise every commit fails.
+
+Run: in `ca_wait`, wait with `any: true` when lanes run in parallel, so an early failure is seen at
+once (the finished lanes come back, the rest as still running).
+
 If those tools are missing, the server is not connected: tell the user to run
 `ca onboard --yes --harness claude` once and restart Claude Code (or `/mcp` to reconnect). Until
 then the same steps work from the shell with the `ca` CLI (`ca doctor`, `ca init`,
