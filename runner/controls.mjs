@@ -133,7 +133,7 @@ export function withStatusFields(o, { res, handled, closed } = {}) {
   if (o.key === 'failed' || o.key === 'checks failing' || o.key === 'killed') glyph = GLYPHS.failed;
   else if (attention) glyph = GLYPHS['needs-you'];
   else if (o.key === 'running' || o.key === 'planned') glyph = GLYPHS.working;
-  else if (o.key === 'done' || o.key === 'verified' || (o.key === 'handled' && !stoppedHandled)) glyph = GLYPHS.done;
+  else if (o.key === 'done' || o.key === 'verified' || (o.key === 'handled' && (!stoppedHandled || o.label === 'Merged'))) glyph = GLYPHS.done;
   else glyph = GLYPHS.idle;
   return { ...o, attention, steps, glyph };
 }
