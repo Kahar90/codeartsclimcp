@@ -572,7 +572,7 @@ function shownGlance() {
 }
 // Needs-you lanes in the current view: the tab title keeps their count when it is above zero.
 function viewNeedsYou() {
-  const attn = (l) => laneBucket(l) === 'attention';
+  const attn = laneAttention;
   if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id) || curPlan; return p ? p.waves.flatMap((w) => w.lanes).filter(attn).length : 0; }
   if (route.kind === 'lane') { const l = lanes.find((x) => x.id === route.id) || (detail && detail.id === route.id ? detail : null); return l && attn(l) ? 1 : 0; }
   return lanes.filter(attn).length;
@@ -642,6 +642,7 @@ function glanceSig() { const s = shownGlance(); return s ? `${s.plan.id}:${s.gla
 // ---------- demo fixture (?demo=1): one fetch-layer swap used for every /api call ----------
 const DEMO = new URLSearchParams(location.search).has('demo');
 const DEMO_ADV = DEMO && new URLSearchParams(location.search).has('advance'); // check hook: office-layout step 1 finishes 6 s after load
+const DEMO_CLOSED = DEMO && new URLSearchParams(location.search).has('closed'); // check hook: add the closed plan "Glance status" (kept out of ?demo=1 so the older checks keep their counts)
 const DEMO_T0 = Date.now();
 const dIso = (m) => new Date(DEMO_T0 - m * 60000).toISOString();
 const dAdv = () => DEMO_ADV && Date.now() - DEMO_T0 > 6000;
@@ -720,13 +721,19 @@ function demoLanes() {
     dLane('demo-repo--unverified', 'unverified', { bucket: 'attention', bucketWhy: "checks couldn't run: node --check runner/ca.mjs (exit 127)", project: D_PROJ_B, health: 'unverified', phase: 'finished', result: 'unverified', reason: "checks couldn't run: node --check runner/ca.mjs (exit 127)", status: { key: 'unverified', label: 'Unverified', tone: 'warn', reason: "checks couldn't run: node --check runner/ca.mjs (exit 127)" }, elapsed: '4m 12s', commits: '3/3', ...dTokBy(dTok(9000, 1200), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 420000, progress: { done: 3, total: 3, current: null } }),
     dLane('demo-repo--checks-failing', 'checks-failing', { bucket: 'attention', bucketWhy: 'checks failing: node checks/assets.check.mjs (exit 1)', project: D_PROJ_B, health: 'checks failing', phase: 'finished', result: 'checks failing', reason: 'checks failing: node checks/assets.check.mjs (exit 1)', status: { key: 'checks failing', label: 'Checks failing', tone: 'bad', reason: 'checks failing: node checks/assets.check.mjs (exit 1)' }, elapsed: '6m 40s', commits: '4/4', ...dTokBy(dTok(11000, 1800), dTok(900, 120), dTok(0, 0)), actions: ['resume'], suggest: 'resume', why: 'resume gives the worker another fix round', finishedAt: DEMO_T0 - 300000, progress: { done: 4, total: 4, current: null } }),
     dLane('demo-repo--merged', 'merged', { bucket: 'ended', bucketWhy: 'merged by the lead', project: D_PROJ_A, health: 'done', phase: 'finished', result: 'done', verdict: 'ready', status: { key: 'handled', label: 'Merged', tone: 'done', reason: 'merged by the lead' }, elapsed: '9m 20s', commits: '5/5', ...dTokBy(dTok(14000, 2600), dTok(1100, 200), dTok(0, 0)), actions: [], suggest: '', why: '', handled: true, finishedAt: DEMO_T0 - 1500000, progress: { done: 5, total: 5, current: null } }),
-  ].filter((l) => !demoRemoved.has(l.id) && !gone.has(l.id));
-  for (const l of ls) {
+  ];
+  if (DEMO_CLOSED) ls.push(
+    dLane('demo-repo--glance-merged', 'merged', { bucket: 'ended', bucketWhy: 'merged by the lead', project: D_PROJ_A, health: 'done', phase: 'finished', result: 'done', verdict: 'ready', status: { key: 'handled', label: 'Merged', tone: 'done', reason: 'merged by the lead' }, elapsed: '12m 08s', commits: '6/6', ...dTokBy(dTok(18000, 2400), dTok(900, 150), dTok(0, 0)), actions: [], suggest: '', why: '', handled: true, seen: true, finishedAt: DEMO_T0 - 320000, progress: { done: 6, total: 6, current: null } }),
+    dLane('demo-repo--glance-handled', 'handled', { bucket: 'ended', bucketWhy: 'handled by the lead', project: D_PROJ_A, health: 'stopped', phase: 'finished', result: 'stopped', reason: 'handled by the lead', status: { key: 'handled', label: 'Handled by lead', tone: 'done', reason: 'handled by the lead' }, elapsed: '4m 30s', commits: '1/3', ...dTokBy(dTok(7000, 900), dTok(400, 60), dTok(0, 0)), actions: [], suggest: '', why: '', handled: true, seen: true, finishedAt: DEMO_T0 - 900000, progress: { done: 1, total: 3, current: null } }),
+    dLane('demo-repo--glance-stopped', 'stopped', { bucket: 'ended', bucketWhy: 'stopped by the lead', project: D_PROJ_A, health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the lead', status: { key: 'stopped', label: 'Stopped by lead', tone: 'idle', reason: 'stopped by the lead' }, elapsed: '2m 10s', commits: '0/2', ...dTokBy(dTok(1500, 120), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', seen: true, finishedAt: DEMO_T0 - 1200000, progress: { done: 0, total: 2, current: null } }),
+  );
+  const kept = ls.filter((l) => !demoRemoved.has(l.id) && !gone.has(l.id));
+  for (const l of kept) {
     l.seen = dSeen.has(l.id);
     // same rule as the server: a finished needs-you lane marked handled reads as ended
     if (l.seen && l.bucket === 'attention' && l.result) { l.handled = true; l.bucketWhy = `handled (was ${l.bucketWhy})`; l.bucket = 'ended'; l.suggest = ''; }
   }
-  return ls;
+  return kept;
 }
 function demoPlans() {
   const by = Object.fromEntries(demoLanes().map((l) => [l.id, l]));
@@ -759,6 +766,19 @@ function demoPlans() {
         wp('demo-repo--stuck', { model: 'maas/glm-5.3', why: 'Recover the stalled turn', files: ['runner/sandbox.mjs'], briefExists: true }),
       ] }] },
   ];
+  // The closed plan "Glance status" (check hook ?demo=1&closed=1): every lane settled, so nothing needs
+  // the human; the plan badge reads Done and each lane keeps its own steps mode (complete or hide).
+  if (DEMO_CLOSED) list.push({ id: 'glance-status', file: 'D:/Coding/demo-repo/tasks/glance.json', updatedAt: dIso(6), title: 'Glance status',
+    goal: 'Show one truthful status per plan and lane, so a glance never disagrees.',
+    lead: 'Claude Opus 5.5', status: 'done', closed: true, glance: { state: 'done', word: 'Done', detail: 'the lead closed the plan after every lane settled', at: dIso(5) },
+    now: 'Every lane settled; the lead closed the plan.',
+    next: [{ text: 'Archive the plan', done: true }], risks: [], decisions: [{ at: dIso(180), text: 'Close the plan once every lane is handled, merged or stopped.' }],
+    ...planTokSum([by['demo-repo--glance-merged'], by['demo-repo--glance-handled'], by['demo-repo--glance-stopped']]),
+    waves: [{ name: 'Wave 1 · Cleanup', note: '', status: 'done', lanes: [
+      wp('demo-repo--glance-merged', { model: 'maas/glm-5.3', why: 'Merge the finished lane', files: ['runner/dash.html'], briefExists: true }),
+      wp('demo-repo--glance-handled', { model: 'maas/glm-5.3', why: 'Handle the stopped lane', files: ['runner/dash.html'], briefExists: true }),
+      wp('demo-repo--glance-stopped', { model: 'maas/glm-5.3', why: 'Stop the stale lane', files: ['runner/dash.html'], briefExists: true }),
+    ] }] });
   const force = demoGlanceForce();
   if (force) {
     const first = list.find((p) => p.id === 'office-polish') || list[0];
@@ -813,6 +833,15 @@ function demoDetail(id) {
       outside: [{ at: dIso(12), tool: 'edit', path: 'C:/elsewhere/notes.txt' }],
       verdict: 'needs fixes', review: D_REVIEW_CHAOS, summary: D_SUMMARY_CHAOS,
       brief: dBrief('chaos', 'Add motion to the Office view with reduced-motion fallbacks.', ['Motion brief', 'Intro tilt', 'Hover lift', 'Reduced motion fades'], ['node checks/office.check.mjs']) },
+    // The closed plan lanes keep a full step list on their detail page even though the card hides the
+    // step bar (status.steps === 'hide'): the check asserts exactly that pair.
+    'demo-repo--glance-merged': { steps: dSteps(['Read the cleanup brief', 'Merge the finished lane', 'Confirm the check is green', 'Update the plan file', 'Commit the merge', 'Ping the lead'], 6, 0, true), files: ['runner/dash.html'], checks: ['node checks/lanestruth.check.mjs'],
+      commits: [{ hash: 'a1b2c3d', subject: 'step 6 commit the merge' }], verdict: 'ready', summary: '## Summary\n\nMerged the finished lane into main.',
+      brief: dBrief('merged', 'Merge the finished lane into main.', ['Read the cleanup brief', 'Merge the finished lane', 'Confirm the check is green', 'Update the plan file', 'Commit the merge', 'Ping the lead'], ['node checks/lanestruth.check.mjs']) },
+    'demo-repo--glance-handled': { steps: dSteps(['Read the brief', 'Draft the change', 'Hand it back to the lead'], 1, 0, true), files: ['runner/dash.html'], checks: [],
+      brief: dBrief('handled', 'Hand the stopped lane back to the lead when the plan closes.', ['Read the brief', 'Draft the change', 'Hand it back to the lead'], []) },
+    'demo-repo--glance-stopped': { steps: dSteps(['Open the stale lane', 'Stop the work and note why'], 0, 0, true), files: [], checks: [],
+      brief: dBrief('stopped', 'Stop the stale lane.', ['Open the stale lane', 'Stop the work and note why'], []) },
   };
   return { ...base, ...(sets[l.id] || {}) };
 }
@@ -1019,9 +1048,50 @@ function laneBucket(l) {
   if (r === 'done' || r === 'continued') return 'done';
   return 'ended';
 }
+// ---------- lane truth (status-contract part 1) ----------
+// The server sends lane.status.attention, .steps and .glyph; an older payload omits them, so derive the
+// same values from the lane. attention marks the lanes a human must act on (the Needs you set);
+// steps is live (running/planned), complete (done/verified/merged) or hide (everything else).
+const LANE_GLYPH = { working: '\u25CF', needs: '!', failed: '\u2715', done: '\u2713', idle: '\u2013' };
+function laneAttention(l) { const s = l && l.status; return (s && typeof s.attention === 'boolean') ? s.attention : laneBucket(l) === 'attention'; }
+function laneStepsMode(l) {
+  const s = l && l.status; if (s && s.steps) return s.steps;
+  if (l && (l.running || l.health === 'planned')) return 'live';
+  if (['done', 'verified'].includes(String((l && l.result) || ''))) return 'complete';
+  if (s && s.label === 'Merged') return 'complete';
+  return 'hide';
+}
+function laneGlyphOf(l) {
+  const s = l && l.status; if (s && s.glyph) return s.glyph;
+  if (l && l.running) return LANE_GLYPH.working;
+  const r = String((l && l.result) || '').toLowerCase();
+  if (laneBucket(l) === 'attention') return (r === 'failed' || r === 'checks failing') ? LANE_GLYPH.failed : LANE_GLYPH.needs;
+  if (['done', 'verified'].includes(r) || (s && s.label === 'Merged')) return LANE_GLYPH.done;
+  return LANE_GLYPH.idle;
+}
+// The status label with its glyph; an attention lane always takes the needs-you colour.
+function laneBadge(l) {
+  const st = CAUI.laneStatus(l), tone = laneAttention(l) ? 'bad' : (st.tone || st.key || 'idle');
+  return `<span class="ca-badge s-${esc(tone)}" title="${esc(st.label)}"><span class="gb" aria-hidden="true">${esc(laneGlyphOf(l))}</span>${esc(st.label)}</span>`;
+}
+// The step bar and fraction. A live lane shows "d/t steps", a complete lane a full bar with "t/t" and a
+// check, a settled (hide) lane shows neither on the card (its detail page still lists the steps).
+function laneStepsCard(l) {
+  const mode = laneStepsMode(l), p = l.progress || {}, n = p.total || 0;
+  if (mode === 'hide') return '';
+  if (mode === 'complete') return `<div class="lane-steps"><span>${laneGlyphOf(l)} ${n}/${n} steps</span>${prog(p, l.result)}</div>`;
+  return `<div class="lane-steps"><span>${n ? `${p.done || 0}/${n} steps` : 'no numbered steps'}</span>${prog(p, l.result)}</div>`;
+}
+function laneStepsFoot(l) {
+  const mode = laneStepsMode(l), p = l.progress || {}, n = p.total || 0;
+  if (mode === 'hide') return '';
+  if (mode === 'complete') return `${prog(p, l.result)}<span class="cr-meta">${laneGlyphOf(l)} ${n}/${n} steps</span>`;
+  return `${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${n} steps</span>`;
+}
 // Small localStorage helpers: a remembered control room never throws on a locked-down browser.
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+let glanceOn = lsGet('ca.glance', 'on') !== 'off'; // the glance banner on/off, shared with the Office page via localStorage
 let crFilter = lsGet('ca-cr-filter', '') || ''; // '' = show all; a bucket key filters the list
 let crProject = lsGet('ca-cr-project', '') || ''; // '' = all projects; else a project key
 let crGroup = lsGet('ca-cr-group', 'status') === 'project' ? 'project' : 'status';
@@ -1034,7 +1104,7 @@ const crIsOld = (l) => !!l.result && !!l.finishedAt && (Date.now() - new Date(l.
 const crOldLanes = (list) => list.filter(crIsOld);
 function crCounts() {
   const c = { attention: 0, running: 0, done: 0, ended: 0 };
-  for (const l of lanes) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; }
+  for (const l of lanes) { if (laneAttention(l)) { c.attention++; continue; } const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; }
   return c;
 }
 function crMeta(key) { return CR_BUCKETS.find((x) => x.key === key) || CR_BUCKETS[3]; }
@@ -1071,13 +1141,13 @@ function crRow(l) {
   return `<div class="cr-row" data-lane="${esc(l.id)}">
     <div class="cr-row-top">${crBadge(b)}${proj ? `<span class="chip">${esc(proj)}</span>` : ''}<a class="cr-task" href="${href}">${esc(l.task)}</a><span class="cr-time">${crTime(l)}</span><a class="cr-open" href="${href}" aria-label="Open ${esc(l.task)}" title="Open ${esc(l.task)}"><svg class="ca-ico" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4l5 5-5 5"/></svg></a></div>
     ${why ? `<div class="cr-why">${esc(why)}</div>` : ''}
-    <div class="cr-row-foot">${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${p.total || 0} steps</span><span class="cr-meta">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</span>${sug}${seenBtn}</div>
+    <div class="cr-row-foot">${laneStepsFoot(l)}<span class="cr-meta">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</span>${sug}${seenBtn}</div>
   </div>`;
 }
 const projKey = (l) => (l.project && l.project.key) || '';
 const projName = (l) => (l.project && (l.project.name || l.project.key)) || '';
 function crProjectKeys() { const m = new Map(); for (const l of lanes) { const k = projKey(l); if (k && !m.has(k)) m.set(k, projName(l)); } return m; }
-function crBucketCounts(list) { const c = { attention: 0, running: 0, done: 0, ended: 0 }; for (const l of list) { const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; } return c; }
+function crBucketCounts(list) { const c = { attention: 0, running: 0, done: 0, ended: 0 }; for (const l of list) { if (laneAttention(l)) { c.attention++; continue; } const b = laneBucket(l); if (b === 'done') { if (!l.seen) c.done++; } else if (c[b] != null) c[b]++; } return c; }
 function crModels() {
   const by = {};
   for (const l of lanes) for (const [m, e] of Object.entries(l.tokensByModel || {})) {
@@ -1120,7 +1190,7 @@ function renderControl() {
   const shown = lanes.filter((l) => (!crFilter || laneBucket(l) === crFilter) && (!crProject || projKey(l) === crProject));
   const tiles = CR_BUCKETS.map((b) => crTile(b, c[b.key] || 0)).join('');
   const chips = `<button type="button" class="cr-chip${crProject === '' ? ' on' : ''}" data-crproj="" aria-pressed="${crProject === ''}">All projects</button>` +
-    [...crProjectKeys()].map(([k, n]) => { const a = lanes.filter((l) => projKey(l) === k && laneBucket(l) === 'attention').length; return `<button type="button" class="cr-chip${crProject === k ? ' on' : ''}" data-crproj="${esc(k)}" aria-pressed="${crProject === k}">${esc(n)}${a ? ` <span class="ca-badge s-bad">${a}</span>` : ''}</button>`; }).join('');
+    [...crProjectKeys()].map(([k, n]) => { const a = lanes.filter((l) => projKey(l) === k && laneAttention(l)).length; return `<button type="button" class="cr-chip${crProject === k ? ' on' : ''}" data-crproj="${esc(k)}" aria-pressed="${crProject === k}">${esc(n)}${a ? ` <span class="ca-badge s-bad">${a}</span>` : ''}</button>`; }).join('');
   const groups = ['status', 'project'].map((g) => `<button type="button" class="cr-gbtn${crGroup === g ? ' on' : ''}" data-crgroup="${g}" aria-pressed="${crGroup === g}">${g === 'status' ? 'By status' : 'By project'}</button>`).join('');
   const body = crGroup === 'project' ? crProjectView(shown) : crStatusView(shown);
   const html = `<div class="pad">
@@ -1156,7 +1226,7 @@ async function setSeen(id, seen, note = '') {
 // then the same ack POST the per-row Mark handled button makes, once per lane. An error on one lane never
 // stops the others; failures are listed in the toast.
 async function markAllStale() {
-  const old = lanes.filter((l) => laneBucket(l) === 'attention' && crIsOld(l));
+  const old = lanes.filter((l) => laneAttention(l) && crIsOld(l));
   if (!old.length) return;
   const note = window.prompt(`Mark all ${old.length} lanes older than 2 days handled. Note (optional):`, '');
   if (note === null) return;
@@ -1215,8 +1285,8 @@ function renderRail() {
   const loose = lanes.filter((l) => !inPlan.has(l.id));
   const sel = (kind, id) => route.kind === kind && route.id === id ? ' sel' : '';
   const dot = (st) => `<span class="ca-dot s-${st.key}"></span>`;
-  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${CAUI.badge(CAUI.laneStatus(l))}${delBtn('lane', l.id, `Delete lane ${l.task}`, l.running)}</div>`;
-  const attention = lanes.filter((l) => laneBucket(l) === 'attention').length;
+  const row = (l) => `<div class="rail-fin${sel('lane', l.id)}" data-go="lane/${esc(l.id)}">${crDot(l.bucket || laneBucket(l))}<span class="nm">${esc(l.task)}</span>${laneBadge(l)}${delBtn('lane', l.id, `Delete lane ${l.task}`, l.running)}</div>`;
+  const attention = lanes.filter(laneAttention).length;
   let h = `<div class="rail-card cr${route.kind === '' ? ' sel' : ''}" data-go="/">
     <div class="rail-row"><span class="ca-dot" style="color:var(--sel)"></span><span class="rail-title">Control room</span>${attention ? `<span class="ca-badge s-bad">${attention}</span>` : ''}</div>
     <div class="rail-sub">what needs you, running, done, ended</div></div>`;
@@ -1290,7 +1360,7 @@ function renderPlan(p) {
         <div class="lane-meta">${esc(short(l.models?.build || l.plan?.model || 'default model'))}${l.elapsed ? ' · ' + esc(l.elapsed) : ''}${l.commits ? ' · commits ' + esc(l.commits) : ''}</div>
         <div class="lane-tok" title="${esc(CAUI.tokenDetail(l.tokens))}">${CAUI.fmtTokens(CAUI.tokenTotal(l.tokens))} tokens</div>
         ${contLine(l)}
-        <div class="lane-steps"><span>${l.progress?.total ? `${l.progress.done}/${l.progress.total} steps` : 'no numbered steps'}</span>${prog(l.progress, l.result)}</div>
+        ${laneStepsCard(l)}
         ${curBand(l)}${stepsBlock(l)}
         ${l.suggest ? ctlBar(l, true) : ''}
       </div></div>`;
@@ -1797,7 +1867,7 @@ async function refresh(full) {
   catch { $('counts').textContent = 'dashboard server not reachable'; markStale(); return; }
   markFresh();
   $('counts').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`;
-  const attn = lanes.filter((l) => laneBucket(l) === 'attention').length;
+  const attn = lanes.filter(laneAttention).length;
   legacyTitle = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
   applyDocumentGlance(shownGlance());
   diffNotify();
