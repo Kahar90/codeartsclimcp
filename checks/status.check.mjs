@@ -48,7 +48,7 @@ if (C) {
   J('a worker breakdown reads Failed', lo({ s: { result: 'failed', reason: 'the worker crashed' } }), 'failed', 'Failed', 'bad');
   J('paused reads Paused', lo({ s: { result: 'paused' } }), 'paused', 'Paused', 'warn');
   J('stopped reads Stopped', lo({ s: { result: 'stopped' } }), 'stopped', 'Stopped', 'idle');
-  J('handled overrides a done lane', lo({ s: { result: 'done' }, handled: true, note: 'took it over by hand' }), 'handled', 'Handled', 'idle');
+  J('handled overrides a done lane', lo({ s: { result: 'done' }, handled: true, note: 'took it over by hand' }), 'handled', 'Handled by lead', 'idle');
   J('handled with a merge note reads Merged', lo({ s: { result: 'done' }, handled: true, note: 'merged by the lead' }), 'handled', 'Merged', 'done');
   J('handled overrides a failed lane', lo({ s: { result: 'failed' }, handled: true, note: 'merged into main' }), 'handled', 'Merged', 'done');
 }

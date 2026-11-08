@@ -78,7 +78,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
-import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck } from './controls.mjs';
+import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck, GLYPHS } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
 import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
@@ -852,7 +852,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
       S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
       if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
-      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check, and commit the fix.` }; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` }; }
       L(`== gate check ok (${dur(r.ms)})`);
     }
     return { ok: true };
@@ -1115,22 +1115,42 @@ const ackAt = (v) => (v && typeof v === 'object' ? v.at : v);
 function laneSeen(id, finishedAt) { return !!(finishedAt && ackAt(readAcks()[id]) === finishedAt); }
 function ackNote(id) { const v = readAcks()[id]; return v && typeof v === 'object' ? v.note || '' : ''; }
 function setAck(id, seen, finishedAt, note = '') { const a = { ...readAcks() }; if (seen && finishedAt) a[id] = note ? { at: finishedAt, note } : finishedAt; else delete a[id]; writeAcks(a); }
-// The bucket a person sees: a finished needs-you lane (failed, paused, needs review) that was marked handled moves to
-// ended until it finishes again. A DEAD or running lane can never be marked away: it needs resume or stop.
+// The bucket a person sees: any finished lane the lead acknowledged is handled, and a DEAD or running
+// lane can never be marked away (it needs resume or stop). The ended lanes of a closed plan are never
+// attention either: the lead closed the plan, so nothing is left for the human.
 function bucketFor(l) {
   const s = l.s; const r = laneBucket({ s, alive: alive(s.pid), health: health(s) });
-  if (r.bucket === 'attention' && s.result && laneSeen(l.id, s.finishedAt)) {
-    const note = ackNote(l.id); return { bucket: 'ended', reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
+  if (s.result && laneSeen(l.id, s.finishedAt)) {
+    const note = ackNote(l.id); return { bucket: r.bucket === 'attention' ? 'ended' : r.bucket, reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
   }
+  if (r.bucket === 'attention' && s.result && closedPlanLanes().has(l.id)) return { bucket: 'ended', reason: r.reason, handled: false };
   return r;
 }
 function bucketOf(l) { return bucketFor(l).bucket; }
+// Lane ids that belong to a closed plan: their ended lanes need nothing from the human. Cached by the
+// registered plans' ids and mtimes, so a poll over many lanes reads the plan files once.
+let closedLanes = { key: null, ids: new Set() };
+function closedPlanLanes() {
+  const rs = plans();
+  const key = rs.map((r) => `${r.id}:${r.mtime}`).join('|');
+  if (closedLanes.key === key) return closedLanes.ids;
+  const ids = new Set();
+  for (const r of rs) {
+    const p = readJSON(r.file) || {};
+    if (!planClosed(p)) continue;
+    const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+    for (const pl of p.lanes || []) { if (!pl || pl.removed) continue; ids.add(laneId(path.resolve(base, pl.repo || '.'), pl.task)); }
+  }
+  closedLanes = { key, ids };
+  return ids;
+}
 // The one status a person sees for this lane, shown the same way in the CLI, MCP and both views.
-// bucketFor already decides whether a finished needs-you lane was acknowledged (handled): pass
-// that through so an acked lane reads Handled (or Merged) and everything else keeps its own status.
+// bucketFor already decides whether a finished lane was acknowledged (handled) and whether the lane is
+// an ended lane of a closed plan; pass both through so the label and the attention flag agree everywhere.
 function laneStatusOf(l, s = l.s) {
   const r = bucketFor(l);
-  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '' });
+  const closed = !!s.result && closedPlanLanes().has(l.id);
+  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '', closed });
 }
 // Lane kind for the Office characters; the brief is read once per change (mtime), not on every poll.
 const kindCache = new Map();
@@ -1855,10 +1875,16 @@ async function cmdPlan(args) {
     return;
   }
   if (sub === 'update') {
-    const pi = args.indexOf('--patch'); const raw = pi >= 0 ? args[pi + 1] : undefined;
-    const q = args.slice(1).find((a) => !a.startsWith('--') && a !== raw);
-    if (!q || raw === undefined) die('usage: ca plan update <id> --patch <json>', 2);
-    let patch; try { patch = JSON.parse(raw); } catch { die(`--patch is not valid JSON: ${oneLine(raw, 80)}`, 2); }
+    // The patch comes from --patch <json>, --patch-file <file> or --patch - (JSON on stdin). The file
+    // and stdin forms exist because Windows PowerShell splits a JSON argument on its spaces.
+    const pi = args.indexOf('--patch'); const fi = args.indexOf('--patch-file');
+    let raw = pi >= 0 ? args[pi + 1] : undefined; let from = 'arg';
+    if (fi >= 0) { const f = args[fi + 1]; if (!f || f.startsWith('--')) die('usage: ca plan update <id> --patch-file <file>', 2); try { raw = fs.readFileSync(f, 'utf8'); } catch { die(`cannot read --patch-file ${f}`, 2); } from = 'file'; }
+    else if (raw === '-') { try { raw = fs.readFileSync(0, 'utf8'); } catch { die('cannot read the patch from stdin', 2); } from = 'stdin'; }
+    const skip = new Set([0]); if (pi >= 0) { skip.add(pi); skip.add(pi + 1); } if (fi >= 0) { skip.add(fi); skip.add(fi + 1); }
+    const q = args.filter((a, i) => !skip.has(i) && !a.startsWith('--'))[0];
+    if (!q || raw === undefined) die('usage: ca plan update <id> --patch <json> | --patch-file <file> | --patch -', 2);
+    let patch; try { patch = JSON.parse(raw); } catch { die(`--patch (${from}) is not valid JSON: ${oneLine(raw, 80)}`, 2); }
     validatePatch(patch);
     const r = findPlan(q); if (!r) die(`no registered plan matches "${q}"; ca plan list`, 2);
     const res = withPlanLock(r.file, () => {
@@ -2061,6 +2087,10 @@ const attnKey = (k) => ['checks failing', 'failed', 'unverified', 'stopped', 'ki
 // running, done, failed or waiting on them. Pure: it reads only the plan view it is handed.
 const QUIET_MS = 15 * 60e3;
 const GLANCE_WORD = { working: 'Working', 'needs-you': 'Needs you', failed: 'Failed', done: 'Done', quiet: 'Check Claude', idle: 'Idle' };
+// The tone and glyph a glance state maps to (status contract part 2): the plan badge is exactly the
+// glance word, tone and glyph, so every pill in both views shows the same thing (never a page guess).
+const GLANCE_TONE = { working: 'run', 'needs-you': 'warn', failed: 'bad', done: 'done', quiet: 'warn', idle: 'idle' };
+const GLANCE_GLYPH = { working: GLYPHS.working, 'needs-you': GLYPHS['needs-you'], failed: GLYPHS.failed, done: GLYPHS.done, quiet: '?', idle: GLYPHS.idle };
 const glanceBad = (k) => k === 'failed' || k === 'checks failing' || k === 'killed';
 const glanceDur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
 function glanceOf(view) {
@@ -2075,11 +2105,13 @@ function glanceOf(view) {
   const laneMs = Math.max(0, ...lanes.map((x) => Math.max(ms(x.finishedAt), ms(x.startedAt))));
   const atIso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null);
   const out = (state, detail, at = null) => ({ state, word: GLANCE_WORD[state], detail: oneLine(detail || '', 89), at });
-  // a. the plan is closed: a bad lane makes it failed, otherwise done.
+  // a. the plan is closed: a bad lane makes it failed, otherwise done. The detail is the close reason
+  // without a leading "Closed:" or "Done:" (status contract part 2).
   if (view.closed) {
     const bad = lanes.find((x) => glanceBad(statusKey(x)));
     if (bad) return out('failed', `${bad.task} failed: ${statusKey(bad)}`);
-    const reason = /^(Closed|Plan closed)/i.test(view.now || '') ? view.now : '';
+    const nowTxt = String(view.now || '');
+    const reason = /^\s*(Closed|Done|Plan closed)\b/i.test(nowTxt) ? nowTxt.replace(/^\s*(Closed|Done|Plan closed)\s*:\s*/i, '').trim() : '';
     return out('done', reason || `All ${(view.counts && view.counts.total) || lanes.length} lanes finished`, atIso(Math.max(leadMs, laneMs)));
   }
   // b. the lead ended its turn on a question for the human.
@@ -2120,11 +2152,11 @@ function planView(r) {
     if (!fs.existsSync(bf)) bf = path.join(base, 'tasks', `${pl.task}.md`);
     const old = l ? null : laneFromLog(path.join(base, 'tasks', `${pl.task}.lane.log`), { id, task: pl.task, repo, dir: path.join(repo, 'tasks', `${pl.task}.lane`) }, bf);
     const v = l ? laneView(l) : old ? { ...laneView(old), archived: true } : { id, task: pl.task, repo, health: 'planned', phase: 'planned', running: false, result: '',
-      status: { key: 'planned', label: 'Planned', tone: 'idle', reason: 'planned, not started' },
+      status: { key: 'planned', label: 'Planned', tone: 'idle', reason: 'planned, not started', attention: false, steps: 'live', glyph: GLYPHS.working },
       progress: { done: 0, total: briefSteps(bf).length, current: null } };
     // "dropped": true marks a planned lane the lead decided not to run; it never counts as open work.
     const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped',
-      status: { key: 'dropped', label: 'Dropped', tone: 'idle', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' },
+      status: { key: 'dropped', label: 'Dropped', tone: 'idle', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started', attention: false, steps: 'hide', glyph: GLYPHS.idle },
       reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
     if (pl.kind && ['code', 'art', 'review', 'docs'].includes(String(pl.kind).toLowerCase())) v.kind = String(pl.kind).toLowerCase(); // plan override
     return { ...v, ...d, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
@@ -2135,7 +2167,7 @@ function planView(r) {
     const old = pl.continues && byTask.get(pl.continues), nu = byTask.get(pl.task);
     if (old && nu && old.result && old.result !== 'done') {
       Object.assign(old, { health: 'continued', result: 'continued',
-        status: { key: 'continued', label: 'Continued', tone: 'idle', reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` },
+        status: { key: 'continued', label: 'Continued', tone: 'idle', reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}`, attention: false, steps: 'hide', glyph: GLYPHS.idle },
         continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
       // One agent, one station: the successor carries the earlier run(s); views show them as history, not as another lane.
       nu.continues = [...(old.continues || []), { id: old.id, task: old.task, reason: old.reason, commits: old.commits, progress: old.progress, elapsed: old.elapsed }];
@@ -2200,6 +2232,9 @@ function planView(r) {
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
   view.glance = glanceOf(view);
+  // The one badge every plan surface shows (status contract part 2): exactly the glance word, tone and
+  // glyph. The views render plan.badge, never a word they compute themselves.
+  view.badge = { word: view.glance.word, tone: GLANCE_TONE[view.glance.state] || 'idle', glyph: GLANCE_GLYPH[view.glance.state] || GLANCE_GLYPH.idle };
   return view;
 }
 function laneDetail(l) {
