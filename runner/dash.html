@@ -357,7 +357,8 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 /* ---------- glance: banner, rail dot, tab title and favicon ---------- */
 /* One state per plan (plan.glance), shown at a glance. Colours and breathing come from --glance,
    the state colour set inline from the contract's table. */
-.glance-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; box-sizing: border-box; margin: 0 0 16px; padding: 10px 16px; border-left: 6px solid var(--glance, var(--sel)); background: color-mix(in srgb, var(--glance, var(--sel)) 14%, var(--panel)); border-radius: var(--radius-sm) }
+.glance-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 6px 16px; border-left: 6px solid var(--glance, var(--sel)); background: color-mix(in srgb, var(--glance, var(--sel)) 14%, var(--panel)); border-radius: var(--radius-sm) }
+.pad.has-glance { padding-top: 10px }
 .glance-banner .glance-glyph { font: 700 28px/1 var(--font-display); color: var(--glance, var(--sel)); flex: none }
 .glance-banner .glance-word { font: 700 28px/1.1 var(--font-display); color: var(--fg); flex: none }
 .glance-banner .glance-detail { color: var(--muted); font-size: 13.5px; min-width: 0; overflow-wrap: anywhere }
@@ -552,14 +553,14 @@ function worstOpenGlance() {
 // The glance the current route shows: the plan's own glance, the worst over open plans on the Control
 // room, and on a lane detail the glance of the plan that owns the lane.
 function shownGlance() {
-  if (route.kind === 'plan') { const p = curPlan || plans.find((x) => x.id === route.id); const g = glanceOf(p); return g ? { plan: p, glance: g } : null; }
+  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id) || curPlan; const g = glanceOf(p); return g ? { plan: p, glance: g } : null; }
   if (route.kind === 'lane') { const p = plans.find((x) => x.waves.some((w) => w.lanes.some((l) => l.id === route.id))); const g = glanceOf(p); return g ? { plan: p, glance: g } : null; }
   return worstOpenGlance();
 }
 // Needs-you lanes in the current view: the tab title keeps their count when it is above zero.
 function viewNeedsYou() {
   const attn = (l) => laneBucket(l) === 'attention';
-  if (route.kind === 'plan') { const p = curPlan || plans.find((x) => x.id === route.id); return p ? p.waves.flatMap((w) => w.lanes).filter(attn).length : 0; }
+  if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id) || curPlan; return p ? p.waves.flatMap((w) => w.lanes).filter(attn).length : 0; }
   if (route.kind === 'lane') { const l = lanes.find((x) => x.id === route.id) || (detail && detail.id === route.id ? detail : null); return l && attn(l) ? 1 : 0; }
   return lanes.filter(attn).length;
 }
@@ -599,7 +600,7 @@ function setFavicon(url) {
   if (url) l.href = url;
 }
 function applyDocumentGlance(shown) {
-  document.title = glanceTitle(shown);
+  document.title = shown ? glanceTitle(shown) : legacyTitle;
   if (shown && shown.glance.state !== 'idle') setFavicon(faviconFor(shown.glance.state));
 }
 // The banner markup, shared by the plan home and the Control room. opts.link adds the plan title as a
@@ -644,6 +645,10 @@ const demoControls = []; // fixture log of kick/resume POSTs, read by the check 
 const demoRemoved = new Set(); // ids deleted in the fixture: a removed plan or lane never comes back
 // plan id -> its lane ids, so deleting a plan also drops its lanes from /api/lanes and the waves
 const D_PLAN_LANES = { 'office-polish': ['demo-repo--office-layout'], 'string-utils': ['demo-repo--string-utils', 'demo-repo--path-join', 'demo-repo--stuck'] };
+// Check hook (?demo=1&glance=<state>): force the first fixture plan's glance to done, failed or quiet.
+// Read live from location.search so a check can flip it at runtime with history.replaceState.
+const D_GLANCE_DETAIL = { done: 'All lanes finished', failed: 'Lane failed: checks failing', quiet: 'No lead update for 18m; Claude may be waiting on you' };
+function demoGlanceForce() { if (!DEMO) return ''; const s = (new URLSearchParams(location.search).get('glance') || '').trim(); return D_GLANCE_DETAIL[s] ? s : ''; }
 function dLane(id, task, o) {
   return Object.assign({ lane: id, id, task, repo: D_REPO, health: 'planned', phase: 'planned', elapsed: '', idle: '-', commits: '0/0',
     steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tokensBy: {}, actions: [], suggest: '', why: '', tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
@@ -716,7 +721,7 @@ function demoPlans() {
   const list = [
     { id: 'office-polish', file: 'D:/Coding/demo-repo/tasks/plan.json', updatedAt: dIso(4), title: 'Office view polish: sprites and layout',
       goal: 'Polish the Office view: sprite-driven layout, tight spacing and a check harness that screenshots both routes without real lanes.',
-      lead: 'Claude Opus 5.5', status: 'running',
+      lead: 'Claude Opus 5.5', status: 'running', glance: { state: 'working', word: 'Working', detail: 'Wave 1 building, step 1/7', at: dIso(3) },
       now: 'Wave 1 is laying out the stage; the fixture lane renders the new home for the check.',
       next: [{ text: 'Merge the office-layout worktree into main', done: true }, { text: 'Run the lanes check on both routes and read the screenshots', done: false }, { text: 'Copy the finished runner into the live skill folder', done: false }],
       risks: ['The sprite atlas doubles if we add a fifth role', 'Check runtime grows past 120 s when every assertion waits on a poll'],
@@ -729,7 +734,7 @@ function demoPlans() {
       waves: [{ name: 'Wave 1 · Layout', note: 'Stage geometry and the check hook', status: 'running', lanes: [wp('demo-repo--office-layout', { model: 'maas/glm-5.3', why: 'Owns the layout rework end to end', files: ['runner/dash.html', 'checks/lanes.check.mjs'], briefExists: true })] }] },
     { id: 'string-utils', file: 'D:/Coding/demo-repo/tasks/strings.json', updatedAt: dIso(2), title: 'String utils for sandbox',
       goal: 'Give the sandbox string helpers: formatting, path joins and escaping, each covered by a check.',
-      lead: 'Claude Opus 5.5', status: 'running',
+      lead: 'Claude Opus 5.5', status: 'running', glance: { state: 'needs-you', word: 'Needs you', detail: 'Claude is asking: keep the stuck lane or drop it?', at: dIso(1) },
       now: 'The first lane is in review-ready shape; the second is still building.',
       next: [{ text: 'Read the path-join verdict', done: true }, { text: 'Land string-utils once its check passes', done: false }],
       risks: ['Escaping rules differ between cmd and bash'],
@@ -741,6 +746,11 @@ function demoPlans() {
         wp('demo-repo--stuck', { model: 'maas/glm-5.3', why: 'Recover the stalled turn', files: ['runner/sandbox.mjs'], briefExists: true }),
       ] }] },
   ];
+  const force = demoGlanceForce();
+  if (force) {
+    const first = list.find((p) => p.id === 'office-polish') || list[0];
+    if (first) first.glance = { state: force, word: GLANCE[force].word, detail: D_GLANCE_DETAIL[force], at: dIso(1) };
+  }
   return list
     .filter((p) => !demoRemoved.has(p.id))
     .map((p) => ({ ...p, waves: p.waves.map((w) => ({ ...w, lanes: w.lanes.filter(Boolean) })) }));
@@ -1284,7 +1294,7 @@ function renderPlan(p) {
   const pRows = CAUI.tokenSplit(p.tokensBy);
   const planTokTitle = pRows.map((r) => `${r.label} ${CAUI.fmtTokens(r.total)}`).join(' / ');
   const glanceShown = glanceOf(p) ? { plan: p, glance: glanceOf(p) } : null;
-  const html = `<div class="pad">
+  const html = `<div class="pad${glanceShown ? ' has-glance' : ''}">
     ${glanceBannerHtml(glanceShown)}
     <div class="plan-head">
       <div class="plan-head-row"><h1>${esc(p.title)}</h1>${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
@@ -1694,7 +1704,9 @@ onboard: () => {
   const fails = rows.filter((r) => r.status === 'fail').length;
   const warns = rows.filter((r) => r.status === 'warn').length;
   return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
-}, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; },
+}, // Glance snapshot for the check harness: the state, word and detail the current view shows, plus the tab title and the favicon URL.
+glance: () => { const s = shownGlance(); const l = document.querySelector('link[rel="icon"]'); return { state: s ? s.glance.state : null, word: s ? glanceWord(s.glance) : '', detail: s ? (s.glance.detail || '') : '', title: document.title, favicon: l ? l.href : '' }; },
+fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; },
 // ids deleted in the fixture, for the check harness: a removed plan or lane never comes back
 removed: () => [...demoRemoved],
 // DOM writes per poll-rebuilt region: the hover check asserts these stop growing while nothing changed
@@ -1706,6 +1718,8 @@ let demoFailAt = 0; // check hook: window.__lanes.fail(true) forces every /api c
 let legacyTitle = 'Lanes'; // the aggregate title the check harness expects, kept even when a glance owns document.title
 let notifyOn = false, notifyPrimed = false;
 const notifyWas = new Map(); // laneId -> bucket at the previous poll, so we only notify on a change
+let glancePrimed = false;
+const glanceWas = new Map(); // planId -> glance state at the previous poll, so a plan's glance notifies once on a change
 const clockS = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 function setStale(since) {
   const el = $('stale'); if (!el) return;
@@ -1748,6 +1762,21 @@ function diffNotify() {
   }
   notifyWas.clear(); for (const l of lanes) notifyWas.set(l.id, laneBucket(l));
 }
+// Diff plan glances between polls by plan id: a plan whose glance turns done, needs-you or failed
+// notifies once, tagged by plan id and state. Primed on the first poll so the first load never notifies.
+function diffGlanceNotify() {
+  if (!glancePrimed) { glancePrimed = true; glanceWas.clear(); for (const p of plans) { const g = glanceOf(p); if (g) glanceWas.set(p.id, g.state); } return; }
+  if (notifyOn && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    for (const p of plans) {
+      const g = glanceOf(p); if (!g) continue;
+      const was = glanceWas.get(p.id);
+      if (was != null && was !== g.state && (g.state === 'done' || g.state === 'needs-you' || g.state === 'failed')) {
+        try { const n = new Notification(`${glanceWord(g)}: ${p.title}`, { body: g.detail || p.title, tag: `${p.id}:${g.state}` }); n.onclick = () => { window.focus(); location.hash = `#/plan/${encodeURIComponent(p.id)}`; }; } catch {}
+      }
+    }
+  }
+  glanceWas.clear(); for (const p of plans) { const g = glanceOf(p); if (g) glanceWas.set(p.id, g.state); }
+}
 function go(h) { location.hash = h; }
 function parseRoute() { const [k, ...r] = location.hash.slice(1).replace(/^\//, '').split('/'); return { kind: k, id: decodeURIComponent(r.join('/')) }; }
 async function refresh(full) {
@@ -1757,8 +1786,9 @@ async function refresh(full) {
   $('counts').textContent = `${plans.length} plan${plans.length === 1 ? '' : 's'} · ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`;
   const attn = lanes.filter((l) => laneBucket(l) === 'attention').length;
   legacyTitle = attn > 0 ? `(${attn}) Needs you · Lanes` : 'Lanes';
-  document.title = legacyTitle;
+  applyDocumentGlance(shownGlance());
   diffNotify();
+  diffGlanceNotify();
   renderRail();
   if (route.kind === 'plan') { const p = plans.find((x) => x.id === route.id); if (p) { curPlan = p; renderPlan(p); } else { viewSig = ''; $('view').innerHTML = '<div class="empty">Plan not found</div>'; } }
   else if (route.kind === 'lane') {
