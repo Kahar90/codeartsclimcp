@@ -18,9 +18,13 @@ prefix.
 
 Register the plan you are working to with `ca_plan` as soon as you start, and keep it current:
 `ca_plan_update` for a changed goal, next tasks or lanes, and `ca_note` (now true, with phase
-planning, building, waiting, verifying or done) for a meaningful transition. The plan is how the
-human follows the work in both dashboard views, so publish real scope changes and transitions, not
-a heartbeat, and never paste private reasoning or chat.
+planning, building, waiting, verifying, asking or done) for a meaningful transition. The plan is how
+the human follows the work in both dashboard views, so publish real scope changes and transitions,
+not a heartbeat, and never paste private reasoning or chat.
+
+- Before you end your turn to ask the human anything (a question, a choice, an approval), post
+  `ca_note {now: true, phase: 'asking', text: '<the question in one line>'}`; when work resumes,
+  post the next phase. The dashboard shows it as Needs you.
 
 If those tools are missing, the server is not connected: tell the user to run
 `ca onboard --yes --harness claude` once and restart Claude Code (or `/mcp` to reconnect). Until

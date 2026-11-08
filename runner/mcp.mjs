@@ -56,7 +56,7 @@ const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = [
   'You are the lead over CodeArts build lanes: the lanes are the workers.',
   'Run ca_doctor first and fix every fail row, write one brief per lane with ca_init, then start it with ca_lane_start.',
-  'Register the plan you are working to with ca_plan when you start, and keep it current: ca_plan_update for a changed goal, next tasks or lanes, and ca_note (now true, with phase planning, building, waiting, verifying or done) for a meaningful transition or progress. Publish real scope changes and transitions, not a heartbeat, and never paste private reasoning or chat.',
+  'Register the plan you are working to with ca_plan when you start, and keep it current: ca_plan_update for a changed goal, next tasks or lanes, and ca_note (now true, with phase planning, building, waiting, verifying, asking or done) for a meaningful transition or progress. Publish real scope changes and transitions, not a heartbeat, and never paste private reasoning or chat.',
   'Block on ca_wait instead of polling ca_status; exit 124 means still running, call it again.',
   'When a lane ends, read ca_summary, judge the reviewer findings against the brief and verify the work yourself by running the repo checks on the branch.',
   'Steer a running lane with ca_steer, kick a stuck turn with ca_kick, stop it with ca_stop, and continue a paused, failed, stopped or DEAD lane with ca_resume.',
@@ -402,14 +402,14 @@ const TOOLS = [
   },
   {
     name: 'ca_note',
-    description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use set_phase to report the lead phase (planning, building, waiting, verifying, done); a now note is timestamped and kept in a bounded recent-activity history the dashboard shows. Use it to keep the dashboard current while lanes run.',
+    description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use set_phase to report the lead phase (planning, building, waiting, verifying, asking, done); a now note is timestamped and kept in a bounded recent-activity history the dashboard shows. Use it to keep the dashboard current while lanes run.',
     inputSchema: {
       type: 'object',
       properties: {
         text: { type: 'string', description: 'the decision, or the current activity with now true' },
         now: { type: 'boolean', description: 'true: set the "lead is doing" line (timestamped) instead of appending a decision' },
         plan: { type: 'string', description: 'plan id to write to (default: the newest registered plan)' },
-        phase: { type: 'string', description: 'lead phase to report: planning, building, waiting, verifying or done' },
+        phase: { type: 'string', description: 'lead phase to report: planning, building, waiting, verifying, asking or done' },
       },
       required: ['text'],
     },

@@ -52,7 +52,7 @@
 //        ca plan update <id> --patch <json>   change plan fields (title, goal, now, status, phase, next, waves,
 //                                  lanes, risks); bumps revision and updatedAt; refuses unknown fields
 //        ca note [--now] [--plan <id>] [--phase <phase>] <text>   log a lead decision (--now: set the "lead is
-//                                  doing" line; --phase: planning|building|waiting|verifying|done)
+//                                  doing" line; --phase: planning|building|waiting|verifying|asking|done)
 //        ca lead-tokens [--plan id] [--session file]   point the plan at the lead's Claude transcript and print totals
 //        ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]
 //                                  report the lead's own token use on the plan (any harness; --add accumulates)
@@ -1749,7 +1749,7 @@ function openPlanFor(repo, task) {
   return null;
 }
 // The lead phase a note may report: a small closed set the views render as a badge.
-const LEAD_PHASES = ['planning', 'building', 'waiting', 'verifying', 'done'];
+const LEAD_PHASES = ['planning', 'building', 'waiting', 'verifying', 'asking', 'done'];
 // Bounded activity: keep only the newest entries so a long lead session cannot grow plan.json forever.
 const ACTIVITY_MAX = 20;
 function pushActivity(p, entry) {
@@ -2001,6 +2001,59 @@ const statusKey = (x) => (x && x.status && x.status.key) || (x && x.result) || '
 const settledKey = (k) => k === 'verified' || k === 'done' || k === 'handled';
 // Anything a human must look at, plus the ended-without-a-result states the old badge read the same way.
 const attnKey = (k) => ['checks failing', 'failed', 'unverified', 'stopped', 'killed'].includes(k);
+// One glance state per plan, so a person across the room can tell at once whether the work is
+// running, done, failed or waiting on them. Pure: it reads only the plan view it is handed.
+const QUIET_MS = 15 * 60e3;
+const GLANCE_WORD = { working: 'Working', 'needs-you': 'Needs you', failed: 'Failed', done: 'Done', quiet: 'Check Claude', idle: 'Idle' };
+const glanceBad = (k) => k === 'failed' || k === 'checks failing' || k === 'killed';
+const glanceDur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
+function glanceOf(view) {
+  const lanes = (view.waves || []).flatMap((w) => w.lanes || []).filter((x) => x.result !== 'dropped');
+  const lead = view.lead || {};
+  const phase = lead.phase || null;
+  const age = typeof lead.age === 'number' ? lead.age : null;
+  const act = Array.isArray(lead.activity) && lead.activity.length ? lead.activity[lead.activity.length - 1] : null;
+  const lastText = act && act.text ? act.text : '';
+  const leadMs = lead.updatedAt ? Date.parse(lead.updatedAt) : 0;
+  const ms = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : (Number.isFinite(Date.parse(v || '')) ? Date.parse(v) : 0));
+  const laneMs = Math.max(0, ...lanes.map((x) => Math.max(ms(x.finishedAt), ms(x.startedAt))));
+  const atIso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null);
+  const out = (state, detail, at = null) => ({ state, word: GLANCE_WORD[state], detail: oneLine(detail || '', 89), at });
+  // a. the plan is closed: a bad lane makes it failed, otherwise done.
+  if (view.closed) {
+    const bad = lanes.find((x) => glanceBad(statusKey(x)));
+    if (bad) return out('failed', `${bad.task} failed: ${statusKey(bad)}`);
+    const reason = /^(Closed|Plan closed)/i.test(view.now || '') ? view.now : '';
+    return out('done', reason || `All ${(view.counts && view.counts.total) || lanes.length} lanes finished`, atIso(Math.max(leadMs, laneMs)));
+  }
+  // b. the lead ended its turn on a question for the human.
+  if (phase === 'asking') return out('needs-you', `Claude is asking: ${lastText || view.now || ''}`, lead.nowAt || lead.updatedAt || null);
+  // c. the lead reports done.
+  if (phase === 'done') return out('done', lastText || 'Claude is done', atIso(Math.max(leadMs, laneMs)));
+  // d. a lane is running.
+  if (view.counts && view.counts.running > 0) {
+    const r = lanes.find((x) => x.running);
+    let detail = `${view.counts.running} of ${view.counts.total} lanes running`;
+    if (r && r.progress && r.progress.total > 0) detail += `, step ${r.progress.done}/${r.progress.total}`;
+    return out('working', detail);
+  }
+  // e. a fresh lead phase means the lead is still working.
+  if (age !== null && age < QUIET_MS && ['planning', 'building', 'waiting', 'verifying'].includes(phase)) return out('working', `Claude is ${phase}`);
+  // f. a lane needs a human: a bad one is failed, any other attention lane is needs-you.
+  const attn = lanes.filter((x) => attnKey(statusKey(x)));
+  if (attn.length) {
+    const bad = attn.find((x) => glanceBad(statusKey(x)));
+    if (bad) return out('failed', `${bad.task} failed: ${statusKey(bad)}`);
+    const a = attn[0];
+    return out('needs-you', `${a.task}: ${(a.status && a.status.label) || statusKey(a)}`);
+  }
+  // g. lanes or a lead phase exist but nothing is fresh or needs a human.
+  if (lanes.length || phase) {
+    return out('quiet', age === null ? 'No lead update yet; Claude may be waiting on you' : `No lead update for ${glanceDur(age)}; Claude may be waiting on you`);
+  }
+  // h. nothing to look at.
+  return out('idle', '');
+}
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
@@ -2086,10 +2139,12 @@ function planView(r) {
     revision: Number(p.revision) || 0, updatedAt: freshMs ? new Date(freshMs).toISOString() : null, nowAt: typeof p.nowAt === 'string' ? p.nowAt : null,
     age: freshMs ? Date.now() - freshMs : null,
     activity: Array.isArray(p.leadActivity) ? p.leadActivity.slice(-ACTIVITY_MAX) : [] };
-  return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
+  const view = { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
     state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead,
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
+  view.glance = glanceOf(view);
+  return view;
 }
 function laneDetail(l) {
   const s = l.s; const rd = (f) => { try { return fs.readFileSync(path.join(l.dir, f), 'utf8'); } catch { return ''; } };
