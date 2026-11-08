@@ -1211,7 +1211,7 @@ function renderRail() {
   h += plans.length ? plans.map((p) => {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
-      <div class="rail-row">${dot(st)}${glanceDot(p)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
+      <div class="rail-row">${p.glance ? glanceDot(p) : dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}${delBtn('plan', p.id, `Delete plan ${p.title}`)}</div>
       <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
