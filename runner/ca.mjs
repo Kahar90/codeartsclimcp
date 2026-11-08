@@ -779,9 +779,14 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     if (!parts.some((p) => same(p, dir))) parts.unshift(dir);
     return { ...process.env, [key]: parts.join(path.delimiter) };
   };
+  // Run the CHECK lines in the same shell the rest of the runner trusts. On Windows a bare 'bash'
+  // can resolve to WSL's /bin/bash, which does not see the Windows node on PATH (the error reads
+  // "/bin/bash: line 1: node: command not found"); workerShell() picks Git's bash, which inherits
+  // the Windows environment and finds the node that checkEnv() put on PATH.
+  const checkShell = () => { const s = workerShell(); return s && fs.existsSync(s) ? s : 'bash'; };
   const runCheck = (cmd) => new Promise((res) => {
     const t0 = now(); let out = '';
-    const ch = spawn('bash', ['-c', cmd], { cwd: repo, env: { ...checkEnv(), CA_LANE: id }, windowsHide: true });
+    const ch = spawn(checkShell(), ['-c', cmd], { cwd: repo, env: { ...checkEnv(), CA_LANE: id }, windowsHide: true });
     const timer = setTimeout(() => { out += `\n[runner: timed out after ${CFG.checkTimeout}s]`; killTree(ch.pid); }, CFG.checkTimeout * 1000);
     ch.stdout.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
     ch.stderr.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
