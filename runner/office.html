@@ -1737,7 +1737,19 @@ function setScrim(on) {
     scrimTimer = setTimeout(() => { if (!sc.classList.contains("show")) sc.hidden = true; }, 220);
   }
 }
+// A lane's steps come from /detail. Opening before they arrive placed a short window, then the steps
+// grew it and it jumped to a new spot: wait for the first detail (capped) so it opens once, at full size.
+let openSeq = 0;
 function openWin(id, anchor, kb) {
+  const seq = ++openSeq;
+  if (mode !== "demo" && id !== "lead" && !detailCache.has(id)) {
+    Promise.race([fetchDetail(id), new Promise((r) => setTimeout(r, 600))])
+      .then(() => { if (seq === openSeq) showWin(id, anchor, kb); });
+    return;
+  }
+  showWin(id, anchor, kb);
+}
+function showWin(id, anchor, kb) {
   clearTimeout(winCloseTimer);
   const win = $("win");
   const wasOpen = !win.hidden;
@@ -1756,6 +1768,7 @@ function openWin(id, anchor, kb) {
   if (mode !== "demo" && id !== "lead") fetchDetail(id).then((d) => { if (winFor === id && !$("win").hidden && d && d.steps) renderChecklist(d.steps); });
 }
 function closeWin(toFocus) {
+  openSeq++;
   const win = $("win");
   if (win.hidden || !winFor) return;
   const anchor = winAnchor;
