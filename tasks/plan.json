@@ -1,133 +1,20 @@
 {
-  "title": "Delete plans and lanes from the dashboard and Office view",
-  "goal": "Users can delete plans and lanes in the Lanes dashboard and the Office view; deleting kills the lane processes, unregisters them and purges logs so nothing is left running or tracked.",
+  "title": "Office fills the stage: no black bars",
+  "goal": "The Office room fills the whole stage on desktop (no dark bands beside or above it) while every station sprite, nameplate and the sign stay in view.",
   "lead": "Claude Opus 5.5",
-  "status": "closed",
-  "now": "Deleted from the dashboard",
-  "waves": [
-    {
-      "name": "Wave 1",
-      "lanes": [
-        "rm-core",
-        "rm-ui"
-      ]
-    },
-    {
-      "name": "Wave 2",
-      "lanes": [
-        "ui-polish"
-      ]
-    },
-    {
-      "name": "Wave 3",
-      "lanes": [
-        "status-model"
-      ]
-    }
-  ],
+  "status": "running",
+  "now": "Briefing the office-cover lane",
+  "waves": [{ "name": "Wave 1", "lanes": ["office-cover"] }],
   "lanes": [
     {
-      "task": "status-model",
-      "repo": "../../../ca-work/codeartsclimcp-status-model",
-      "model": "maas/glm-5.3",
-      "why": "Honest lane statuses: Verified, Unverified (checks could not run), Checks failing, Failed only for real breakdowns, Handled/Merged override",
-      "files": [
-        "runner/controls.mjs",
-        "runner/ca.mjs",
-        "runner/assets/workshop.js",
-        "runner/dash.html",
-        "runner/office.html",
-        "checks/status.check.mjs"
-      ],
-      "removed": true
-    },
-    {
-      "task": "rm-core",
-      "repo": "../../../ca-work/codeartsclimcp-rm-core",
-      "why": "removeLane/removePlan in ca.mjs, ca rm, API routes, MCP tools, contract check",
-      "files": [
-        "runner/ca.mjs",
-        "runner/mcp.mjs",
-        "checks/remove.check.mjs"
-      ],
-      "removed": true
-    },
-    {
-      "task": "rm-ui",
-      "repo": "../../../ca-work/codeartsclimcp-rm-ui",
-      "why": "Delete buttons in Lanes dashboard and Office view, demo fixtures, CDP check",
-      "files": [
-        "runner/dash.html",
-        "runner/office.html",
-        "checks/removeui.check.mjs"
-      ],
-      "removed": true
-    },
-    {
-      "task": "ui-polish",
-      "repo": "../../../ca-work/codeartsclimcp-ui-polish",
-      "why": "Hover cards flicker on every poll (skip unchanged DOM writes); space above the steer input in the Office lane window",
-      "files": [
-        "runner/dash.html",
-        "runner/office.html",
-        "checks/hover.check.mjs"
-      ],
-      "removed": true
+      "task": "office-cover",
+      "repo": ".",
+      "model": "flash",
+      "why": "sizeStage letterboxes the room with Math.min; switch to a content-aware cover fit plus a blurred room backdrop for any remainder",
+      "files": ["runner/office.html", "checks/officefit.check.mjs"]
     }
   ],
-  "next": [
-    "Merge both branches into main",
-    "Run all checks on main",
-    "Drive the real dashboard"
-  ],
-  "decisions": [
-    {
-      "at": "2026-11-08T13:00:00Z",
-      "text": "API contract fixed up front: POST /api/lane/<id>/remove and POST /api/plans/<id>/remove, so both lanes run in parallel."
-    },
-    {
-      "at": "2026-11-08T06:29:41.381Z",
-      "text": "Lanes moved to clones in C:\\Users\\nabil\\ca-work: the main repo's .git denies writes to the worker sandbox, so commits failed there."
-    },
-    {
-      "at": "2026-11-08T06:36:02.319Z",
-      "text": "Unregistered duplicate clone plans codeartsclimcp-rm-ui/-rm-core; steered rm-core to fix ensurePlan so lanes listed in another open plan never register their own."
-    },
-    {
-      "at": "2026-11-08T07:32:05.642Z",
-      "text": "Resumed codeartsclimcp-ui-polish--ui-polish from the ca resume: Lead verified the branch outside the sandbox: hover, removeui, office all pass. lanes.check has 3 REGRESSIONS from step 2 (dash.html skip-unchanged writes): (a) \"Seen earlier holds the marked lane\": clicking [data-crseen=\"1\"] toggles a UI-only state, but the skip compares only server data so the Seen earlier block never re-renders; include UI state (seen-expanded, any toggles, route) in the signature, or force a render after local UI actions. (b) \"flash clears on the next render\" and (c) \"reduced motion skips the flash\": the .steprow.flash class is added in one render and must be removed by the next poll render; now the next render is skipped as unchanged so the flash never clears. Make the flash state part of the signature (a row with flash pending must re-render once to drop it) or clear the flash with its own timer/classList.remove independent of the skip; reduced motion must never add the flash. Read checks/lanes.check.mjs lines 80-145 for the exact expectations. Ignore \"the onboard hook lists every doctor row with a status\" (fails on the base too). Do not run browser checks in your shell (sandbox blocks loopback); commit the fix as \"fix: ...\" and end; the runner reruns the checks."
-    },
-    {
-      "at": "2026-11-08T08:18:05.486Z",
-      "text": "Resumed codeartsclimcp-status-model--status-model from the ca resume: Model switched to flash for speed. Step 1 is committed (runner/controls.mjs: classifyCheck, laneOutcome, laneBucket, laneActions) from the previous run; review it briefly against the brief, fix anything missing as 'fix: ...', then continue with step 2. Keep each step tight: edit, node --check, commit. Do not run browser or ca dash checks in your shell (sandbox blocks loopback)."
-    },
-    {
-      "at": "2026-11-08T08:58:06.425Z",
-      "text": "Plan closed: All four lanes merged into main (delete plans/lanes, plan dedup, hover/steer/spinner polish, honest status model); every check passes on main.."
-    },
-    {
-      "at": "2026-11-08T09:06:17.360Z",
-      "text": "Lane status-model deleted from the dashboard"
-    },
-    {
-      "at": "2026-11-08T09:06:17.396Z",
-      "text": "Lane rm-core deleted from the dashboard"
-    },
-    {
-      "at": "2026-11-08T09:06:17.447Z",
-      "text": "Lane rm-ui deleted from the dashboard"
-    },
-    {
-      "at": "2026-11-08T09:06:17.492Z",
-      "text": "Lane ui-polish deleted from the dashboard"
-    },
-    {
-      "at": "2026-11-08T09:06:17.506Z",
-      "text": "Plan codeartsclimcp deleted from the dashboard"
-    }
-  ],
-  "risks": [
-    "Earlier lanes in this repo failed their git gate; watch the first commit."
-  ],
-  "removed": true
+  "next": ["verify fit checks and screenshots at 1920x945, 2560x1440, 1366x768", "merge, release, install-local"],
+  "decisions": ["Cover the stage as far as the station content allows; any leftover band shows a blurred, dimmed copy of the room instead of the dark shell colour"],
+  "risks": ["Ultra-wide screens cannot be fully covered without cropping stations; the blurred backdrop fills that band"]
 }
