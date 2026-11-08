@@ -497,6 +497,9 @@ function dTokBy(build, review, other) { const by = { build, review, other }; ret
 function planTokSum(lanes) { const list = lanes.map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
 const D_RUN_ACTIONS = ['steer', 'stop', 'attach', 'kick', 'fresh', 'restart-server'];
 const demoControls = []; // fixture log of kick/resume POSTs, read by the check harness
+const demoRemoved = new Set(); // ids deleted in the fixture: a removed plan or lane never comes back
+// plan id -> its lane ids, so deleting a plan also drops its lanes from /api/lanes and the waves
+const D_PLAN_LANES = { 'office-polish': ['demo-repo--office-layout'], 'string-utils': ['demo-repo--string-utils', 'demo-repo--path-join', 'demo-repo--stuck'] };
 function dLane(id, task, o) {
   return Object.assign({ lane: id, id, task, repo: D_REPO, health: 'planned', phase: 'planned', elapsed: '', idle: '-', commits: '0/0',
     steers: 0, interrupts: 0, verdict: '', now: '', tokens: {}, tokensBy: {}, actions: [], suggest: '', why: '', tools: [], models: { build: 'maas/glm-5.3', review: 'maas/glm-5.3' },
@@ -536,6 +539,7 @@ const D_PROJ_A = { key: 'demo-repo', name: 'demo-repo' };
 const D_PROJ_B = { key: 'sandbox', name: 'sandbox' };
 const dSeen = new Set(['demo-repo--path-join']);
 function demoLanes() {
+  const gone = new Set(Object.entries(D_PLAN_LANES).filter(([pid]) => demoRemoved.has(pid)).flatMap(([, ids]) => ids));
   const ls = [
     dLane('demo-repo--office-layout', 'office-layout', { bucket: 'running', bucketWhy: 'building wave 1, step 1/7', project: D_PROJ_A, health: 'running', phase: 'build', running: true, elapsed: '3m 51s', idle: '1s', commits: dAdv() ? '1/7' : '0/7', now: 'Thinking', ...dTokBy(dTok(48000, 150, { reasoning: 4200, cacheRead: 9000 }), dTok(3900, 40), dTok(864, 12)), actions: D_RUN_ACTIONS, suggest: '', why: '', session: 's-7011', startedAt: DEMO_T0 - 231000,
       runs: 2, continues: [{ id: 'demo-repo--office-v2', task: 'office-v2', reason: 'paused by the operator for a scope change', commits: 6, progress: { done: 6, total: 8 }, elapsed: '41m 12s' }],
@@ -551,7 +555,7 @@ function demoLanes() {
     dLane('demo-repo--orphan', 'orphan', { bucket: 'ended', bucketWhy: 'stopped by the operator', project: D_PROJ_A, health: 'stopped', phase: 'finished', result: 'stopped', reason: 'stopped by the operator', elapsed: '1m 12s', commits: '0/3', ...dTokBy(dTok(900, 80), dTok(0, 0), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 5200000, progress: { done: 0, total: 3, current: null } }),
     dLane('demo-repo--chaos', 'chaos', { bucket: 'attention', bucketWhy: 'needs review: two fixes asked', project: D_PROJ_A, health: 'needs review', phase: 'finished', result: 'needs review', verdict: 'needs fixes', elapsed: '12m 55s', commits: '3/4', ...dTokBy(dTok(7300, 1060), dTok(2200, 300), dTok(0, 0)), actions: ['resume'], suggest: '', why: '', finishedAt: DEMO_T0 - 600000, progress: { done: 3, total: 4, current: null } }),
     dLane('demo-repo--archive', 'archive', { bucket: 'ended', bucketWhy: 'archived after cleanup', project: D_PROJ_A, health: 'idle', phase: 'finished', result: 'archived', elapsed: '12m 40s', commits: '2/2', ...dTokBy(dTok(5200, 400), dTok(0, 0), dTok(0, 0)), actions: [], suggest: '', why: '', finishedAt: DEMO_T0 - 6 * 86400000, progress: { done: 2, total: 2, current: null } }),
-  ];
+  ].filter((l) => !demoRemoved.has(l.id) && !gone.has(l.id));
   for (const l of ls) {
     l.seen = dSeen.has(l.id);
     // same rule as the server: a finished needs-you lane marked handled reads as ended
@@ -561,8 +565,8 @@ function demoLanes() {
 }
 function demoPlans() {
   const by = Object.fromEntries(demoLanes().map((l) => [l.id, l]));
-  const wp = (id, plan) => ({ ...by[id], plan });
-  return [
+  const wp = (id, plan) => (by[id] ? { ...by[id], plan } : null);
+  const list = [
     { id: 'office-polish', file: 'D:/Coding/demo-repo/tasks/plan.json', updatedAt: dIso(4), title: 'Office view polish: sprites and layout',
       goal: 'Polish the Office view: sprite-driven layout, tight spacing and a check harness that screenshots both routes without real lanes.',
       lead: 'Claude Opus 5.5', status: 'running',
@@ -590,6 +594,9 @@ function demoPlans() {
         wp('demo-repo--stuck', { model: 'maas/glm-5.3', why: 'Recover the stalled turn', files: ['runner/sandbox.mjs'], briefExists: true }),
       ] }] },
   ];
+  return list
+    .filter((p) => !demoRemoved.has(p.id))
+    .map((p) => ({ ...p, waves: p.waves.map((w) => ({ ...w, lanes: w.lanes.filter(Boolean) })) }));
 }
 // The demo layer resolves lane ids exactly like the server: exact id, then task name, then substring.
 function demoResolve(id) {
@@ -704,6 +711,7 @@ async function demoPost(what, id, body) {
   if (what === 'kick') { demoControls.push({ laneId: id, action: 'kick', body: body || {} }); return { ok: true, message: `Kick sent (${(body && body.mode) || 'turn'})` }; }
   if (what === 'resume') { demoControls.push({ laneId: id, action: 'resume', body: body || {} }); return { ok: true, message: 'Lane resumed' }; }
   if (what === 'ack') { const seen = !(body && body.seen === false); if (seen) dSeen.add(id); else dSeen.delete(id); return { ok: true, seen }; }
+  if (what === 'remove') { demoRemoved.add(id); demoControls.push({ action: 'remove', laneId: id }); return { ok: true, id, killed: [], removed: [] }; }
   return { ok: true };
 }
 function demoOverview() {
@@ -722,10 +730,17 @@ async function demoApi(path, opts) {
   if (demoFailAt) throw new Error('demo: forced runner failure'); // check hook: window.__lanes.fail(true)
   const u = new URL(path, 'http://x');
   if (u.pathname === '/api/plans') return demoPlans();
+  const pm = u.pathname.match(/^\/api\/plans\/([^/]+)\/remove$/);
+  if (pm && opts && opts.method === 'POST') {
+    const id = decodeURIComponent(pm[1]);
+    demoRemoved.add(id);
+    demoControls.push({ action: 'remove', planId: id });
+    return { ok: true, id, lanes: D_PLAN_LANES[id] || [], killed: [] };
+  }
   if (u.pathname === '/api/lanes') return demoLanes();
   if (u.pathname === '/api/overview') return demoOverview();
   if (u.pathname === '/api/doctor') return demoDoctor();
-  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume|ack)$/);
+  const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|detail|steer|stop|attach|kick|resume|ack|remove)$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
     if (m[2] === 'detail') return demoDetail(id);
@@ -1485,7 +1500,9 @@ onboard: () => {
   const fails = rows.filter((r) => r.status === 'fail').length;
   const warns = rows.filter((r) => r.status === 'warn').length;
   return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
-}, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; } };
+}, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; },
+// ids deleted in the fixture, for the check harness: a removed plan or lane never comes back
+removed: () => [...demoRemoved] };
 
 // ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
 let lastOkAt = 0, firstFailAt = 0, staleOn = false;
