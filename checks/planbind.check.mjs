@@ -71,6 +71,20 @@ const p2 = js(path.join(repo2, 'tasks', 'plan.json'));
 check('a lane the lead already put in the plan is not added twice and the plan is kept', r.status === 0 && lanesOf(p2).filter((t) => t === 'planned').length === 1 && p2.title === 'Lead written plan' && p2.lanes[0].why === 'by the lead', JSON.stringify(p2).slice(0, 200));
 check('a plan the lead forgot to register is registered when its lane starts', /Lead written plan/.test(planList()), planList());
 
+// ---- 4b. a lane already listed in another repo's registered open plan is not duplicated ----
+{
+  const repoA = mkrepo('lead-a'); const repoB = mkrepo('lead-b');
+  const planA = path.join(repoA, 'tasks', 'plan.json');
+  fs.writeFileSync(planA, JSON.stringify({ title: 'Shared lead plan', status: 'running', waves: [{ name: 'W1', lanes: ['x'] }], lanes: [{ task: 'x', repo: repoB, why: 'lives in another clone' }] }, null, 2));
+  ca(['plan', planA]);
+  const before = fs.readdirSync(path.join(reg, 'plans')).length;
+  brief(repoB, 'x', 'the shared task');
+  r = ca(['lane', repoB, 'x']);
+  const after = fs.readdirSync(path.join(reg, 'plans')).length;
+  check('a lane already listed in another repo open plan does not create its own plan', r.status === 0 && !fs.existsSync(path.join(repoB, 'tasks', 'plan.json')) && after === before, `status ${r.status} before ${before} after ${after} ${(r.stdout + r.stderr).slice(-160)}`);
+  check('the shared plan is left untouched and still the only one for the work', /Shared lead plan/.test(planList()) && js(planA)?.lanes?.[0]?.why === 'lives in another clone', planList().slice(0, 160));
+}
+
 // ---- 5. a closed plan is archived (still listed) and a new open plan is created ----
 ca(['plan', 'close', 'app', '--reason', 'shipped']);
 brief(repo, 'fourth', 'add a readiness endpoint');
