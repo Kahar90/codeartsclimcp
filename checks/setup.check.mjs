@@ -25,6 +25,7 @@ check('kiro: .kiro/settings/mcp.json has the codearts server', k && isServer(k.m
 check('kiro: read-only tools auto-approved, start/steer/stop not', k && ['ca_status', 'ca_summary', 'ca_wait'].every((t) => k.mcpServers.codearts.autoApprove?.includes(t)) && !['ca_lane_start', 'ca_steer', 'ca_stop'].some((t) => k.mcpServers.codearts.autoApprove.includes(t)));
 const steer = rd(path.join(repo, '.kiro', 'steering', 'codearts-lanes.md'));
 check('kiro: steering file with front matter and the workflow', steer && /^---\r?\n[\s\S]*inclusion:\s*\w+[\s\S]*?\r?\n---/.test(steer) && /ca_wait/.test(steer));
+check('kiro: steering asks the lead to register and keep the plan current', /\bca_plan_update\b/.test(steer || '') && /\bca_note\b/.test(steer || ''), (steer || '').slice(0, 160));
 // merge keeps other servers and is idempotent
 const kp = path.join(repo, '.kiro', 'settings', 'mcp.json'); const kj = js(kp); kj.mcpServers.other = { command: 'x', args: [] }; kj.extra = 1; fs.writeFileSync(kp, JSON.stringify(kj, null, 2));
 r = ca(['setup', 'kiro', repo]); k = js(kp);
@@ -51,6 +52,7 @@ check('claude: says to restart and type /codearts-build', /\/codearts-build/.tes
 const skillP = path.join(repo, '.claude', 'skills', 'codearts-build', 'SKILL.md'); const skill = rd(skillP) || '';
 check('claude: installs the /codearts-build skill in the repo', /^---\r?\nname: codearts-build\r?\ndescription: .+\r?\n---/.test(skill) && /mcp__codearts__ca_doctor/.test(skill) && /ca_lane_start/.test(skill) && /ca_wait/.test(skill), skill.slice(0, 200));
 check('claude: skill is portable (no machine-specific paths)', !/[A-Z]:[\\/]/.test(skill) && !/ca-office|codeartsclimcp/.test(skill));
+check('claude: skill asks the lead to register and keep the plan current', /ca_plan_update/.test(skill) && /ca_note/.test(skill));
 const sl = js(path.join(repo, '.claude', 'settings.local.json'));
 check('claude: settings.local.json enables the server and allows read-only tools only', sl?.enabledMcpjsonServers?.includes('codearts') && ['ca_status', 'ca_wait', 'ca_summary'].every((t) => sl.permissions.allow.includes(`mcp__codearts__${t}`)) && !sl.permissions.allow.some((t) => /ca_(lane_start|steer|stop)/.test(t)), JSON.stringify(sl));
 fs.writeFileSync(path.join(repo, '.claude', 'settings.local.json'), JSON.stringify({ enabledMcpjsonServers: ['other'], permissions: { allow: ['Bash(ls)'] }, model: 'x' }));

@@ -56,10 +56,11 @@ const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = [
   'You are the lead over CodeArts build lanes: the lanes are the workers.',
   'Run ca_doctor first and fix every fail row, write one brief per lane with ca_init, then start it with ca_lane_start.',
+  'Register the plan you are working to with ca_plan when you start, and keep it current: ca_plan_update for a changed goal, next tasks or lanes, and ca_note (now true, with phase planning, building, waiting, verifying or done) for a meaningful transition or progress. Publish real scope changes and transitions, not a heartbeat, and never paste private reasoning or chat.',
   'Block on ca_wait instead of polling ca_status; exit 124 means still running, call it again.',
   'When a lane ends, read ca_summary, judge the reviewer findings against the brief and verify the work yourself by running the repo checks on the branch.',
   'Steer a running lane with ca_steer, kick a stuck turn with ca_kick, stop it with ca_stop, and continue a paused, failed, stopped or DEAD lane with ca_resume.',
-  'The human watches the dashboard at http://127.0.0.1:4777 (Office view at /office).',
+  'The human watches the dashboard at http://127.0.0.1:4777 (Office view at /office), where the plan shows your phase, latest activity and how long ago you last updated it.',
 ].join(' ');
 
 // Append one sentence when a newer codearts-lanes is known, so the agent can tell the user once.

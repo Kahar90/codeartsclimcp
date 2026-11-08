@@ -18,20 +18,35 @@ summaries, not transcripts.
   offer `ca_update` (it reinstalls, then they restart the agent and any open dashboard).
 
 ## 2. Plan
+- Register the plan as soon as you split the goal: `tasks/plan.json` with `title, goal, lead,
+  status, now, waves[{name, lanes}], lanes[{task, repo, model, why, files}], next, decisions,
+  risks`, then `ca_plan`. The plan is how the human sees your intent, so register it even for a
+  single lane. Never leave a plan open at the end (section 6).
+- Keep it current while the work moves, and only when something real changed:
+  - `ca_note {text, now: true, phase}` for a transition or progress; the phases are `planning`,
+    `building`, `waiting`, `verifying`, `done`. Each now note is timestamped and kept in a bounded
+    recent-activity history both views show, so the dashboard reads the lead phase, latest activity
+    and how long ago you last updated.
+  - `ca_plan_update {id, patch}` for changed scope: a revised `goal`, new `next` tasks, or `waves`
+    and `lanes`. It patches only the fields you send and bumps the revision.
+  - Publish real transitions, not a heartbeat: nothing changed means nothing to post. Never paste
+    private reasoning or chat, only what you did and what is next.
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.
 - Parallel lanes each get a git worktree: `git worktree add ../<repo>-wt-<task> -b lane/<task>`.
-- Optional plan for the dashboard: `tasks/plan.json` with `title, goal, lead, status, now,
-  waves[{name, lanes}], lanes[{task, repo, model, why, files}], next, decisions, risks`, then
-  `ca_plan`. Update the "lead is doing" line with `ca_note` (now: true).
 
 ## 3. Brief (one per lane)
-- `ca_init {repo, task, goal}` writes `tasks/<task>.md` from the template; then edit it:
-  - at most 8 numbered steps, exact files and behaviour, "commit after each step" with subject
-    `step N: ...`;
-  - one `CHECK: <command>` line per check: the runner runs them itself when the worker goes idle
-    and feeds failures back (up to 3 fix rounds);
-  - a step that adds a test hook or script so results can be verified without looking at a UI;
-  - "only touch <files>", "do not ask questions", the safety rules from the template;
+- `ca_init {repo, task, goal}` writes `tasks/<task>.md` from the template; then edit it to be lean:
+  - aim for 1 to 3 outcome steps, and never more than 8. Each step is a piece of behaviour a check
+    can prove, names the exact files and behaviour, and says "commit after each step" with subject
+    `step N: ...`. A step is not a chore list.
+  - one `CHECK: <command>` line per check, and reuse a check another step or lane already has
+    instead of adding a near-duplicate. The runner runs the lines itself when the worker goes idle
+    and feeds failures back (up to 3 fix rounds).
+  - include one step that adds a test hook or script so the result can be verified without looking
+    at a UI (for example `window.__app.state()`).
+  - "only touch <files>", "do not ask questions", the safety rules from the template.
+  - no separate self-review step: the runner's reviewer gate and your own verification cover it,
+    and the worker commits only steps that work, so a "re-read and fix" step just burns time.
   - no MODEL line by default: flash builds every lane, GLM 5.3 reviews. Add `MODEL: maas/glm-5.3`
     only for very complex lanes (many files across modules, long context, hard design reasoning).
 
@@ -61,6 +76,12 @@ summaries, not transcripts.
 - Token counters: each lane tracks its tokens per agent (build, review, other sessions) and per
   model; `ca_status`, `ca_summary` and the plan views carry them, so cost is visible per lane
   and per plan.
+- Reading the numbers: `cache read` is context the model replayed from cache on every turn. It
+  accumulates fast and usually dwarfs the rest, but it is replayed context, not new generation and
+  not the same as price. `reasoning` (thinking) tokens are the model's own deliberation and output
+  tokens are what it wrote; judge cost from input, output, cache-read and cache-write separately.
+  The views show cumulative totals, so a large cache-read total means long context replayed many
+  times, not that many tokens were generated, and turning thinking off does not remove the replay.
 
 ## 5. Judge and verify
 - Exit codes / results: 0 done (review ready), 4 needs review, 1 failed or stopped,

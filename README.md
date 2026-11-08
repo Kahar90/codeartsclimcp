@@ -45,7 +45,9 @@ Restart your coding agent once after setup, then, in any repo, ask for what you 
 
 A folder that is not a git repo yet is fine: your agent makes it one before the first lane.
 Your agent splits the goal into small steps, starts lanes, waits, checks the result and reports
-back with what was built, the commits and the review verdict.
+back with what was built, the commits and the review verdict. It also registers the plan it is
+working to and keeps it current, so the dashboard shows your agent's phase, its latest activity
+and how long ago it last updated, next to the lanes.
 
 ## Visual tour
 
@@ -66,7 +68,9 @@ Needs you by itself: every row has its own decision (Resume, Kick, Mark handled)
 ![The plan view shows waves, the current step and the decisions log](docs/images/lanes.png)
 
 A plan shows each wave of lanes, the current step of every lane and the decisions the agent
-recorded, so you can follow a goal from brief to done.
+recorded, so you can follow a goal from brief to done. The lead's phase, latest activity and
+update age sit at the top of the plan: a stale age means no update for a while, not that the agent
+stopped.
 
 ### Lane detail: transcript, brief, steering and checks
 

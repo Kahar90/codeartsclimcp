@@ -34,10 +34,12 @@ try {
   let m = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'check', version: '1' } });
   check('initialize answers', m.result && m.result.protocolVersion && m.result.serverInfo?.name && m.result.capabilities?.tools, JSON.stringify(m).slice(0, 200));
   check('initialize has instructions', typeof m.result?.instructions === 'string' && m.result.instructions.length > 40);
+  const ins = m.result?.instructions || '';
+  check('instructions ask the lead to register and keep the plan current', /ca_plan\b/.test(ins) && /ca_plan_update/.test(ins) && /ca_note/.test(ins) && /phase/.test(ins), ins.slice(0, 200));
   srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   m = await rpc('ping', {}); check('ping', m.result && !m.error);
   m = await rpc('tools/list', {}); const tools = m.result?.tools || [];
-  const want = ['ca_doctor', 'ca_init', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_kick', 'ca_resume', 'ca_ack', 'ca_lead_tokens', 'ca_plan', 'ca_plan_list', 'ca_plan_close', 'ca_gc', 'ca_note', 'ca_update_check', 'ca_update'];
+  const want = ['ca_doctor', 'ca_init', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_kick', 'ca_resume', 'ca_ack', 'ca_lead_tokens', 'ca_plan', 'ca_plan_list', 'ca_plan_update', 'ca_plan_close', 'ca_plan_rm', 'ca_gc', 'ca_note', 'ca_update_check', 'ca_update'];
   check('tools/list has every tool', want.every((w) => tools.some((x) => x.name === w)), tools.map((x) => x.name).join(','));
   check('tools have descriptions and object schemas', tools.length && tools.every((x) => x.description && x.description.length > 15 && x.inputSchema?.type === 'object'));
   check('required args declared', tools.find((x) => x.name === 'ca_steer')?.inputSchema?.required?.includes('lane'));

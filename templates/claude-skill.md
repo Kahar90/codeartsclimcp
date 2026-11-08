@@ -12,8 +12,15 @@ no goal, ask for one in a single question, then start.
 ## Tools
 
 Use the `codearts` MCP server tools: `mcp__codearts__ca_doctor`, `ca_init`, `ca_lane_start`,
-`ca_status`, `ca_wait`, `ca_summary`, `ca_tail`, `ca_steer`, `ca_stop`, `ca_plan`, `ca_note`
-(all prefixed `mcp__codearts__`). Below they are named without the prefix.
+`ca_status`, `ca_wait`, `ca_summary`, `ca_tail`, `ca_steer`, `ca_stop`, `ca_plan`,
+`ca_plan_update`, `ca_note` (all prefixed `mcp__codearts__`). Below they are named without the
+prefix.
+
+Register the plan you are working to with `ca_plan` as soon as you start, and keep it current:
+`ca_plan_update` for a changed goal, next tasks or lanes, and `ca_note` (now true, with phase
+planning, building, waiting, verifying or done) for a meaningful transition. The plan is how the
+human follows the work in both dashboard views, so publish real scope changes and transitions, not
+a heartbeat, and never paste private reasoning or chat.
 
 If those tools are missing, the server is not connected: tell the user to run
 `ca onboard --yes --harness claude` once and restart Claude Code (or `/mcp` to reconnect). Until

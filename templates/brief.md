@@ -7,8 +7,12 @@ progress from it). Do not ask questions; decide and keep going.
 1. <step: exact behaviour, file names>. Commit.
 2. <step>. Commit.
 ...
-7. Test hook / check: <how a script can verify this without vision, e.g. window.__app.state()>. Commit.
-8. Self check: re-read your changes against this brief and fix bugs you find. Commit if changed.
+
+Keep the brief lean: aim for 1 to 3 steps and never more than 8. Each step is a piece of behaviour
+a check can prove, not a chore. Reuse a `CHECK:` command that already exists instead of adding a
+near-duplicate, and include one step that adds a test hook or script so the result is verifiable
+without vision (for example window.__app.state()). Do not add a separate "re-read and fix"
+self-review step: the runner's reviewer gate and the lead's verification cover that.
 
 Safety rules (hard):
 - Never kill processes you did not start (no taskkill / Stop-Process on chrome, node or git).
