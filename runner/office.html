@@ -296,7 +296,8 @@ body.narrow #glanceSign .gs-detail { font-size: 11px; max-width: none; }
 #glanceBubble { position: absolute; z-index: 4; transform: translate(-50%, -100%); pointer-events: none; padding: 5px 11px; background: #fbf3ff; color: #1a1424; border: 3px solid #140d07; border-radius: 9px; font: 800 22px/1 var(--font-display); box-shadow: 0 4px 12px rgba(0, 0, 0, .5); }
 #glanceBubble[hidden] { display: none !important; }
 #glanceBubble::after { content: ""; position: absolute; left: 50%; margin-left: -6px; bottom: -9px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #140d07; }
-.glance-spark { position: absolute; width: 6px; height: 6px; border-radius: 1px; z-index: 5; pointer-events: none; image-rendering: pixelated; }
+@keyframes glance-spark-fly { 0% { opacity: 0; transform: translate(0, 0) scale(.5); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--sx, 0), var(--sy, 0)) scale(.4); } }
+.glance-spark { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 1px; z-index: 5; pointer-events: none; image-rendering: pixelated; animation: glance-spark-fly 1s ease-out forwards; }
 </style>
 </head>
 <body>
@@ -1129,6 +1130,9 @@ function renderGlance() {
   if (!g || !GLANCE_META[g.state]) {
     sign.hidden = true;
     if (glow) glow.hidden = true;
+    renderGlanceBubble(null);
+    clearGlanceTitle();
+    noteGlance(null);
     return;
   }
   const state = g.state, meta = GLANCE_META[state];
@@ -1148,6 +1152,94 @@ function renderGlance() {
     else bar.hidden = true;
   }
   if (glow) { glow.hidden = false; glow.dataset.state = state; }
+  renderGlanceBubble(state);
+  applyGlanceTitle(state, meta, word, p);
+  noteGlance(state);
+}
+
+// Step 2: the lead speech bubble, the tab title and canvas favicon, and the done sparkle.
+// The bubble glyph only for the states the brief names; idle and working show none.
+const GLANCE_BUBBLE = { "needs-you": "?", quiet: "?", failed: "\u2715", done: "\u2713" };
+const PLAIN_TITLE = document.title;
+let prevGlanceState = null, prevGlancePlan = null;
+function renderGlanceBubble(state) {
+  const b = $("glanceBubble");
+  if (!b) return;
+  const glyph = state ? GLANCE_BUBBLE[state] : null;
+  if (!glyph) { b.hidden = true; return; }
+  const f = SCENE.stations.lead.foot;
+  b.hidden = false;
+  b.dataset.state = state;
+  if (b.textContent !== glyph) b.textContent = glyph;
+  b.style.left = (ox + f[0] * k) + "px";
+  b.style.top = (oy + (f[1] - 26) * k) + "px";
+}
+function glanceFavicon(meta) {
+  const c = document.createElement("canvas");
+  c.width = 32; c.height = 32;
+  const x = c.getContext("2d");
+  const r = 7;
+  x.fillStyle = meta.color;
+  x.beginPath();
+  x.moveTo(r, 0);
+  x.arcTo(32, 0, 32, 32, r);
+  x.arcTo(32, 32, 0, 32, r);
+  x.arcTo(0, 32, 0, 0, r);
+  x.arcTo(0, 0, 32, 0, r);
+  x.closePath();
+  x.fill();
+  x.fillStyle = "#1a1424";
+  x.font = "700 21px system-ui, Arial, sans-serif";
+  x.textAlign = "center";
+  x.textBaseline = "middle";
+  x.fillText(meta.glyph, 16, 17);
+  return c.toDataURL("image/png");
+}
+function setGlanceIcon(href) {
+  let link = document.querySelector('link[rel~="icon"]');
+  if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+  if (link.getAttribute("href") !== href) link.setAttribute("href", href);
+}
+function applyGlanceTitle(state, meta, word, p) {
+  if (state === "idle") { clearGlanceTitle(); return; }
+  document.title = meta.glyph + " " + word + " - " + ((p && (p.title || p.goal)) || "");
+  setGlanceIcon(glanceFavicon(meta));
+}
+function clearGlanceTitle() {
+  if (document.title !== PLAIN_TITLE) document.title = PLAIN_TITLE;
+  const link = document.querySelector('link[rel~="icon"]');
+  if (link) link.removeAttribute("href");
+}
+function sparkleSign() {
+  if (!PixelSprites.motion()) return;
+  const sign = $("glanceSign");
+  if (!sign || sign.hidden) return;
+  const stage = $("stage");
+  const sr = sign.getBoundingClientRect(), tr = stage.getBoundingClientRect();
+  const cx = sr.left - tr.left + sr.width / 2;
+  const cy = sr.top - tr.top + sr.height / 2;
+  const meta = GLANCE_META[sign.dataset.state];
+  const color = meta ? meta.color : "#6ee7a0";
+  const scale = Math.max(0.6, k);
+  for (let i = 0; i < 14; i++) {
+    const s = document.createElement("span");
+    s.className = "glance-spark";
+    const ang = (Math.PI * 2 * i) / 14 + Math.random() * 0.35;
+    const dist = (44 + Math.random() * 44) * scale;
+    s.style.left = cx + "px";
+    s.style.top = cy + "px";
+    s.style.background = color;
+    s.style.setProperty("--sx", Math.round(Math.cos(ang) * dist) + "px");
+    s.style.setProperty("--sy", Math.round(Math.sin(ang) * dist) + "px");
+    stage.appendChild(s);
+    setTimeout(() => { if (s.parentNode) s.parentNode.removeChild(s); }, 1100);
+  }
+}
+// Sparkle only when the glance turns done from another state on the same plan, never on first load or a plan switch.
+function noteGlance(state) {
+  if (glancePlanId === prevGlancePlan && state === "done" && prevGlanceState && prevGlanceState !== "done") sparkleSign();
+  prevGlancePlan = glancePlanId;
+  prevGlanceState = state;
 }
 
 function render() {
@@ -2270,6 +2362,20 @@ window.__office = {
   },
   demoAdvance,
   demoFail,
+  // The glance as the page shows it, for the check harness: sign state, word, detail, tab title, favicon.
+  glance() {
+    const sign = $("glanceSign");
+    const link = document.querySelector('link[rel~="icon"]');
+    const w = sign && sign.querySelector(".gs-word");
+    const d = sign && sign.querySelector(".gs-detail");
+    return {
+      state: sign && !sign.hidden ? sign.dataset.state : null,
+      word: (w && w.textContent) || "",
+      detail: (d && d.textContent) || "",
+      title: document.title,
+      favicon: (link && link.getAttribute("href")) || "",
+    };
+  },
   // ids deleted through the Delete controls, for the check harness
   removed: () => [...demoRemoved],
   // DOM writes per poll-rebuilt region: the hover check asserts these stop growing while nothing changed
