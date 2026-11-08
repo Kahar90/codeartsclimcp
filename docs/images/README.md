@@ -1,8 +1,9 @@
 # Screenshots
 
-The PNGs in this folder are the genuine output of the repo's own UI checks, captured from the
-**built-in demo data** only (the `?demo=1` fixtures). No real lane, project, path or private text
-is ever shown.
+Four of these PNGs are the genuine output of the repo's own UI checks, captured from the
+**built-in demo data** only (the `?demo=1` fixtures); they never show a real lane, project, path or
+private text. `keys-form.png` is a setup screenshot of the local keys form, not a dashboard
+capture.
 
 ## How to (re)capture
 
@@ -21,17 +22,17 @@ Then copy the four selected files into this folder.
 | Source (`checks/out/`) | Destination (`docs/images/`) | Shows |
 |---|---|---|
 | `lanes-control-room.png` | `lanes-control-room.png` | Control room: Needs you / Running / Done / Ended |
-| `lanes-home.png` (or `lanes-plan-home-tokens.png`) | `lanes.png` | Plan home: waves, current step, decisions |
-| `lanes-detail-transcript.png` | `lane-detail.png` | Lane detail: transcript, brief, steering, checks |
-| `1-scene.png` (or `2-window.png`) | `office.png` | Office view: the workshop scene / a lane window |
+| `lanes-home.png` | `lanes.png` | Plan home: waves, current step, decisions |
+| `lanes-detail-transcript.png` | `lane-detail.png` | Lane progress, token usage, brief steps, steering controls |
+| `2-window.png` | `office.png` | Office view: a lane window |
 
 For example, on a POSIX shell:
 
 ```sh
-cp checks/out/lanes-control-room.png   docs/images/lanes-control-room.png
-cp checks/out/lanes-home.png           docs/images/lanes.png
+cp checks/out/lanes-control-room.png      docs/images/lanes-control-room.png
+cp checks/out/lanes-home.png              docs/images/lanes.png
 cp checks/out/lanes-detail-transcript.png docs/images/lane-detail.png
-cp checks/out/1-scene.png              docs/images/office.png
+cp checks/out/2-window.png                docs/images/office.png
 ```
 
 `tools/check-readme.mjs` verifies that README.md keeps referencing these files and that every
