@@ -821,6 +821,9 @@ function demoPlanOptions() {
   return [{ id: p.id, title: p.title, closed: !!p.closed }];
 }
 let needsShown = -1;
+// DOM writes per poll-rebuilt region: the hover check reads window.__office.renders() and asserts these
+// stop growing while a hover card or the plan menu stays open and nothing else changes.
+const renders = { statusBadge: 0, planMenu: 0, hoverCard: 0, winSteps: 0, tokens: 0, winBadge: 0 };
 function renderTop() {
   const p = model.plan;
   $("planTitle").textContent = p.title || p.goal || "(no plan)";
@@ -830,7 +833,7 @@ function renderTop() {
   $("leadChip").hidden = !leadName(p);
   $("leadChip").textContent = leadName(p);
   const badgeHtml = planBadgeHtml(ownLanes());
-  if ($("statusBadge").innerHTML !== badgeHtml) $("statusBadge").innerHTML = badgeHtml;
+  if ($("statusBadge").innerHTML !== badgeHtml) { $("statusBadge").innerHTML = badgeHtml; renders.statusBadge++; }
   const attn = model.lanes.filter((l) => laneBucket(l) === "attention").length;
   const pill = $("needsPill");
   if (pill) {
@@ -903,7 +906,7 @@ function renderPlanMenu() {
   if (views.length && plans.length) html += '<li class="pm-sep" role="presentation"></li>';
   if (plans.length) html += '<li class="pm-head" role="presentation">Plans</li>' + plans.map(row).join("");
   const m = $("planMenu");
-  if (m.innerHTML !== html) m.innerHTML = html;
+  if (m.innerHTML !== html) { m.innerHTML = html; renders.planMenu++; }
   if (planMenuActive >= 0) m.setAttribute("aria-activedescendant", "pm-" + planMenuActive); else m.removeAttribute("aria-activedescendant");
 }
 function placeFloat(el, anchor, align) {
@@ -996,7 +999,7 @@ function showHoverCard(id) {
   const anchor = $(id), card = $("hoverCard");
   if (!model || !anchor || anchor.hidden || !$("planMenu").hidden) return hideHoverCard();
   const html = id === "tokenChip" ? tokenCard(model.plan) : outcomeCard(ownLanes());
-  if (card.innerHTML !== html) card.innerHTML = html;
+  if (card.innerHTML !== html) { card.innerHTML = html; renders.hoverCard++; }
   const wasHidden = card.hidden;
   hoverOn = id; card.hidden = false;
   placeFloat(card, anchor, "center");
@@ -1536,7 +1539,7 @@ function renderChecklist(steps) {
     const short = m ? m[1] : full.slice(0, 80);
     return '<li class="st-' + st + '" title="' + CAUI.esc(full) + '"><span class="mark">' + mark + '</span><span class="st-text">' + CAUI.esc(short) + '</span></li>';
   }).join("");
-  if ($("winSteps").innerHTML !== html) $("winSteps").innerHTML = html;
+  if ($("winSteps").innerHTML !== html) { $("winSteps").innerHTML = html; renders.winSteps++; }
 }
 function syncComposer(l) {
   const run = !!(l && l.running);
@@ -1652,16 +1655,16 @@ function renderTokensRow(tokens, by) {
   const sum = parts.reduce((a, p) => a + p.total, 0) || 1;
   const cls = (r) => (r === "build" ? "b" : r === "review" ? "r" : "o");
   const barHtml = parts.map((p) => '<i class="tk-seg ' + cls(p.role) + '" style="width:' + (p.total / sum) * 100 + '%"></i>').join("");
-  if ($("tkBar").innerHTML !== barHtml) $("tkBar").innerHTML = barHtml;
+  if ($("tkBar").innerHTML !== barHtml) { $("tkBar").innerHTML = barHtml; renders.tokens++; }
   const legendHtml = parts.filter((p) => p.total > 0).map((p) => '<span><i class="tk-key ' + cls(p.role) + '"></i>' + CAUI.esc(p.label) + " " + CAUI.fmtTokens(p.total) + "</span>").join("");
-  if ($("tkLegend").innerHTML !== legendHtml) $("tkLegend").innerHTML = legendHtml;
+  if ($("tkLegend").innerHTML !== legendHtml) { $("tkLegend").innerHTML = legendHtml; renders.tokens++; }
 }
 function renderWinContent(keepInput) {
   if (winFor === "lead") {
     const p = model.plan;
     $("winTitle").textContent = leadName(p);
     const badgeHtml = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
-    if ($("winBadge").innerHTML !== badgeHtml) $("winBadge").innerHTML = badgeHtml;
+    if ($("winBadge").innerHTML !== badgeHtml) { $("winBadge").innerHTML = badgeHtml; renders.winBadge++; }
     $("winMeta").textContent = "Orchestrator";
     renderTokensRow(p.tokens, p.tokensBy);
     hideControls();
@@ -1681,7 +1684,7 @@ function renderWinContent(keepInput) {
   const pr = l.progress || {};
   $("winTitle").textContent = laneName(l);
   const badgeHtml = CAUI.badge(CAUI.status(l.health));
-  if ($("winBadge").innerHTML !== badgeHtml) $("winBadge").innerHTML = badgeHtml;
+  if ($("winBadge").innerHTML !== badgeHtml) { $("winBadge").innerHTML = badgeHtml; renders.winBadge++; }
   const mm = l.models && (l.models.build || Object.values(l.models)[0]);
   $("winMeta").textContent = [mm ? CAUI.shortModel(mm) : "", pr.total ? pr.done + " / " + pr.total + " steps" : ""].filter(Boolean).join(" \u00b7 ");
   renderTokensRow(l.tokens, l.tokensBy);
@@ -2123,6 +2126,8 @@ window.__office = {
   demoFail,
   // ids deleted through the Delete controls, for the check harness
   removed: () => [...demoRemoved],
+  // DOM writes per poll-rebuilt region: the hover check asserts these stop growing while nothing changed
+  renders: () => ({ ...renders }),
 };
 
 $("planBtn").addEventListener("click", () => ($("planMenu").hidden ? openPlanMenu() : closePlanMenu(true)));

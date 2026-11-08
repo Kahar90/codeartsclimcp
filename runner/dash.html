@@ -1523,7 +1523,9 @@ onboard: () => {
   return { shown: !!panel, ready: !!panel && rows.length > 0 && fails === 0, fails, warns, prompt: ONBOARD_PROMPT, harness: onbHarness, cmd: onbCmd(), rows };
 }, fail: (on) => { demoFailAt = on ? Date.now() - 11000 : 0; },
 // ids deleted in the fixture, for the check harness: a removed plan or lane never comes back
-removed: () => [...demoRemoved] };
+removed: () => [...demoRemoved],
+// DOM writes per poll-rebuilt region: the hover check asserts these stop growing while nothing changed
+renders: () => ({ rail: railRenders, view: viewRenders }) };
 
 // ---------- always trustworthy: freshness label, stale banner, tab title, notifications ----------
 let lastOkAt = 0, firstFailAt = 0, staleOn = false;
