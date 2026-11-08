@@ -2,8 +2,8 @@
   "title": "You are working in a git repo (current directory)",
   "goal": "You are working in a git repo (current directory)",
   "lead": "lead",
-  "status": "done",
-  "now": "Closed: README refresh accepted by lead after image inspection and README/Office checks. Runner Bash lacks node; no reviewer verdict. Two existing onboarding doctor-row assertions fail. No remaining implementation work.",
+  "status": "closed",
+  "now": "Deleted from the dashboard",
   "waves": [
     {
       "name": "Lanes",
@@ -27,8 +27,13 @@
     {
       "at": "2026-11-08T05:19:53.136Z",
       "text": "Plan closed: README refresh accepted by lead after image inspection and README/Office checks. Runner Bash lacks node; no reviewer verdict. Two existing onboarding doctor-row assertions fail. No remaining implementation work.."
+    },
+    {
+      "at": "2026-11-08T09:06:14.240Z",
+      "text": "Plan codeartsclimcp~20261108-124040 deleted from the dashboard"
     }
   ],
   "next": [],
-  "risks": []
+  "risks": [],
+  "removed": true
 }

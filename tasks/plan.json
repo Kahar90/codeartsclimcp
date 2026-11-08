@@ -2,8 +2,8 @@
   "title": "Delete plans and lanes from the dashboard and Office view",
   "goal": "Users can delete plans and lanes in the Lanes dashboard and the Office view; deleting kills the lane processes, unregisters them and purges logs so nothing is left running or tracked.",
   "lead": "Claude Opus 5.5",
-  "status": "done",
-  "now": "Closed: All four lanes merged into main (delete plans/lanes, plan dedup, hover/steer/spinner polish, honest status model); every check passes on main.",
+  "status": "closed",
+  "now": "Deleted from the dashboard",
   "waves": [
     {
       "name": "Wave 1",
@@ -38,7 +38,8 @@
         "runner/dash.html",
         "runner/office.html",
         "checks/status.check.mjs"
-      ]
+      ],
+      "removed": true
     },
     {
       "task": "rm-core",
@@ -48,7 +49,8 @@
         "runner/ca.mjs",
         "runner/mcp.mjs",
         "checks/remove.check.mjs"
-      ]
+      ],
+      "removed": true
     },
     {
       "task": "rm-ui",
@@ -58,7 +60,8 @@
         "runner/dash.html",
         "runner/office.html",
         "checks/removeui.check.mjs"
-      ]
+      ],
+      "removed": true
     },
     {
       "task": "ui-polish",
@@ -68,7 +71,8 @@
         "runner/dash.html",
         "runner/office.html",
         "checks/hover.check.mjs"
-      ]
+      ],
+      "removed": true
     }
   ],
   "next": [
@@ -100,9 +104,30 @@
     {
       "at": "2026-11-08T08:58:06.425Z",
       "text": "Plan closed: All four lanes merged into main (delete plans/lanes, plan dedup, hover/steer/spinner polish, honest status model); every check passes on main.."
+    },
+    {
+      "at": "2026-11-08T09:06:17.360Z",
+      "text": "Lane status-model deleted from the dashboard"
+    },
+    {
+      "at": "2026-11-08T09:06:17.396Z",
+      "text": "Lane rm-core deleted from the dashboard"
+    },
+    {
+      "at": "2026-11-08T09:06:17.447Z",
+      "text": "Lane rm-ui deleted from the dashboard"
+    },
+    {
+      "at": "2026-11-08T09:06:17.492Z",
+      "text": "Lane ui-polish deleted from the dashboard"
+    },
+    {
+      "at": "2026-11-08T09:06:17.506Z",
+      "text": "Plan codeartsclimcp deleted from the dashboard"
     }
   ],
   "risks": [
     "Earlier lanes in this repo failed their git gate; watch the first commit."
-  ]
+  ],
+  "removed": true
 }

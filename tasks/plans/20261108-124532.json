@@ -2,8 +2,8 @@
   "title": "KIND: review Read-only codebase audit",
   "goal": "KIND: review Read-only codebase audit",
   "lead": "lead",
-  "status": "done",
-  "now": "Closed: Read-only easy-wins audit delivered; lead independently verified findings. No implementation requested. Lane clean-tree gate failed on runner-generated plan metadata.",
+  "status": "closed",
+  "now": "Deleted from the dashboard",
   "waves": [
     {
       "name": "Lanes",
@@ -27,8 +27,13 @@
     {
       "at": "2026-11-08T05:43:16.169Z",
       "text": "Plan closed: Read-only easy-wins audit delivered; lead independently verified findings. No implementation requested. Lane clean-tree gate failed on runner-generated plan metadata.."
+    },
+    {
+      "at": "2026-11-08T09:06:15.915Z",
+      "text": "Plan codeartsclimcp~20261108-124532 deleted from the dashboard"
     }
   ],
   "next": [],
-  "risks": []
+  "risks": [],
+  "removed": true
 }
