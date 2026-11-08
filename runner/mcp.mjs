@@ -181,6 +181,24 @@ const TOOLS = [
       ...(a.force ? ['--force'] : [])],
   },
   {
+    name: 'ca_workspace',
+    description: 'Prepare a parallel lane workspace as a LOCAL CLONE at ../<repo-name>-wt-<task> on a new branch lane/<task> (ca workspace), or merge that branch back with land: true (ca workspace --land, which refuses a dirty main tree and removes the clone). Use a clone, never git worktree add: a worktree keeps its git dir in the main repo, outside the lane folder, so the CodeArts sandbox refuses every commit ("Permission denied"). Start the lane in the printed workspace folder.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'path of the main repo the lane works from' },
+        task: { type: 'string', description: 'task name; the clone is <repo-name>-wt-<task> and the branch is lane/<task>' },
+        from: { type: 'string', description: 'branch to start lane/<task> from (default: the repo current branch)' },
+        land: { type: 'boolean', description: 'true: fetch lane/<task> from the clone into repo and merge it (--no-ff), then delete the clone; refuses on a dirty main tree' },
+      },
+      required: ['repo', 'task'],
+    },
+    ok: [0],
+    timeout: 120000,
+    build: (a) => ['workspace', ...(a.land ? ['--land'] : []), needStr(a.repo, 'repo'), needStr(a.task, 'task'),
+      ...optStrPair('--from', a.from)],
+  },
+  {
     name: 'ca_lane_start',
     description: 'Start a lane in the background (ca lane <repo> <task> --detach): a CodeArts worker reads the brief, builds, commits each step and runs the CHECK lines itself. Returns at once; follow it with ca_wait. Use it only after ca_doctor is clean and the brief at tasks/<task>.md exists.',
     inputSchema: {
@@ -212,6 +230,7 @@ const TOOLS = [
         lanes: { type: 'array', items: { type: 'string' }, description: 'lane ids or task names to wait for (as in ca_status)' },
         timeout_s: { type: 'number', description: 'how long to block at most, seconds (default 45, max 55)' },
         any: { type: 'boolean', description: 'true: return as soon as any one lane has a result (an early failure is seen at once when lanes run in parallel); the still-running lanes are listed in running' },
+        compact: { type: 'boolean', description: 'default true: one small row per lane {lane, status {key, label, attention}, progress "d/t", commits, tokens, next}; set false for the full status rows' },
       },
       required: ['lanes'],
     },
@@ -489,7 +508,10 @@ async function waitResult(a) {
   // Capped below the ~60 s tool timeout of common MCP clients: a longer block comes back as a client error.
   const timeoutS = needCount(a.timeout_s, 'timeout_s', 45, 55);
   const any = a.any === true;
-  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
+  // compact defaults to true: the lead gets one small decision row per lane. Set compact: false for the
+  // full status rows (progress object, tokensBy, paths) when it needs to inspect a lane.
+  const compactArg = a.compact === false ? [] : ['--compact'];
+  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), '--json', ...compactArg, '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
   if (![0, 1, 3, 4, 5, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();

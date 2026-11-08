@@ -35,7 +35,10 @@ summaries, not transcripts.
   changes scope, publish the revised goal, pending tasks and lanes before starting the added work.
   Pass the plan id explicitly to notes so concurrent projects cannot steal your updates.
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.
-- Parallel lanes each get a git worktree: `git worktree add ../<repo>-wt-<task> -b lane/<task>`.
+- Parallel lanes each get a local clone: `ca_workspace {repo, task, from}` (CLI
+  `ca workspace <repo> <task> [--from <branch>]`) makes `../<repo>-wt-<task>` on branch
+  `lane/<task>`. Never use `git worktree add` for a lane: a worktree keeps its git dir in the main
+  repo, outside the lane folder, so the CodeArts sandbox refuses every commit ("Permission denied").
 
 ## 3. Brief (one per lane)
 - `ca_init {repo, task, goal}` writes `tasks/<task>.md` from the template; then edit it to be lean:
@@ -106,7 +109,9 @@ committing; the runner runs final CHECK gates at idle and the lead verifies the 
 - Run the checks yourself on the lane's branch; for UI, drive the real app. Check `git status`.
 - Real bug: write `tasks/<task>-fix.md` (finding, file:line, expected behaviour, CHECK line) and
   run it as a new lane. Fix one-liners yourself.
-- Merge worktree lanes into main yourself, run the checks on main, remove the worktree.
+- Merge a lane workspace back yourself with `ca_workspace --land {repo, task}` (CLI
+  `ca workspace --land <repo> <task>`): it refuses on a dirty main tree, fetches and merges the lane
+  branch, then removes the clone. Run the checks on main.
 
 ## 6. Report and close
 What was built, commits, checks and in-app results, verdicts and what you overruled, open items.
