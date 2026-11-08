@@ -66,7 +66,7 @@ recorded, so you can follow a goal from brief to done.
 
 ### Lane detail: transcript, brief, steering and checks
 
-![A lane's transcript, brief, steering box and check results on one page](docs/images/lane-detail.png)
+![Lane progress, token usage, brief steps and steering controls](docs/images/lane-detail.png)
 
 Open any lane for its live transcript, the brief it is following, a box to steer it mid-run, and
 the checks the runner ran before reporting done.
