@@ -19,7 +19,7 @@
 //                                  --resume: continue a paused/stopped/failed lane in place, same id and step count,
 //                                  plus the lead's notes from tasks/<task>.resume.md if present)
 //        ca status [--json] [--all]        table of lanes (--json adds id, task, repo, result, progress)
-//        ca wait <lane...> [--any] [--timeout S] [--json] [--quiet]  block until lanes end (--any: first); exit = worst lane
+//        ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]  block until lanes end (--any: first); exit = worst lane
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
 //        ca workspace <repo> <task> [--from <branch>]   prepare a parallel lane workspace as a local
@@ -1579,16 +1579,34 @@ function laneExit(s) {
 }
 const exitRank = (c) => ({ 1: 4, 3: 3, 5: 2, 4: 1 }[c] ?? 0);
 const worstExit = (codes) => codes.reduce((a, b) => (exitRank(b) > exitRank(a) ? b : a), 0);
+// The compact `ca wait --json --compact` row: only what a lead needs to decide and call again, so the
+// context stays small when many lanes are watched. `next` is the per-lane action for its exit code.
+const WAIT_NEXT = {
+  0: 'read ca_summary for each lane and verify the work',
+  1: 'read ca_summary; ca_resume continues a failed, stopped or checks-failing lane with a note',
+  3: 'keys missing or rejected: ask the human to run ca auth (never ask for keys in chat), then ca_resume the lane',
+  4: 'read ca_summary: the reviewer asked for changes, or the checks could not run (unverified)',
+  5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
+  124: 'still running: call ca wait again',
+};
+function compactWaitRow(l, s) {
+  const st = laneStatusOf(l, s); const pg = stepProgress(s);
+  return { lane: l.id, status: { key: st.key, label: st.label, attention: st.attention }, progress: `${pg.done}/${pg.total}`,
+    commits: s.commits || 0, tokens: tokenTotal(s.tokens), next: WAIT_NEXT[s.result ? laneExit(s) : 124] || '' };
+}
 async function cmdWait(args) {
   const asJson = args.includes('--json'); const quiet = args.includes('--quiet');
+  // --compact: with --json, return only the small per-lane decision rows a lead reads when many lanes
+  // run at once. MCP ca_wait turns it on by default.
+  const wantCompact = args.includes('--compact');
   // --any returns as soon as one lane has a result, so a lead watching parallel lanes sees an early
   // failure at once instead of waiting for the slowest lane. Others are listed as still running.
   const any = args.includes('--any');
   const ti = args.indexOf('--timeout');
   const timeoutS = ti >= 0 ? Number(args[ti + 1]) : NaN;
-  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--quiet]', 2);
+  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]', 2);
   const qs = args.filter((a, i) => !a.startsWith('--') && !(ti >= 0 && i === ti + 1));
-  if (!qs.length) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--quiet]', 2);
+  if (!qs.length) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]', 2);
   const targets = qs.map((q) => findLane(q)); // resolve every lane first: unknown -> exit 2
   const deadline = Number.isFinite(timeoutS) && timeoutS > 0 ? now() + timeoutS * 1000 : Infinity;
   const last = new Map(); let lastBeat = 0;
@@ -1611,15 +1629,20 @@ async function cmdWait(args) {
     if (any ? finished.length > 0 : states.every(({ s }) => s.result)) {
       const objs = finished.map(({ l, s }) => ({ lane: l.id, result: s.result, status: laneStatusOf(l, s), verdict: s.verdict || '', exit: laneExit(s),
         summaryPath: fs.existsSync(path.join(l.dir, 'summary.md')) ? path.join(l.dir, 'summary.md') : null }));
-      const running = states.filter(({ s }) => !s.result).map(({ l }) => l);
+      const runningStates = states.filter(({ s }) => !s.result);
+      const running = runningStates.map(({ l }) => l);
       for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
-      if (asJson) process.stdout.write(JSON.stringify(any ? { lanes: objs, any: true, running: running.map(statusRow) } : { lanes: objs }) + '\n');
-      else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
+      if (asJson) {
+        const lanes = wantCompact ? finished.map(({ l, s }) => compactWaitRow(l, s)) : objs;
+        const run = wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : running.map(statusRow);
+        process.stdout.write(JSON.stringify(any ? { lanes, any: true, running: run } : { lanes }) + '\n');
+      } else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
     }
     if (now() >= deadline) {
-      const running = states.filter(({ s }) => !s.result).map(({ l }) => l);
-      if (asJson) console.log(JSON.stringify({ timeout: true, waitedS: timeoutS, lanes: running.map(statusRow) }));
+      const runningStates = states.filter(({ s }) => !s.result);
+      const running = runningStates.map(({ l }) => l);
+      if (asJson) console.log(JSON.stringify({ timeout: true, waitedS: timeoutS, lanes: wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : running.map(statusRow) }));
       else { console.log(`wait: timeout after ${timeoutS}s; still running:`); printRows(running.map(laneRow)); }
       process.exit(124);
     }

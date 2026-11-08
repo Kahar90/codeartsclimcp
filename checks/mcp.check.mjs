@@ -49,7 +49,7 @@ try {
   check('ca_summary returns summary JSON', !m.result?.isError && j && j.result === 'done' && j.verdict === 'ready', text(m).slice(0, 160));
   m = await call('ca_tail', { lane: 'good', lines: 5 }); check('ca_tail returns the transcript tail', !m.result?.isError && /line two/.test(text(m)), text(m).slice(0, 120));
   m = await call('ca_wait', { lanes: ['good'] }); j = parse(text(m));
-  check('ca_wait on a done lane: result JSON with exit 0', !m.result?.isError && j && j.exit === 0 && Array.isArray(j.lanes) && j.lanes[0].result === 'done', text(m).slice(0, 200));
+  check('ca_wait on a done lane: compact row with exit 0', !m.result?.isError && j && j.exit === 0 && Array.isArray(j.lanes) && j.lanes[0].status?.key === 'done' && typeof j.lanes[0].progress === 'string', text(m).slice(0, 200));
   const t0 = Date.now(); m = await call('ca_wait', { lanes: ['slow'], timeout_s: 2 }, 30000); j = parse(text(m));
   check('ca_wait timeout says still running, not an error', !m.result?.isError && j && j.exit === 124 && j.timedOut === true && Date.now() - t0 < 20000, text(m).slice(0, 200));
   // MCP clients (Codex, opencode) cancel a tool call after about 60 s: a huge timeout_s must still answer in time.

@@ -230,6 +230,7 @@ const TOOLS = [
         lanes: { type: 'array', items: { type: 'string' }, description: 'lane ids or task names to wait for (as in ca_status)' },
         timeout_s: { type: 'number', description: 'how long to block at most, seconds (default 45, max 55)' },
         any: { type: 'boolean', description: 'true: return as soon as any one lane has a result (an early failure is seen at once when lanes run in parallel); the still-running lanes are listed in running' },
+        compact: { type: 'boolean', description: 'default true: one small row per lane {lane, status {key, label, attention}, progress "d/t", commits, tokens, next}; set false for the full status rows' },
       },
       required: ['lanes'],
     },
@@ -507,7 +508,10 @@ async function waitResult(a) {
   // Capped below the ~60 s tool timeout of common MCP clients: a longer block comes back as a client error.
   const timeoutS = needCount(a.timeout_s, 'timeout_s', 45, 55);
   const any = a.any === true;
-  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
+  // compact defaults to true: the lead gets one small decision row per lane. Set compact: false for the
+  // full status rows (progress object, tokensBy, paths) when it needs to inspect a lane.
+  const compactArg = a.compact === false ? [] : ['--compact'];
+  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), '--json', ...compactArg, '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
   if (![0, 1, 3, 4, 5, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();

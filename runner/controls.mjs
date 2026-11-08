@@ -7,8 +7,14 @@
 // check itself could not run (missing tool, sandbox, timeout): not the worker's fault.
 export function classifyCheck({ code, out }) {
   if (!code) return 'pass';
-  if (code === 126 || code === 127
-    || /command not found|is not recognized as an internal or external command|ENOENT|EACCES|Sandbox Network Error|cannot find module 'node'|\[runner: timed out/i.test(String(out || ''))) return 'infra';
+  const o = String(out || '');
+  // A missing command or file: the check could not run, whoever is at fault (not the worker's).
+  const missing = /command not found|is not recognized as an internal or external command|ENOENT|cannot find module|No such file or directory/i.test(o);
+  // 126/127 only means "infra" when the check never ran: the shell could not find the command or file, or
+  // it said nothing at all. A worker's check that got to run and crashed after printing PASS lines (a Node
+  // Assertion failed abort) still exits non-zero: that is a real "fail", not a check that could not run.
+  if (code === 126 || code === 127) return (missing || !o.trim()) ? 'infra' : 'fail';
+  if (/command not found|is not recognized as an internal or external command|ENOENT|EACCES|Sandbox Network Error|cannot find module 'node'|\[runner: timed out/i.test(o)) return 'infra';
   return 'fail';
 }
 
