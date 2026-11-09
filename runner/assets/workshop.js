@@ -96,7 +96,7 @@
   var raf = 0;
   function tick() { raf = 0; if (document.hidden) return; sprites.forEach(function (s) { if (!s.el.isConnected) { sprites.delete(s); return; } s._render(false); }); if (sprites.size && motionOn()) raf = requestAnimationFrame(tick); }
   function kick() { if (!raf && !document.hidden) raf = requestAnimationFrame(tick); }
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) { sprites.forEach(function (s) { s._render(true); }); kick(); } });
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', function () { if (!document.hidden) { sprites.forEach(function (s) { s._render(true); }); kick(); } });
   listeners.push(function (on) { if (on) kick(); });
 
   window.PixelSprites = {
