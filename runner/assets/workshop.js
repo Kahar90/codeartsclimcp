@@ -146,6 +146,59 @@
     }, 10000);
   }
   if (typeof location !== 'undefined' && typeof setInterval === 'function') watchUi();
+  // ---------- time taken ----------
+  // Human duration, same format as the CLI (ca.mjs fmtDur): 45s / 12m / 2h 0m / 3d 4h.
+  function fmtDur(ms) {
+    var s = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h';
+  }
+  // Local HH:MM, with the date appended when the moment is not today (a plan may span days).
+  function fmtClock(t) {
+    var d = new Date(t); if (isNaN(d.getTime())) return '?';
+    var n = new Date();
+    var hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    var today = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+    return today ? hm : hm + ' ' + d.toLocaleDateString();
+  }
+  var SEG_COLOR = { planning: 'var(--lead)', lanes: 'var(--builder)', between: 'var(--faint)', verify: 'var(--muted)' };
+  var PHASE_LABEL = { build: 'Build', checks: 'Checks', fix: 'Fix', review: 'Review', wait: 'Waiting', other: 'Other' };
+  // The inner HTML of the "time taken" hover card, shared by the Office chip and the Lanes plan head.
+  // time: { startedAt, endedAt, live, totalMs, segments:[{key,label,ms}], work:{totalMs,byPhase}, lanes:[{task,ms}] }.
+  function timeCard(time) {
+    if (!time) return '';
+    var segs = Array.isArray(time.segments) ? time.segments : [];
+    var barSum = segs.reduce(function (a, s) { return a + (+s.ms || 0); }, 0) || 1;
+    var bar = segs.filter(function (s) { return (+s.ms || 0) > 0; }).map(function (s) {
+      return '<span style="width:' + (100 * (+s.ms || 0) / barSum) + '%;background:' + (SEG_COLOR[s.key] || 'var(--faint)') + '"></span>';
+    }).join('');
+    var rows = segs.filter(function (s) { return (+s.ms || 0) > 0 || s.key === 'lanes'; }).map(function (s) {
+      return '<div class="tc-row"><span class="tc-sw" style="background:' + (SEG_COLOR[s.key] || 'var(--faint)') + '"></span><span class="tc-l">' + esc(s.label) + '</span><span class="tc-v">' + fmtDur(s.ms) + '</span></div>';
+    }).join('');
+    var byPhase = (time.work && time.work.byPhase) || {};
+    var prows = ['build', 'checks', 'fix', 'review', 'wait', 'other'].filter(function (k) { return (+byPhase[k] || 0) > 0; }).map(function (k) {
+      return '<div class="tc-row"><span class="tc-l">' + PHASE_LABEL[k] + '</span><span class="tc-v">' + fmtDur(byPhase[k]) + '</span></div>';
+    }).join('');
+    var lanes = Array.isArray(time.lanes) ? time.lanes : [];
+    var lrows = lanes.map(function (l) {
+      return '<div class="tc-row"><span class="tc-l">' + esc(l.task) + '</span><span class="tc-v">' + fmtDur(l.ms) + '</span></div>';
+    }).join('');
+    var foot = 'Started ' + esc(fmtClock(time.startedAt)) + (time.live ? ' \u00b7 still running' : (time.endedAt != null ? ' \u00b7 finished ' + esc(fmtClock(time.endedAt)) : ''));
+    return '<div class="tc-kicker">' + (time.live ? 'Time so far' : 'Time taken') + '</div>' +
+      '<div class="tc-big">' + fmtDur(time.totalMs) + '</div>' +
+      (bar ? '<div class="tc-bar">' + bar + '</div>' : '') +
+      '<div class="tc-sec">' + rows + '</div>' +
+      (prows ? '<div class="tc-sec"><div class="tc-kicker">Worker time ' + fmtDur(time.work && time.work.totalMs) + '</div>' + prows + '</div>' : '') +
+      (lrows ? '<div class="tc-sec"><div class="tc-kicker">By lane</div>' + lrows + '</div>' : '') +
+      '<div class="tc-foot">' + foot + '</div>';
+  }
+  function timeRowsByPhase(byPhase) {
+    var by = byPhase || {};
+    return ['build', 'checks', 'fix', 'review', 'wait', 'other'].filter(function (k) { return (+by[k] || 0) > 0; }).map(function (k) { return PHASE_LABEL[k] + ' ' + fmtDur(by[k]); }).join(' / ');
+  }
+
   // ---------- tokens ----------
   // A token record is { input, output, reasoning, cacheRead, steps, total }. total may be missing on old lanes.
   function tokenTotal(t) {
@@ -429,5 +482,6 @@
 
   window.CAUI = { status: status, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); },
     tokenTotal: tokenTotal, fmtTokens: fmtTokens, tokenDetail: tokenDetail, tokenSplit: tokenSplit, ACTIONS: ACTIONS, QUICK_STEERS: QUICK_STEERS, control: control,
-    place: place, track: track, toast: toast, copyText: copyText, update: initUpdate };
+    place: place, track: track, toast: toast, copyText: copyText, update: initUpdate,
+    fmtDur: fmtDur, timeCard: timeCard, timeRowsByPhase: timeRowsByPhase };
 })();
