@@ -640,17 +640,22 @@ async function runLane(repoArg, task, opts = {}) {
     return k && k.mode ? k : { mode: 'turn', text: '', by: 'unknown', at: now() };
   };
   let curModel = BUILD, curAgent;
+  let lastPumpHadStepReview = false; // did the last pumpInbox() deliver a step-review finding?
   const pumpInbox = async (sid) => {
+    lastPumpHadStepReview = false;
     let files = []; try { files = fs.readdirSync(path.join(dir, 'inbox')).filter((f) => f.endsWith('.txt')).sort(); } catch {}
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      L('>> steer:'); block('» ', text); S.steers.push({ at: now(), by: 'ca steer', phase: S.phase, text: oneLine(text, 500) });
+      const by = /stepreview/i.test(f) ? 'step review' : 'ca steer';
+      if (by === 'step review') lastPumpHadStepReview = true;
+      L('>> steer:'); block('» ', text); S.steers.push({ at: now(), by, phase: S.phase, text: oneLine(text, 500) });
       process.stdout.write(`[${task} ${hhmmss()}] steer received: ${oneLine(text, 100)}\n`);
       await send(sid, `Message from the lead (steering, applies on top of the brief): ${text}`, curModel, curAgent);
     }
     return files.length;
   };
+  const inboxStepReviewFiles = () => { try { return fs.readdirSync(path.join(dir, 'inbox')).filter((f) => f.endsWith('.txt') && /stepreview/i.test(f)); } catch { return []; } };
 
   // A step review is a short read-only pass over one step commit, run while the builder keeps working.
   // It must never touch drive()/send()/waitTurn(): those set S.activeSession, S.busy and the builder
@@ -1091,7 +1096,18 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
       sid = r.sid; S.buildSession = sid;
       if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; if (r.keys) S.keysMessage = r.keys; break; }
-      if (await pumpInbox(sid)) continue; // a steer arrived right at the end: let the builder handle it
+      // The builder is idle: let a step review still in flight finish (bounded by its own timeout) so
+      // its finding can be steered in before the gates run.
+      if (stepReviewRunning) { try { await stepReviewRunning; } catch {} }
+      const srFiles = inboxStepReviewFiles();
+      if (srFiles.length && (S.stepReviewContinues || 0) >= CFG.fixes) {
+        for (const f of srFiles) { try { fs.rmSync(path.join(dir, 'inbox', f), { force: true }); } catch {} }
+        L(`== step-review steers capped at ${CFG.fixes}; not looping again`);
+      }
+      if (await pumpInbox(sid)) {
+        if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
+        continue; // a steer arrived right at the end: let the builder handle it
+      }
       phase('gate', 'running gates');
       const g = await gates();
       if (g.ok) { reason = ''; exitCode = 0; break; }
