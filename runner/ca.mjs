@@ -422,7 +422,7 @@ async function runLane(repoArg, task, opts = {}) {
       'fs.mkdirSync(reqDir, { recursive: true });',
       "const reqFile = path.join(reqDir, id + '.json');",
       "const resFile = path.join(reqDir, id + '.result.json');",
-      'fs.writeFileSync(reqFile, JSON.stringify({ id, arg, at: Date.now() }));',
+      "fs.writeFileSync(reqFile + '.tmp', JSON.stringify({ id, arg, at: Date.now() })); fs.renameSync(reqFile + '.tmp', reqFile);",
       'const waitMs = (Number(process.env.CHECK_TIMEOUT) || 900) * 1000 + 60000;',
       'const deadline = Date.now() + waitMs;',
       'let res = null;',
