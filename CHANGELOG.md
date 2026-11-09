@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.4 (2026-11-10)
+
+Updates
+- Snappier dashboard: every poll used to re-read every lane and plan file once per plan and once per lane
+  (about 1 s per request at 100 lanes and 8 plans, so two open tabs kept the dashboard half busy). Parsed files
+  are now cached until they change and each request reads the lanes and plans once: about 25 ms per request.
+- Open in Lanes from the Office agent window shows the lane name at once ("Opening lane...") while its
+  detail loads, so it never looks like the Control room.
+- Faster commands: user environment variables are read in one registry query instead of one PowerShell
+  start per name (`ca doctor` 5.4 s to 3.3 s; lane start and `ca auth` gain the same).
+- Checks: `npm run check` runs the fast set (no browser) in parallel in about 1.5 min with per-check times;
+  `npm run check:full` runs all 48 in about 4 min (was over 10).
+
 ## 0.5.3 (2026-11-09)
 
 Updates
