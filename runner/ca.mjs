@@ -850,7 +850,7 @@ async function runLane(repoArg, task, opts = {}) {
       // A check the worker asked for may run for minutes: its bash tool is waiting on the helper, which
       // is normal, so keep the tool watchdog from aborting that wait.
       if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
-      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) maybeStepReview(); }
+      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview(); maybeStepReview(); } }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
         try {
@@ -1238,6 +1238,71 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     try { await fr.promise; } catch {}
     s.aborting = false;
     if (S.reviewSession === fr.sid) S.reviewSession = null;
+  };
+
+  // ---- speculative final review ----
+  // The builder spends 30 s to 2.6 min after its last step commit (final checks, wrap-up reply) before the
+  // gates, and only then did the final review start. As soon as every numbered step has a "step N:" commit
+  // and the work tree is clean, the final review starts in its own session while the builder wraps up. It is
+  // an independent poller like runStepReview: never drive()/send()/waitTurn(), which belong to the builder.
+  // State: S.specReview = { head, at, used }. When the builder goes idle and the git clean gate passes, a
+  // review whose HEAD is still the one it saw is used as the final review; otherwise it is aborted and the
+  // normal review runs. An in-flight step review is cancelled when the speculative one starts (it covers it).
+  let specReview = null; // { sid, head, from, at, promise, used } for the current round, or null
+  const startSpecReview = (prev) => {
+    const head = git(repo, 'rev-parse', 'HEAD');
+    const at = now();
+    const rb = finalReviewPrompt(prev);
+    const rec = { sid: null, head, from: prev && prev.to ? prev.to : START, at, used: false, promise: null };
+    S.specReview = { head, at, used: false };
+    S.reviewStartedAt = at;
+    save(true);
+    rec.promise = (async () => {
+      try {
+        rec.sid = await newSession(`${task} review (speculative)`);
+        reviewSessions.add(rec.sid);
+        sent.add(rb.trim()); // the runner's own prompt: never list it as a TUI steer
+        await server.api('POST', `/session/${rec.sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: rb }] });
+        L(`== speculative review (${REVIEW}, plan agent) session ${rec.sid} on ${head.slice(0, 8)}: starts while the builder wraps up`);
+        const deadline = at + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false, text = '';
+        while (!done) {
+          if (now() > deadline) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'timeout', text }; }
+          await sleep(3000);
+          let st; try { st = (await server.api('GET', '/session/status', null, 10000))[rec.sid]?.type; } catch { st = undefined; }
+          if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
+          try { text = lastAssistantText(await server.api('GET', `/session/${rec.sid}/message`)); } catch {}
+          if (sawBusy || text) done = true;
+          else if (now() - at > 60000) return { sid: rec.sid, ok: false, reason: 'missing', text };
+        }
+        return { sid: rec.sid, ok: true, reason: '', text };
+      } catch (err) { L(`! speculative review error: ${oneLine(String((err && err.message) || err), 200)}`); return { sid: rec.sid, ok: false, reason: 'error', text: '' }; }
+    })().catch(() => ({ sid: rec.sid, ok: false, reason: 'error', text: '' }));
+    specReview = rec;
+    return rec;
+  };
+  const maybeSpecReview = async () => {
+    if (CFG.noReview || specReview) return;
+    const pg = stepProgress(S);
+    if (!pg.total || pg.done !== pg.total) return;
+    if (dirty().length) return;
+    // The speculative review reads the whole range, so cancel a step review still in flight the same way
+    // the idle grace does: it is covered by the final review now.
+    if (stepReviewRunning) {
+      stepReviewCancel = true;
+      L('== speculative review starts: cancelling the step review in flight (the final review covers those commits)');
+      try { await stepReviewRunning; } catch {}
+      stepReviewCancel = false;
+      if (specReview) return;
+    }
+    startSpecReview(S.reviewRounds[S.reviewRounds.length - 1]);
+  };
+  const discardSpecReview = async () => {
+    const rec = specReview; if (!rec) return;
+    const s = rec.sid ? sx(rec.sid) : null;
+    if (rec.sid) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch (err) { L(`! speculative review abort failed: ${err.message}`); } }
+    if (s) { s.aborting = true; s.busy = false; s.sawBusy = true; }
+    try { await rec.promise; } catch {}
+    if (s) s.aborting = false;
   };
 
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
