@@ -1115,7 +1115,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok (committed by the runner)');
       } else {
         S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: d.slice(0, 5).join(', ') }); L(`== gate git clean: FAIL (${d.length} changed)`);
-        return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` };
+        return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` + CHECK_HELP };
       }
     } else {
       S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
@@ -1148,7 +1148,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
       S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
       if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
-      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` }; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }; }
       L(`== gate check ok (${dur(r.ms)})`);
     }
     return { ok: true };
@@ -1295,7 +1295,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
         if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
         say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message + CHECK_HELP, buildModel);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
         continue;
       }
       // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
@@ -1309,7 +1309,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
         if (++S.fixes > CFG.fixes) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; exitCode = 1; break; }
         say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message + CHECK_HELP, buildModel);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
         continue;
       }
       // The checks passed: wait for the overlapped review to end and record its verdict.
