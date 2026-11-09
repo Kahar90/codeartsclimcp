@@ -852,7 +852,7 @@ async function runLane(repoArg, task, opts = {}) {
       // A check the worker asked for may run for minutes: its bash tool is waiting on the helper, which
       // is normal, so keep the tool watchdog from aborting that wait.
       if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
-      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview(); maybeStepReview(); } }
+      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview().catch((err) => L(`! speculative review start failed: ${oneLine(String((err && err.message) || err), 200)}`)); maybeStepReview(); } }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
         try {
@@ -1235,10 +1235,14 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   const discardFinalReview = async (fr) => {
     if (!fr) return;
     const s = sx(fr.sid);
+    // A speculative review's own poller has no drive() loop to notice the abort: flag it so it stops at once
+    // instead of spinning to its 60 s "missing" deadline (which would delay the fix-round message).
+    if (fr.spec) specReviewCancel = true;
     try { await server.api('POST', `/session/${fr.sid}/abort`, {}); } catch (err) { L(`! review abort failed: ${err.message}`); }
     s.aborting = true; s.busy = false; s.sawBusy = true;
     try { await fr.promise; } catch {}
     s.aborting = false;
+    if (fr.spec) specReviewCancel = false;
     if (S.reviewSession === fr.sid) S.reviewSession = null;
   };
 
@@ -1325,6 +1329,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     try { await rec.promise; } catch {}
     specReviewCancel = false;
     if (s) s.aborting = false;
+    specReview = null; // release the round: a discarded review must not block maybeSpecReview in the next fix round (S.specReview stays for the contract)
   };
   // Start (or reuse) the final review for the current round. A speculative review whose HEAD is still the
   // current HEAD is awaited in place of the normal review (its text and verdict go through applyFinalReview
@@ -1344,6 +1349,23 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     if (specReview) await discardSpecReview(); // stale: HEAD moved after it started, so abort and review again now
     const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
     return { sid: fr.sid, head: fr.head0, from: fr.from, at: fr.at, promise: fr.promise, spec: false };
+  };
+  // Await the overlapped final review and record it. A speculative review that did not finish (a transient
+  // error, a review past the timeout, or a credentials error its poller cannot report) falls back to the
+  // normal review, which drive()s the session with retries and detects auth, instead of turning the lane into
+  // "needs review" with an empty verdict.
+  const finishFinalReview = async (fr) => {
+    let rr = await fr.promise;
+    if (!rr.ok && fr.spec && rr.reason !== 'cancelled') {
+      L(`== speculative review did not finish (${rr.reason}); running the normal final review`);
+      await discardSpecReview();
+      if (S.specReview) { S.specReview.used = false; save(true); }
+      const fr2 = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
+      fr = { sid: fr2.sid, head: fr2.head0, from: fr2.from, at: fr2.at, promise: fr2.promise, spec: false };
+      rr = await fr2.promise;
+    }
+    if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
+    await applyFinalReview(fr.sid, rr, fr.head, fr.from, fr.at);
   };
 
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
@@ -1473,9 +1495,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         // The checks passed: wait for the overlapped review to end and record its verdict.
         if (fr) {
           phase('review', 'reviewing');
-          const rr = await fr.promise;
-          if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-          await applyFinalReview(fr.sid, rr, fr.head, fr.from, fr.at);
+          await finishFinalReview(fr);
           if (exitCode === 3) break;
         }
         reason = ''; exitCode = 0; cleanEnd = true; break;
@@ -1488,9 +1508,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       if (!finalReviewed && (exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
         const fr = await beginFinalReview();
         phase('review', 'reviewing');
-        const rr = await fr.promise;
-        if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-        await applyFinalReview(fr.sid, rr, fr.head, fr.from, fr.at);
+        await finishFinalReview(fr);
       }
 
       if (!cleanEnd) break; // a stop, timeout, auth, infra/unverified or write failure ends the lane
