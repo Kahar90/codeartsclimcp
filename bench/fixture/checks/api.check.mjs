@@ -9,7 +9,7 @@ const file = path.join(dataDir, 'notes.json');
 async function start(opts) { const srv = createServer(opts); await new Promise((r) => srv.listen(0, '127.0.0.1', r)); return { srv, base: `http://127.0.0.1:${srv.address().port}` }; }
 let base = '';
 const call = async (method, p, body, raw) => {
-  let r; try { r = await fetch(base + p, { method, headers: { 'content-type': 'application/json' }, body: raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body) }); } catch (e) { return { code: -1, j: null, h: new Headers(), error: String(e.cause?.code || e.message) }; }
+  let r; try { r = await fetch(base + p, { method, signal: AbortSignal.timeout(5000), headers: { 'content-type': 'application/json' }, body: raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body) }); } catch (e) { return { code: -1, j: null, h: new Headers(), error: String(e.cause?.code || e.message) }; }
   let j = null; try { j = await r.json(); } catch {}
   return { code: r.status, j, h: r.headers };
 };
