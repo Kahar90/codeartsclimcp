@@ -455,6 +455,9 @@ async function runLane(repoArg, task, opts = {}) {
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
   const REVIEW = (brief.match(/^\s*REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.review;
+  // Step reviews are an early warning, not the gate: they may use a faster model (STEP_REVIEW_MODEL env or brief line)
+  // so they do not compete with the final review for the review model. The final review always uses REVIEW.
+  const STEP_REVIEWER = (brief.match(/^\s*STEP_REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || process.env.STEP_REVIEW_MODEL || REVIEW;
   const stepReviewLine = (brief.match(/^\s*STEP_REVIEW:\s*([\w-]+)/m) || [])[1];
   const STEP_REVIEW = process.env.STEP_REVIEW !== '0' && !/^off$/i.test(stepReviewLine || '') && !CFG.noReview;
   // REVIEW_FIXES: how many review-fix rounds a final "needs fixes" verdict may trigger in place. A brief
@@ -756,8 +759,8 @@ async function runLane(repoArg, task, opts = {}) {
       const prompt = stepReviewTemplate().replaceAll('{TASK}', task).replaceAll('{STEPS}', steps.map((k) => `step ${k}`).join(', '))
         .replaceAll('{RANGE}', `${from}..${to}`).replaceAll('{SUBJECTS}', subjects.join('\n'));
       sent.add(prompt.trim()); // the runner's own prompt: never list it as a TUI steer
-      await server.api('POST', `/session/${sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: prompt }] });
-      L(`== step review ${n} (${REVIEW}, plan agent) session ${sid}: ${from.slice(0, 8)}..${to.slice(0, 8)} for ${steps.map((k) => `step ${k}`).join(', ')}`);
+      await server.api('POST', `/session/${sid}/prompt_async`, { model: splitModel(STEP_REVIEWER), agent: 'plan', parts: [{ type: 'text', text: prompt }] });
+      L(`== step review ${n} (${STEP_REVIEWER}, plan agent) session ${sid}: ${from.slice(0, 8)}..${to.slice(0, 8)} for ${steps.map((k) => `step ${k}`).join(', ')}`);
       const deadline = t0 + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false;
       while (!done) {
         if (now() > deadline) { try { await server.api('POST', `/session/${sid}/abort`, {}); } catch {} verdict = 'timeout'; break; }
