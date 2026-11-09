@@ -1139,6 +1139,13 @@ function cmdDetach(repoArg, task) {
 }
 
 // ---------- control commands ----------
+// The dashboard answers /api/plans, /api/lanes and /api/overview every 2 s and maps a view over every plan and
+// lane, so lanes() and plans() must run once per poll, not once per plan or per lane. The request handler sets
+// reqSnap at the start of a request and the snapshot goes stale on the next one; outside the dashboard it stays
+// null and every call reads live, so CLI commands behave exactly as before.
+let reqSnap = null;
+function lanesSnapshot() { if (!reqSnap) return lanes(); if (!reqSnap.lanes) reqSnap.lanes = lanes(); return reqSnap.lanes; }
+function plansSnapshot() { if (!reqSnap) return plans(); if (!reqSnap.plans) reqSnap.plans = plans(); return reqSnap.plans; }
 function lanes() {
   let files = []; try { files = fs.readdirSync(REG).filter((f) => f.endsWith('.json')); } catch {}
   // Skip non-lane json in the registry (acks.json): a registration always carries a string dir.
@@ -1214,7 +1221,7 @@ function bucketOf(l) { return bucketFor(l).bucket; }
 // registered plans' ids and mtimes, so a poll over many lanes reads the plan files once.
 let closedLanes = { key: null, ids: new Set() };
 function closedPlanLanes() {
-  const rs = plans();
+  const rs = plansSnapshot();
   const key = rs.map((r) => `${r.id}:${r.mtime}`).join('|');
   if (closedLanes.key === key) return closedLanes.ids;
   const ids = new Set();
@@ -1544,7 +1551,7 @@ async function removePlan(r, { by = 'ca plan rm' } = {}) {
   try {
     const snapshot = readJSON(r.file) || {};
     const base = path.resolve(path.dirname(r.file), '..', snapshot.repo || '.');
-    const reg = new Map(lanes().map((l) => [l.id, l]));
+  const reg = new Map(lanesSnapshot().map((l) => [l.id, l]));
     const wanted = (snapshot.lanes || []).filter(Boolean).map((pl) => laneId(path.resolve(base, pl.repo || '.'), pl.task));
     const laneIds = []; const killed = [];
     for (const id of wanted) {
@@ -2524,6 +2531,7 @@ function cmdDash(args) {
   });
   const readBody = async (req) => { try { return { body: await readJson(req) }; } catch (e) { return { error: { error: e.statusCode === 413 ? 'request body too large' : 'invalid JSON body' }, code: e.statusCode || 400 }; } };
   const srv = http.createServer(async (req, res) => {
+    reqSnap = {}; // one lanes()/plans() snapshot per request; rebuilt on the next poll
     const u = new URL(req.url, 'http://x');
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     try {
@@ -2548,22 +2556,22 @@ function cmdDash(args) {
         const files = ['dash.html', 'office.html', 'assets/workshop.js', 'assets/workshop.css'].map((f) => path.join(HERE, f));
         return json({ version: Math.max(0, ...files.map((f) => { try { return Math.round(fs.statSync(f).mtimeMs); } catch { return 0; } })) });
       }
-      if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
+      if (u.pathname === '/api/lanes') return json(lanesSnapshot().map(laneView));
       if (u.pathname === '/api/overview') {
         // The office view in one call: attention buckets and lanes not finished over 3 days ago.
-        const ls = lanes().filter((l) => !l.s.result || now() - (l.s.finishedAt || 0) < 3 * 24 * 3600e3).map(laneView);
+        const ls = lanesSnapshot().filter((l) => !l.s.result || now() - (l.s.finishedAt || 0) < 3 * 24 * 3600e3).map(laneView);
         const counts = { attention: 0, running: 0, done: 0, ended: 0 };
         for (const v of ls) counts[v.bucket] = (counts[v.bucket] || 0) + 1;
         return json({ counts, lanes: ls });
       }
-      if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
+      if (u.pathname === '/api/plans') return json(plansSnapshot().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       const pm = u.pathname.match(/^\/api\/plans\/(.+)\/remove$/);
       if (pm) {
         // Exact registered-plan id only (ids may carry ~ and .): decode the segment, never die().
         if (req.method !== 'POST') return json({ error: 'use POST /api/plans/<id>/remove' }, 405);
         const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
         const pid = decodeURIComponent(pm[1]);
-        const pr = plans().find((x) => x.id === pid);
+        const pr = plansSnapshot().find((x) => x.id === pid);
         if (!pr) return json({ error: `no registered plan has id "${pid}"` }, 404);
         const res = await removePlan(pr, { by: 'dashboard' });
         if (res.error) return json({ error: res.error }, res.code || 500);
@@ -2610,7 +2618,7 @@ function cmdDash(args) {
       }
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack|remove)$/);
       if (m) {
-        const q = decodeURIComponent(m[1]); const all = lanes();
+        const q = decodeURIComponent(m[1]); const all = lanesSnapshot();
         const pr = pickOne(all, q, (x) => x.id, (x) => x.task);
         if (pr.matches) return json({ error: `ambiguous lane "${q}": matches ${pr.matches.join(', ')}; use the full id` }, 409);
         const l = pr.hit;
