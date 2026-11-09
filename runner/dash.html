@@ -2009,7 +2009,14 @@ document.addEventListener('input', (e) => {
   const n = ctlNotes.get(ta.dataset.noteText);
   if (n) n.text = ta.value;
 });
-window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; entryRise = true; crPrevIds = new Set(); hidePlanTime(); refresh(true); };
+// A lane route paints the lane's name at once (from the id), so a slow first poll never looks like the Control room.
+function paintLaneLoading() {
+  if (route.kind !== 'lane' || !route.id) return;
+  const task = route.id.includes('--') ? route.id.slice(route.id.lastIndexOf('--') + 2) : route.id;
+  viewSig = '';
+  $('view').innerHTML = `<div class="pad" id="laneLoading"><div class="crumb"><a class="backlink" href="#/">Control room</a></div><h1 style="margin:4px 0 8px">${esc(task)}</h1><div class="small">Opening lane...</div><div class="skeleton" aria-hidden="true" style="margin-top:14px"><div class="skel-row"></div><div class="skel-row"></div></div></div>`;
+}
+window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; entryRise = true; crPrevIds = new Set(); hidePlanTime(); paintLaneLoading(); refresh(true); };
 syncRail();
 $('notify').onclick = toggleNotify; renderNotify(); updateFreshness();
 $('glanceBtn').onclick = toggleGlance; renderGlanceBtn();
@@ -2021,7 +2028,7 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault(); toggleGlance();
 });
 window.addEventListener('storage', (e) => { if (e.key === 'ca.glance') { glanceOn = e.newValue !== 'off'; renderGlanceBtn(); viewSig = ''; refresh(true); } });
-route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
+route = parseRoute(); paintLaneLoading(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
 </script>
 </body>
 </html>
