@@ -2423,7 +2423,7 @@ function glanceOf(view) {
 }
 function planView(r) {
   const p = r.plan || readJSONCached(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
-  const reg = new Map(lanes().map((l) => [l.id, l]));
+  const reg = laneIndex();
   // A lane entry marked removed: true was deleted with its lane or plan: it must never come back as "planned".
   const planned = (p.lanes || []).filter((pl) => pl && !pl.removed).map((pl) => {
     const repo = path.resolve(base, pl.repo || '.'); const id = laneId(repo, pl.task); const l = reg.get(id);
