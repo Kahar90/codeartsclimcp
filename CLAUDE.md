@@ -23,15 +23,13 @@ A feature is not finished until the installed copy runs it:
   Folder Access and sandbox ACLs that block git and node in Documents).
 - Wait with `ca wait --any` (MCP `any: true`) and check that each lane has commits within minutes.
 
-Checks:
-- `node --check runner/ca.mjs`
-- `node checks/assets.check.mjs` (kit files and the /assets route)
-- `node checks/resume.check.mjs` (paused lanes, --resume, plan continues folding)
-- `node checks/planstate.check.mjs` (plan state from lanes, ca plan close/rm)
-- `node checks/glance.check.mjs` (per-plan glance state, asking phase)
-- `node checks/lanes.check.mjs` and `node checks/glancelanes.check.mjs` (Lanes dashboard over CDP, `?demo=1`)
-- `node checks/office.check.mjs [outDir]` and `node checks/glanceoffice.check.mjs` (Office over CDP, screenshots in `checks/out`)
-- `node checks/writeguard.check.mjs` (repo writable probe, blocked commits, `ca wait --any`)
+Checks (the runner prints per-check times; slow ones are listed in checks/out/timings.json):
+- `npm run check`: the fast set, every check that does not drive a browser, in parallel (about 1.5 min).
+  Run it once after a merge, not per step.
+- `npm run check:full`: everything, browser checks included (at most 3 Chrome at once). Once before a
+  release, and in CI.
+- `node tools/run-checks.mjs <name>`: only matching checks (browser ones too), for the files you touched.
+- `node checks/perf.check.mjs`: dashboard poll cost on 100 lanes and 8 plans (median under 60 ms per route).
 
 Manual: `node runner/ca.mjs dash 4790`, then http://127.0.0.1:4790/office (`?demo=1`, `?demo=done`,
 `?demo=needs`, `?demo=failed`, `?demo=quiet`, `?demo=big`); Lanes: http://127.0.0.1:4790/?demo=1
