@@ -42,7 +42,8 @@ const finish = (sid) => {
 };
 function playReview(sid, text) {
   const hit = reviews.find(([re]) => new RegExp(re, 'i').test(text));
-  later(sid, reviewMs, () => { answer(sid, hit ? hit[1] : '1. DONE\nVERDICT: ready'); later(sid, 100, () => finish(sid)); });
+  const ms = /STEP VERDICT/.test(text) && process.env.FAKE_STEP_REVIEW_MS ? Number(process.env.FAKE_STEP_REVIEW_MS) : reviewMs;
+  later(sid, ms, () => { answer(sid, hit ? hit[1] : '1. DONE\nVERDICT: ready'); later(sid, 100, () => finish(sid)); });
 }
 // Chained turn: "commit:1+run:all+ok" runs its parts in order inside one turn, then answers.
 //   commit:K   writes page<K>.html and commits it as "step K: thing K"

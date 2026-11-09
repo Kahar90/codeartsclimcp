@@ -121,6 +121,7 @@ const CFG = {
   checkTimeout: num('CHECK_TIMEOUT', 900),
   netWait: num('NET_WAIT_S', 1800),    // a network error waits up to this long for the network (no retry spent)
   stepReviewTimeout: num('STEP_REVIEW_TIMEOUT', 600), // a step review session that never settles is aborted after this long
+  stepReviewGrace: num('STEP_REVIEW_GRACE_S', 20), // builder idle: wait this long for a step review in flight, then cancel it (the final review covers those commits)
   noReview: process.env.NO_REVIEW === '1',
 };
 
@@ -729,6 +730,7 @@ async function runLane(repoArg, task, opts = {}) {
   // watchdogs. This is an independent poller: POST prompt_async, then poll the session status until it
   // has been busy and is idle again. Any error is recorded, never retried, never fails the lane.
   let stepReviewRunning = null;    // the promise of the review in flight, or null
+  let stepReviewCancel = false;    // set when the builder went idle and the grace ran out
   // Commits up to here are already covered by a step review; a resumed lane continues after its last one.
   let lastReviewedHash = (S.stepReviews.length && S.stepReviews[S.stepReviews.length - 1].hash) || START;
   const reviewedAlready = (h) => spawnSync('git', ['merge-base', '--is-ancestor', h, lastReviewedHash], { cwd: repo, windowsHide: true }).status === 0;
@@ -753,11 +755,13 @@ async function runLane(repoArg, task, opts = {}) {
       sid = await newSession(`${task} step review ${n}`); reviewSessions.add(sid);
       const prompt = stepReviewTemplate().replaceAll('{TASK}', task).replaceAll('{STEPS}', steps.map((k) => `step ${k}`).join(', '))
         .replaceAll('{RANGE}', `${from}..${to}`).replaceAll('{SUBJECTS}', subjects.join('\n'));
+      sent.add(prompt.trim()); // the runner's own prompt: never list it as a TUI steer
       await server.api('POST', `/session/${sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: prompt }] });
       L(`== step review ${n} (${REVIEW}, plan agent) session ${sid}: ${from.slice(0, 8)}..${to.slice(0, 8)} for ${steps.map((k) => `step ${k}`).join(', ')}`);
       const deadline = t0 + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false;
       while (!done) {
         if (now() > deadline) { try { await server.api('POST', `/session/${sid}/abort`, {}); } catch {} verdict = 'timeout'; break; }
+        if (stepReviewCancel) { try { await server.api('POST', `/session/${sid}/abort`, {}); } catch {} verdict = 'cancelled'; break; }
         await sleep(3000);
         let st; try { st = (await server.api('GET', '/session/status', null, 10000))[sid]?.type; } catch { st = undefined; }
         if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
@@ -765,13 +769,13 @@ async function runLane(repoArg, task, opts = {}) {
         if (sawBusy || text) done = true;
         else if (now() - t0 > 60000) { verdict = 'missing'; break; }
       }
-      if (verdict !== 'timeout' && verdict !== 'missing') {
+      if (verdict !== 'timeout' && verdict !== 'missing' && verdict !== 'cancelled') {
         const m = text.match(/STEP VERDICT:\s*(ok|fix)/i);
         verdict = m ? m[1].toLowerCase() : (text ? 'missing' : 'error');
       }
     } catch (err) { verdict = 'error'; L(`! step review ${n} error: ${oneLine(String((err && err.message) || err), 200)}`); }
     const rec = { steps, hash, from, at: t0, ms: now() - t0, verdict, text: String(text || '').trim().slice(0, 1500) };
-    S.stepReviews.push(rec); lastReviewedHash = to; save(true);
+    S.stepReviews.push(rec); if (verdict !== 'cancelled') lastReviewedHash = to; save(true);
     if (verdict === 'fix') writeStepReviewInbox(steps, hash, rec.text);
     return rec;
   };
@@ -1300,9 +1304,17 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
         sid = r.sid; S.buildSession = sid;
         if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; if (r.keys) S.keysMessage = r.keys; break; }
-        // The builder is idle: let a step review still in flight finish (bounded by its own timeout) so
-        // its finding can be steered in before the gates run.
-        if (stepReviewRunning) { try { await stepReviewRunning; } catch {} }
+        // The builder is idle: give a step review still in flight a short grace so a nearly done finding
+        // can be steered in, then cancel it. The final review reads the whole range anyway, so waiting
+        // minutes for a slow step review only delays the gates (measured: 1.3 to 3.4 min per lane).
+        if (stepReviewRunning) {
+          const settled = await Promise.race([stepReviewRunning.then(() => true, () => true), sleep(CFG.stepReviewGrace * 1000).then(() => false)]);
+          if (!settled) {
+            stepReviewCancel = true; L(`== builder idle: step review still running after ${CFG.stepReviewGrace}s; cancelled (the final review covers those commits)`);
+            try { await stepReviewRunning; } catch {}
+            stepReviewCancel = false;
+          }
+        }
         const srFiles = inboxStepReviewFiles();
         if (srFiles.length && (S.stepReviewContinues || 0) >= CFG.fixes) {
           for (const f of srFiles) { try { fs.rmSync(path.join(dir, 'inbox', f), { force: true }); } catch {} }
