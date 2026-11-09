@@ -1240,6 +1240,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
+    `step reviews: ${STEP_REVIEW ? `${S.stepReviews.length} (ok ${S.stepReviews.filter((x) => x.verdict === 'ok').length}, fix ${S.stepReviews.filter((x) => x.verdict === 'fix').length}, other ${S.stepReviews.filter((x) => x.verdict !== 'ok' && x.verdict !== 'fix').length})` : 'off'}`,
     `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}${S.queuedMs ? ` (queued ${dur(S.queuedMs)} for a model slot)` : ''}`,
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
     ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
@@ -2680,7 +2681,7 @@ function laneDetail(l) {
   let brief = ''; try { brief = fs.readFileSync(path.join(l.repo, 'tasks', `${l.task}.md`), 'utf8'); } catch {}
   return { ...laneView(l), steps: stepProgress(s).list, commits: s.commitLog || [], todos: s.todos || [], files: s.files || [], gates: s.gates || [],
     interruptions: s.interruptions || [], steers: s.steers || [], permissions: s.permissions || [], outside: s.outside || [], errors: s.errors || [],
-    phases: s.phases || [], checks: s.checks || [], verdict: s.verdict || '', brief, review: rd('review.md'), summary: rd('summary.md'), config: s.config || {} };
+    phases: s.phases || [], checks: s.checks || [], verdict: s.verdict || '', brief, review: rd('review.md'), summary: rd('summary.md'), stepReviews: s.stepReviews || [], config: s.config || {} };
 }
 
 // ---------- dashboard ----------
