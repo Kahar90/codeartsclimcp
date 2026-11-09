@@ -21,8 +21,12 @@ summaries, not transcripts.
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.
 - Parallel lanes each get a git worktree: `git worktree add ../<repo>-wt-<task> -b lane/<task>`.
 - Optional plan for the dashboard: `tasks/plan.json` with `title, goal, lead, status, now,
-  waves[{name, lanes}], lanes[{task, repo, model, why, files}], next, decisions, risks`, then
-  `ca_plan`. Update the "lead is doing" line with `ca_note` (now: true).
+  startedAt (an ISO time; write it when you start planning), waves[{name, lanes}], lanes[{task,
+  repo, model, why, files}], next, decisions, risks`, then `ca_plan`. If startedAt is missing,
+  `ca plan` fills it in from the first decision or lane, so the plan's total time stays stable.
+  `ca plan close` also records `closedAt`; the dashboard then shows how long the whole plan took,
+  split into lead planning, lanes running, lead between lanes and lead verifying. Update the
+  "lead is doing" line with `ca_note` (now: true).
 
 ## 3. Brief (one per lane)
 - `ca_init {repo, task, goal}` writes `tasks/<task>.md` from the template; then edit it:

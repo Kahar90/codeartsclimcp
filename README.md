@@ -52,6 +52,10 @@ Open **http://127.0.0.1:4777** while lanes run. The Office view (above) shows wh
 what, step by step; the Lanes view has the plan, every lane's progress, the transcript and a
 box to steer a lane mid-run.
 
+Every plan and lane also shows how long the work took. Hover, focus or tap the **Time** chip on
+a plan (Lanes) or in the Office runstrip to open the breakdown: lead planning, lanes running,
+lead between lanes and lead verifying, plus worker time per phase and per lane.
+
 ![The Lanes view: plan, waves, current step and decisions](docs/images/lanes.png)
 
 ## Controls and tokens
