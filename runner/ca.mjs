@@ -1304,6 +1304,24 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     try { await rec.promise; } catch {}
     if (s) s.aborting = false;
   };
+  // Start (or reuse) the final review for the current round. A speculative review whose HEAD is still the
+  // current HEAD is awaited in place of the normal review (its text and verdict go through applyFinalReview
+  // unchanged); a stale one is aborted and the normal final review starts as before. Returns a normalized
+  // handle { sid, head, from, at, promise, spec } or null when review is off.
+  const beginFinalReview = async () => {
+    if (CFG.noReview) return null;
+    const head = git(repo, 'rev-parse', 'HEAD');
+    if (specReview && specReview.head === head) {
+      specReview.used = true;
+      if (S.specReview) S.specReview.used = true;
+      save(true);
+      L(`== final review: using the speculative review on ${head.slice(0, 8)}`);
+      return { sid: specReview.sid, head, from: specReview.from, at: specReview.at, promise: specReview.promise, spec: true };
+    }
+    if (specReview) await discardSpecReview(); // stale: HEAD moved after it started, so abort and review again now
+    const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
+    return { sid: fr.sid, head: fr.head0, from: fr.from, at: fr.at, promise: fr.promise, spec: false };
+  };
 
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
@@ -1415,11 +1433,12 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           continue;
         }
         // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
-        // it reviews. A CHECK that fails or cannot run aborts and discards this overlapped review.
-        const fr = !CFG.noReview ? await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]) : null;
+        // it reviews. A speculative review that is still valid is awaited in place of a new one; a stale
+        // one is aborted and replaced. A CHECK that fails or cannot run aborts and discards this review.
+        const fr = await beginFinalReview();
         g = await runChecks();
         if (!g.ok) {
-          if (fr) await discardFinalReview(fr);
+          if (fr) { await discardFinalReview(fr); if (fr.spec) specReview = null; }
           // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
           // repair the machine), but a human must look, so exit 4 like needs review.
           if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
@@ -1433,7 +1452,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           phase('review', 'reviewing');
           const rr = await fr.promise;
           if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-          await applyFinalReview(fr.sid, rr, fr.head0, fr.from, fr.at);
+          await applyFinalReview(fr.sid, rr, fr.head, fr.from, fr.at);
           if (exitCode === 3) break;
         }
         reason = ''; exitCode = 0; cleanEnd = true; break;
@@ -1444,11 +1463,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // when the checks could not run (unverified): a reviewer asking for fixes wins over it. The clean
       // success path already ran its review beside the checks, so this only covers the rest.
       if (!finalReviewed && (exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
-        const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
+        const fr = await beginFinalReview();
         phase('review', 'reviewing');
         const rr = await fr.promise;
         if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-        await applyFinalReview(fr.sid, rr, fr.head0, fr.from, fr.at);
+        await applyFinalReview(fr.sid, rr, fr.head, fr.from, fr.at);
       }
 
       if (!cleanEnd) break; // a stop, timeout, auth, infra/unverified or write failure ends the lane
@@ -1456,6 +1475,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // builder session and go through the build loop, gates and review again.
       if (!(S.verdict === 'needs fixes' && reviewFixRounds < REVIEW_FIXES && S.buildSession)) break;
       reviewFixRounds++;
+      specReview = null; // a review fix round starts fresh: the next round may speculate again once its fix is committed and the tree is clean
       say(`review says needs fixes; review fix round ${reviewFixRounds}/${REVIEW_FIXES}`);
       phase('fix', `review fix round ${reviewFixRounds}`);
       await send(S.buildSession, `The reviewer found these problems:\n${review || ''}\nFix the real bugs (ignore a finding that contradicts the brief or the lead's steering), run the checks, and commit as "fix: review findings".` + CHECK_HELP, buildModel);
