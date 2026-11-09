@@ -238,6 +238,8 @@ const MAAS_MODELS = {
   'glm-5.3': { name: 'GLM 5.3 (MaaS)', reasoning: true, limit: { context: 200000, output: 65536 } },
   'deepseek-v4.1-flash': { name: 'DeepSeek V4.1 Flash (MaaS)', reasoning: true, limit: { context: 200000, output: 65536 } },
   'glm-5.2': { name: 'GLM 5.2 (MaaS)', reasoning: true, limit: { context: 200000, output: 65536 } },
+  // The same flash model with thinking turned off: about half the latency per model call.
+  'deepseek-v4.1-flash-fast': { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash, no thinking (MaaS)', reasoning: false, options: { thinking: { type: 'disabled' } }, limit: { context: 200000, output: 65536 } },
 };
 let maasKey;
 const maasEnv = () => {
