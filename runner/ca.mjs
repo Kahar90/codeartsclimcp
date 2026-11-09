@@ -431,7 +431,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0 });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, reviewRounds: resumed.reviewRounds || [] });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -1179,7 +1179,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     // session (context kept), the gates run again and the review runs again, up to REVIEW_FIXES rounds.
     // Review fix rounds do not count in S.fixes and every existing exit path (stop, timeout, auth,
     // infra/unverified, write failure) still ends the outer loop as before.
-    let reviewFixRounds = 0;
+    // A resumed lane already spent some of its review-fix budget, so its rounds count too.
+    let reviewFixRounds = Math.max(0, (S.reviewRounds || []).length - 1);
     for (;;) {
       let cleanEnd = false;
       for (;;) {
@@ -1285,6 +1286,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
+    ...(S.reviewRounds.length ? [`review rounds: ${S.reviewRounds.length} (${S.reviewRounds.map((x) => x.verdict).join(' -> ')})`] : []),
     `step reviews: ${STEP_REVIEW ? `${S.stepReviews.length} (ok ${S.stepReviews.filter((x) => x.verdict === 'ok').length}, fix ${S.stepReviews.filter((x) => x.verdict === 'fix').length}, other ${S.stepReviews.filter((x) => x.verdict !== 'ok' && x.verdict !== 'fix').length})` : 'off'}`,
     `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}${S.queuedMs ? ` (queued ${dur(S.queuedMs)} for a model slot)` : ''}`,
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
