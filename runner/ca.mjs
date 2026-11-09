@@ -1657,7 +1657,7 @@ function compactWaitRow(l, s) {
 // last new commit, capped at 50 (a step that rewrites many files still fits one line); empty when the repo
 // is gone or the first new commit has no parent.
 const UI_EXT = /\.(html|css|js|mjs|ts|tsx|jsx|vue|svelte|svg|png)$/i;
-const stepOf = (subject) => { const m = String(subject || '').match(/\bstep\s*(\d+)\b/i); return m ? Number(m[1]) : null; };
+const stepOf = (subject) => { const m = String(subject || '').match(/^\s*step\s+(\d+)\s*:/i); return m ? Number(m[1]) : null; };
 function stepFiles(repo, fresh) {
   if (!fresh.length) return [];
   const first = fresh[0].hash; const last = fresh[fresh.length - 1].hash;
@@ -1705,9 +1705,12 @@ async function cmdWait(args) {
   if (!qs.length) die(usage, 2);
   const targets = qs.map((q) => findLane(q)); // resolve every lane first: unknown -> exit 2
   const readState = (l) => readJSON(path.join(l.dir, 'state.json')) || l.s;
-  // Baseline per lane: the --after value, or the lane's commit count (state.json commits) at wait start.
+  // Baseline per lane: the --after value (keyed by lane id or task name), or the live commit count at wait
+  // start, read the same way the loop compares it (git), so a resumed lane whose state.json count was reset
+  // does not report its old commits as new.
   const baseline = new Map();
-  for (const l of targets) baseline.set(l.id, afterCount !== null ? afterCount : (afterMap && Object.prototype.hasOwnProperty.call(afterMap, l.id) ? afterMap[l.id] : (readState(l).commits || 0)));
+  const afterFor = (l) => { if (!afterMap) return undefined; for (const k of [l.id, l.task]) if (k && Object.prototype.hasOwnProperty.call(afterMap, k)) return afterMap[k]; return undefined; };
+  for (const l of targets) { const a = afterFor(l); baseline.set(l.id, afterCount !== null ? afterCount : a !== undefined ? a : liveLog(l, readState(l)).length); }
   const deadline = Number.isFinite(timeoutS) && timeoutS > 0 ? now() + timeoutS * 1000 : Infinity;
   const last = new Map(); let lastBeat = 0;
   const note = (l, s) => {
