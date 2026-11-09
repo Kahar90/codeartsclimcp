@@ -394,6 +394,8 @@ async function runLane(repoArg, task, opts = {}) {
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
   const REVIEW = (brief.match(/^\s*REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.review;
+  const stepReviewLine = (brief.match(/^\s*STEP_REVIEW:\s*([\w-]+)/m) || [])[1];
+  const STEP_REVIEW = process.env.STEP_REVIEW !== '0' && !/^off$/i.test(stepReviewLine || '') && !CFG.noReview;
   const START = (resumed && resumed.start) || git(repo, 'rev-parse', 'HEAD');
   const dirtyAll = () => git(repo, 'status', '--porcelain').split(/\r?\n/).filter((l) => l && !/^.. "?(tasks\/|\.codeartsdoer)/.test(l));
   const PRE_DIRTY = new Set(dirtyAll());
