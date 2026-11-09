@@ -18,6 +18,8 @@ body.narrow .runstrip .pnow { flex: 1 1 100%; white-space: normal; overflow: vis
 .runstrip .pnow { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .runstrip .topfill { flex: 1; }
 .chip { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border-2); color: var(--muted); white-space: nowrap; }
+/* On phones the time chip keeps its value and drops the word "Time" so the runstrip still fits. */
+@media (max-width: 480px) { #timeChip .chip-word { display: none; } }
 .needs-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; background: rgba(255, 156, 156, 0.16); border: 1.5px solid var(--bad); color: var(--bad); font-weight: 650; font-size: 13px; text-decoration: none; white-space: nowrap; }
 .needs-pill:hover { background: rgba(255, 156, 156, 0.28) }
 .needs-pill b { font-weight: 800 }
@@ -256,6 +258,7 @@ body.narrow #win a { display: inline-flex; align-items: center; }
   <span class="chip" id="leadChip" hidden></span>
   <span id="statusBadge" tabindex="0"></span>
   <span class="chip" id="tokenChip" tabindex="0" hidden></span>
+  <span class="chip" id="timeChip" tabindex="0" hidden></span>
   <span class="topfill"></span>
   <select id="planSel" hidden aria-label="plan"></select>
   <div id="planPick" hidden>
@@ -411,6 +414,18 @@ const planTokenSums = (lanes) => {
   const tokensBy = {};
   for (const role of ["build", "review", "other"]) tokensBy[role] = tokSum(lanes.map((l) => l.tokensBy && l.tokensBy[role]));
   return { tokens: tokSum(lanes.map((l) => l.tokens)), tokensBy };
+};
+// Time fixture for the office demos: the shape planView sends, in minutes so the numbers stay readable.
+const DEMO_SEG_K = ["planning", "lanes", "between", "verify"], DEMO_SEG_L = ["Lead planning", "Lanes running", "Lead between lanes", "Lead verifying"];
+const demoTime = (total, o) => {
+  o = o || {};
+  const seg = o.seg || [0, 0, 0, 0];
+  return {
+    startedAt: DEMO_T0 - total * 60000, endedAt: o.live ? null : DEMO_T0, live: !!o.live, totalMs: total * 60000,
+    segments: DEMO_SEG_K.map((k, i) => ({ key: k, label: DEMO_SEG_L[i], ms: seg[i] * 60000 })),
+    work: { totalMs: (o.work || 0) * 60000, byPhase: { wait: (o.wait || 0) * 60000, build: (o.build || 0) * 60000, checks: (o.checks || 0) * 60000, fix: (o.fix || 0) * 60000, review: (o.review || 0) * 60000, other: (o.other || 0) * 60000 } },
+    lanes: (o.lanes || []).map((l) => ({ task: l[0], ms: l[1] * 60000, byPhase: { build: l[1] * 60000 } })),
+  };
 };
 const DEMO_BASE = {
   "office-scene": { phase: "build", model: "maas/glm-5.3", dur: 46, by: { build: [12100, 21400, 4800, 680000, 4], review: [2100, 900, 200, 12000, 1], other: [400, 150, 0, 2000, 1] },
@@ -592,6 +607,7 @@ function demoModel() {
         id: "demo-big", title: "CLI and Office view", goal: "Ship the harness-neutral CLI and Office view",
         lead: "Claude Opus 5.5", status: demoDone ? "done" : "running",
         tokens: pt.tokens, tokensBy: pt.tokensBy,
+        time: demoTime(120, { live: !demoDone, seg: [8, 78, 22, 12], work: 258, wait: 8, build: 200, checks: 10, fix: 15, review: 25, lanes: [["office-scene", 46], ["office-sprites", 32], ["cli-dx", 41], ["mcp", 37], ["setup", 29], ["office-motion", 34], ["office-review", 14], ["onboard", 25]] }),
         now: demoDone ? "All eight lanes finished; every check is green." : "Wave 1 is still building; the CLI lane waits for review.",
         next: [{ text: "Merge the sprites worktree into main", done: true }, { text: "Review the CLI help output", done: false }, { text: "Run every check on main", done: false }],
         decisions: [
@@ -618,6 +634,7 @@ function demoModel() {
         id: "demo-crowd", title: "Ten lanes, eight seats", goal: "Seat a crowded plan: three stations, five hot desks, the rest in the +N list",
         lead: "Claude Opus 5.5", status: "running",
         tokens: pt.tokens, tokensBy: pt.tokensBy,
+        time: demoTime(140, { live: true, seg: [10, 90, 26, 14], work: 292, wait: 8, build: 225, checks: 12, fix: 20, review: 27, lanes: [["office-scene", 46], ["office-sprites", 32], ["office-review", 8], ["cli-dx", 41], ["mcp", 37], ["setup", 29], ["onboard", 25], ["office-motion", 34], ["docs-site", 22], ["perf-pass", 18]] }),
         now: "Two lanes need a hand, the other running lanes share the desks, and the finished lanes wait in the +N list.",
         next: [{ text: "Kick the stalled CLI lane and resume the failed MCP lane", done: false }, { text: "Give the first freed desk to the waiting running lane", done: false }, { text: "Merge the finished perf pass into main", done: true }],
         decisions: [
@@ -642,6 +659,7 @@ function demoModel() {
       id: "demo", title: "Office view for codearts-build", goal: "Build the Office view for codearts-build lanes",
       lead: "Claude Opus 5.5", status: demoDone ? "done" : "running",
       tokens: pt.tokens, tokensBy: pt.tokensBy,
+      time: demoTime(64, { live: !demoDone, seg: [6, 38, 12, 8], work: 92, wait: 3, build: 70, checks: 4, fix: 7, review: 8, lanes: [["office-scene", 46], ["office-sprites", 32], ["office-review", 14]] }),
       now: demoDone ? "All lanes finished; reviewing the screenshots." : demoStuck ? "The builder stalled mid-turn and the reviewer gave up; the artist is still drawing." : "Waiting for the scene and sprites lanes to finish.",
       next: [{ text: "Merge the sprites worktree into main", done: true }, { text: "Run both checks on main and look at the screenshots", done: false }, { text: "Copy the office files into the live skill runner", done: false }],
       decisions: [
@@ -832,6 +850,14 @@ function renderTop() {
     $("tokenChip").setAttribute("aria-label", "Tokens " + CAUI.fmtTokens(pt) + ": " + CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).concat(mm).join(", "));
     $("tokenChip").title = CAUI.tokenSplit(p.tokensBy).map((x) => x.label + " " + CAUI.fmtTokens(x.total)).join(" \u00b7 ");
   }
+  const tt = p.time ? (p.time.totalMs || 0) : 0;
+  $("timeChip").hidden = !tt;
+  if (tt) {
+    $("timeChip").innerHTML = '<span class="chip-word">Time</span> ' + CAUI.fmtDur(tt);
+    const segs = (p.time.segments || []).filter((s) => s.ms > 0).map((s) => s.label + " " + CAUI.fmtDur(s.ms)).join(", ");
+    $("timeChip").setAttribute("aria-label", "Time taken " + CAUI.fmtDur(tt) + (segs ? ": " + segs : ""));
+    $("timeChip").title = CAUI.fmtDur(tt);
+  }
   const nPlans = mode === "demo" ? 1 : plansArr.length;
   const nLanes = mode === "demo" ? model.lanes.length : lanesArr.length;
   $("counts").textContent = `${nPlans} plan${nPlans === 1 ? "" : "s"} \u00b7 ${nLanes} lane${nLanes === 1 ? "" : "s"}`;
@@ -926,7 +952,7 @@ let hoverOn = null;
 function showHoverCard(id) {
   const anchor = $(id), card = $("hoverCard");
   if (!model || !anchor || anchor.hidden || !$("planMenu").hidden) return hideHoverCard();
-  const html = id === "tokenChip" ? tokenCard(model.plan) : outcomeCard(ownLanes());
+  const html = id === "tokenChip" ? tokenCard(model.plan) : id === "timeChip" ? CAUI.timeCard(model.plan.time) : outcomeCard(ownLanes());
   if (card.innerHTML !== html) card.innerHTML = html;
   hoverOn = id; card.hidden = false;
   placeFloat(card, anchor, "center");
@@ -2021,6 +2047,7 @@ window.__office = {
       motion: PixelSprites.motion(),
       lanes: (model && model.lanes || []).map((l) => ({ id: l.id, health: String(l.health || ""), running: !!l.running, result: l.result || "", done: (l.progress && l.progress.done) || 0, total: (l.progress && l.progress.total) || 0 })),
       planTokens: CAUI.tokenTotal(model && model.plan.tokens),
+      time: (() => { const t = model && model.plan && model.plan.time; return t ? { total: t.totalMs, label: "Time " + CAUI.fmtDur(t.totalMs) } : null; })(),
       controls: demoControls.slice(),
       quickSteers: $("winChips").hidden ? 0 : $("winChips").childElementCount,
     };
@@ -2067,7 +2094,7 @@ window.addEventListener("resize", () => { closePlanMenu(); hideHoverCard(); sche
 const onScroll = () => { schedulePositionWin(); hideHoverCard(); };
 window.addEventListener("scroll", onScroll, { passive: true });
 document.addEventListener("scroll", onScroll, { passive: true, capture: true });
-for (const id of ["tokenChip", "statusBadge"]) {
+for (const id of ["tokenChip", "timeChip", "statusBadge"]) {
   $(id).addEventListener("mouseenter", () => showHoverCard(id));
   $(id).addEventListener("mouseleave", hideHoverCard);
   $(id).addEventListener("focus", () => showHoverCard(id));
