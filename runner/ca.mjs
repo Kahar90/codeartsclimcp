@@ -466,7 +466,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0,
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [],
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -476,7 +476,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0 });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [] });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -780,6 +780,11 @@ async function runLane(repoArg, task, opts = {}) {
     stepReviewRunning = runStepReview(n, steps, lastReviewedHash, to, subjects).catch(() => null).finally(() => { stepReviewRunning = null; });
   };
 
+  // The check service: the worker's helper drops a request file and waits for the result. The tick
+  // below picks up at most one request per lane and runs it in the background so polling continues.
+  const reqDir = path.join(dir, 'checkreq');
+  let checkJobRunning = false;
+
   // Wait for one turn: idle, error, stall (watchdog), server death, stop or timeout.
   async function waitTurn(sid) {
     const s = sx(sid); let lastPoll = 0, lastCommitCheck = 0; let prevTick = now();
@@ -812,6 +817,20 @@ async function runLane(repoArg, task, opts = {}) {
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
       await pumpInbox(sid);
+      // The worker's helper (inside its sandbox) asks this runner to run a CHECK line outside the
+      // sandbox. Pick up one request per tick and run it in the background so the tick never blocks.
+      if (!checkJobRunning) {
+        let reqs = []; try { reqs = fs.readdirSync(reqDir).filter((f) => f.endsWith('.json') && !f.endsWith('.result.json')); } catch {}
+        reqs.sort();
+        if (reqs.length) {
+          const rf = path.join(reqDir, reqs[0]); const req = readJSON(rf);
+          try { fs.rmSync(rf, { force: true }); } catch {}
+          if (req && req.id) { checkJobRunning = true; handleCheckRequest(req).catch((err) => L(`  ! check service error: ${oneLine(String((err && err.message) || err), 200)}`)).finally(() => { checkJobRunning = false; }); }
+        }
+      }
+      // A check the worker asked for may run for minutes: its bash tool is waiting on the helper, which
+      // is normal, so keep the tool watchdog from aborting that wait.
+      if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
       if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) maybeStepReview(); }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
@@ -1021,6 +1040,35 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ch.on('close', (code) => { clearTimeout(timer); res({ code: code ?? 1, out, ms: now() - t0 }); });
     ch.on('error', (e) => { clearTimeout(timer); res({ code: 127, out: String(e), ms: now() - t0 }); });
   });
+  // Run one CHECK request from the worker's helper: same shell, env and timeout as the gates. Every
+  // line run is recorded in S.workerChecks, and the result file is written atomically (tmp + rename).
+  const writeCheckResult = (rid, obj) => writeAtomic(path.join(reqDir, `${rid}.result.json`), JSON.stringify(obj));
+  const handleCheckRequest = async (req) => {
+    const head = git(repo, 'rev-parse', 'HEAD');
+    const clean = dirty().length === 0;
+    const arg = String(req.arg || '').trim();
+    const runLine = async (n, cmd) => {
+      L(`  > check service: ${n} ${cmd}`);
+      const t0 = now(); const r = await runCheck(cmd);
+      L(`  < check service: exit ${r.code} (${dur(now() - t0)})`);
+      S.workerChecks.push({ n, cmd, code: r.code, ms: r.ms, at: now(), head, clean }); save(true);
+      return { n, cmd, code: r.code, ms: r.ms, out: r.out };
+    };
+    const lines = [];
+    if (arg === 'all') {
+      for (let i = 0; i < checks.length; i++) { const rec = await runLine(i + 1, checks[i]); lines.push(rec); if (rec.code !== 0) break; }
+    } else if (/^\d+$/.test(arg) && Number(arg) >= 1 && Number(arg) <= checks.length) {
+      lines.push(await runLine(Number(arg), checks[Number(arg) - 1]));
+    } else {
+      const msg = `no CHECK line ${arg}: use 1 to ${checks.length}`;
+      S.workerChecks.push({ n: Number(arg) || 0, cmd: '', code: 2, ms: 0, at: now(), head, clean }); save(true);
+      writeCheckResult(req.id, { id: req.id, code: 2, out: msg, at: now() });
+      return;
+    }
+    const code = lines.length ? lines[lines.length - 1].code : 2;
+    const out = lines.map((x) => `== check ${x.n}: ${x.cmd}\n` + String(x.out || '').replace(/\s+$/, '').split(/\r?\n/).slice(-60).join('\n')).join('\n');
+    writeCheckResult(req.id, { id: req.id, code, out, at: now() });
+  };
   async function gitCleanGate() {
     const d = dirty();
     if (d.length) {
