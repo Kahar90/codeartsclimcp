@@ -1204,8 +1204,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     save(true);
     review = text; finalReviewed = true;
   };
-  const startFinalReview = async (prev) => {
-    const head0 = git(repo, 'rev-parse', 'HEAD');
+  // One builder for the final review prompt, so the normal and the speculative review send the exact
+  // same text: the template (or tasks/<task>.review.md), the step-review appendix and, for a fix round,
+  // the previous findings block that names the fix range.
+  const finalReviewPrompt = (prev) => {
     const rf = path.join(repo, 'tasks', `${task}.review.md`);
     let rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
       : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
@@ -1216,6 +1218,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         + `Review only the fix: git log --oneline ${prev.to}..HEAD and git diff ${prev.to}..HEAD. `
         + `Say whether each finding is fixed and whether the fix broke anything; same output format and VERDICT line.`;
     }
+    return rb;
+  };
+  const startFinalReview = async (prev) => {
+    const head0 = git(repo, 'rev-parse', 'HEAD');
+    const rb = finalReviewPrompt(prev);
     const rsid = await newSession(`${task} review`); S.reviewSession = rsid; reviewSessions.add(rsid);
     L(`== review (${REVIEW}, read-only plan agent) session ${rsid}${prev ? `; fix round ${prev.round}` : ''}`);
     await send(rsid, rb, REVIEW, 'plan');

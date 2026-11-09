@@ -21,6 +21,12 @@
         "reviewfix"
       ],
       "note": "baseline showed review = 72% of lane time and every run needed a whole fix lane"
+    },
+    {
+      "name": "Added while running",
+      "lanes": [
+        "specreview"
+      ]
     }
   ],
   "lanes": [
@@ -62,6 +68,12 @@
       "files": [
         "runner/ca.mjs"
       ]
+    },
+    {
+      "task": "specreview",
+      "repo": ".",
+      "why": "start the final review while the builder wraps up",
+      "added": "runner"
     }
   ],
   "next": [
@@ -114,6 +126,10 @@
     {
       "at": "2026-11-09T18:51:30.008Z",
       "text": "Bench v2 baseline on 0.5.4: 19.7 min median (16.3, 23.2), 2/2 needed one fix lane. Phases: review 184-752 s per lane vs build 75-212 s; reviewers spent minutes debugging the sandbox (no loopback, node -v hung 2 min). Sandbox network policy is a global CodeArts setting: not changed by the runner. Review templates now say: no local network, judge by reading."
+    },
+    {
+      "at": "2026-11-09T22:07:52.388Z",
+      "text": "Lane specreview added by the runner (it was not in the plan)"
     }
   ],
   "risks": [
