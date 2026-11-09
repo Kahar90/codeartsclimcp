@@ -50,6 +50,11 @@ a { text-decoration: none }
 .goal { max-width: 900px; margin: 12px 0 0; font-size: 14.5px; color: var(--fg) }
 .plan-path { color: var(--faint); font: 12px var(--mono); margin: 9px 0 0; overflow-wrap: anywhere }
 .plan-tok { color: var(--muted); font: 12.5px var(--font); font-variant-numeric: tabular-nums; margin: 6px 0 0 }
+.plan-time { cursor: pointer; color: var(--fg); text-decoration: underline dotted; text-underline-offset: 2px; border-radius: 4px }
+.plan-time:hover { color: var(--sel-ink) }
+#timeCard { position: fixed; z-index: 40; width: 300px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px 16px 12px; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius); box-shadow: 0 14px 36px rgba(0, 0, 0, .55); color: var(--fg); font-size: 13px }
+#timeCard.tc-in { animation: ca-pop-in var(--dur-2) var(--ease-out) }
+#timeCard[hidden] { display: none !important }
 .lane-tok { color: var(--faint); font: 12px var(--font); font-variant-numeric: tabular-nums; margin-top: 3px }
 .leadband { display: flex; align-items: center; gap: 14px; border: 1.5px solid var(--sel); background: var(--panel); border-radius: var(--radius); padding: 12px 16px; margin: 18px 0 4px }
 .leadband .who { font-weight: 700; color: var(--sel-ink); white-space: nowrap }
@@ -426,6 +431,7 @@ button.btn:disabled, .crtile:disabled, .etab:disabled, .cr-gbtn:disabled, .cr-ch
   </details>
   <main id="view"><div class="pad"><div class="skeleton" aria-hidden="true"><div class="skel-row"></div><div class="skel-row"></div><div class="skel-row"></div></div></div></main>
 </div>
+<div id="timeCard" class="ca-card" role="tooltip" hidden></div>
 <script>
 const $ = (id) => document.getElementById(id);
 // Narrow shell: the rail disclosure defaults closed under 760 px and open above it.
@@ -484,6 +490,32 @@ function dTok(input, output, extra) { const t = Object.assign({ input: input || 
 function dTokAdd(list) { const s = (k) => list.reduce((a, x) => a + ((x && x[k]) || 0), 0); return dTok(s('input'), s('output'), { reasoning: s('reasoning'), cacheRead: s('cacheRead'), steps: s('steps') }); }
 function dTokBy(build, review, other) { const by = { build, review, other }; return { tokens: dTokAdd([build, review, other]), tokensBy: by }; }
 function planTokSum(lanes) { const list = lanes.map((l) => l.tokensBy || {}); const by = { build: dTokAdd(list.map((x) => x.build || {})), review: dTokAdd(list.map((x) => x.review || {})), other: dTokAdd(list.map((x) => x.other || {})) }; return { tokens: dTokAdd([by.build, by.review, by.other]), tokensBy: by }; }
+// Time fixture for ?demo=1: the same shape planView/laneView send, in ms. endMin == null makes a live plan.
+const DMIN = 60000;
+const SEG_K = ['planning', 'lanes', 'between', 'verify'], SEG_L = ['Lead planning', 'Lanes running', 'Lead between lanes', 'Lead verifying'];
+function dTime(o) {
+  const bp = o.byPhase || {};
+  return {
+    startedAt: DEMO_T0 - (o.startMin || 0) * DMIN, endedAt: o.endMin == null ? null : DEMO_T0 - o.endMin * DMIN, live: o.endMin == null,
+    totalMs: o.total * DMIN,
+    segments: (o.segments || []).map((ms, i) => ({ key: SEG_K[i], label: SEG_L[i], ms: ms * DMIN })),
+    work: { totalMs: (o.work || 0) * DMIN, byPhase: { wait: (bp.wait || 0) * DMIN, build: (bp.build || 0) * DMIN, checks: (bp.checks || 0) * DMIN, fix: (bp.fix || 0) * DMIN, review: (bp.review || 0) * DMIN, other: (bp.other || 0) * DMIN } },
+    lanes: (o.lanes || []).map((l) => ({ task: l[0], ms: l[1] * DMIN, byPhase: { build: l[1] * DMIN } })),
+  };
+}
+const dLaneTime = (ms, byPhase) => ({ ms, byPhase, windows: [[DEMO_T0 - ms, DEMO_T0]] });
+const D_LANE_TIME = {
+  'demo-repo--office-layout': dLaneTime(231000, { wait: 3000, build: 199000, review: 29000 }),
+  'demo-repo--string-utils': dLaneTime(437000, { wait: 3000, build: 420000, checks: 2000, review: 12000 }),
+  'demo-repo--stuck': dLaneTime(544000, { wait: 540000, build: 4000 }),
+  'demo-repo--path-join': dLaneTime(302000, { build: 250000, checks: 5000, review: 47000 }),
+  'demo-repo--cli-dx': dLaneTime(2470000, { build: 2200000, checks: 30000, review: 240000 }),
+  'demo-repo--office-scene': dLaneTime(2763000, { build: 2400000, checks: 20000, fix: 100000, review: 243000 }),
+  'demo-repo--stall': dLaneTime(1361000, { build: 1200000, review: 161000 }),
+  'demo-repo--orphan': dLaneTime(72000, { build: 72000 }),
+  'demo-repo--chaos': dLaneTime(775000, { build: 600000, checks: 15000, review: 160000 }),
+  'demo-repo--archive': dLaneTime(760000, { build: 700000, checks: 10000, review: 50000 }),
+};
 const D_RUN_ACTIONS = ['steer', 'stop', 'attach', 'kick', 'fresh', 'restart-server'];
 const demoControls = []; // fixture log of kick/resume POSTs, read by the check harness
 function dLane(id, task, o) {
@@ -543,6 +575,7 @@ function demoLanes() {
   ];
   for (const l of ls) {
     l.seen = dSeen.has(l.id);
+    if (D_LANE_TIME[l.id]) l.time = D_LANE_TIME[l.id];
     // same rule as the server: a finished needs-you lane marked handled reads as ended
     if (l.seen && l.bucket === 'attention' && l.result) { l.handled = true; l.bucketWhy = `handled (was ${l.bucketWhy})`; l.bucket = 'ended'; l.suggest = ''; }
   }
@@ -564,6 +597,7 @@ function demoPlans() {
         { at: dIso(12), text: 'The step disclosure never navigates; only the lane name link opens the detail route.' },
       ],
       ...planTokSum([by['demo-repo--office-layout']]),
+      time: dTime({ startMin: 130, total: 130, segments: [10, 95, 20, 5], work: 118, byPhase: { wait: 3, build: 88, checks: 2, fix: 15, review: 10 }, lanes: [['office-layout', 95]] }),
       waves: [{ name: 'Wave 1 · Layout', note: 'Stage geometry and the check hook', status: 'running', lanes: [wp('demo-repo--office-layout', { model: 'maas/glm-5.3', why: 'Owns the layout rework end to end', files: ['runner/dash.html', 'checks/lanes.check.mjs'], briefExists: true })] }] },
     { id: 'string-utils', file: 'D:/Coding/demo-repo/tasks/strings.json', updatedAt: dIso(2), title: 'String utils for sandbox',
       goal: 'Give the sandbox string helpers: formatting, path joins and escaping, each covered by a check.',
@@ -573,6 +607,7 @@ function demoPlans() {
       risks: ['Escaping rules differ between cmd and bash'],
       decisions: [{ at: dIso(90), text: 'Split the work: one lane per helper family so review stays small.' }],
       ...planTokSum([by['demo-repo--string-utils'], by['demo-repo--path-join'], by['demo-repo--stuck']]),
+      time: dTime({ startMin: 210, endMin: 30, total: 180, segments: [12, 96, 52, 20], work: 150, byPhase: { wait: 4, build: 119, checks: 3, fix: 6, review: 18 }, lanes: [['string-utils', 60], ['path-join', 36], ['stuck', 54]] }),
       waves: [{ name: 'Wave 1 · Helpers', note: '', status: 'running', lanes: [
         wp('demo-repo--string-utils', { model: 'maas/glm-5.3', why: 'Formatting and escaping helpers', files: ['runner/sandbox.mjs'], briefExists: true }),
         wp('demo-repo--path-join', { model: 'maas/qwen3-coder', why: 'Small surface, quick win', files: ['runner/sandbox.mjs'], briefExists: true }),
@@ -1021,7 +1056,7 @@ function renderRail() {
     const st = CAUI.status(planState(p));
     return `<div class="rail-card${sel('plan', p.id)}${p.closed ? ' closed' : ''}" data-go="plan/${esc(p.id)}">
       <div class="rail-row">${dot(st)}<span class="rail-title">${esc(p.title)}</span>${CAUI.badge(st)}</div>
-      <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens</div></div>`;
+      <div class="rail-sub">${esc(planSummary(p))} · ${CAUI.fmtTokens(CAUI.tokenTotal(p.tokens))} tokens${p.time ? ' · ' + CAUI.fmtDur(p.time.totalMs) : ''}</div></div>`;
   }).join('') : '<div class="rail-none">No plan registered. The lead writes <code>tasks/plan.json</code> and runs <code>ca plan</code>.</div>';
   const act = loose.filter((l) => l.running), fin = loose.filter((l) => !l.running);
   h += '<div class="rail-div"></div><div class="rail-h">' + (plans.length ? 'Other lanes' : 'Lanes') + '</div>';
@@ -1059,6 +1094,38 @@ async function toggleSteps(id) {
   }
   if (route.kind === 'plan' && curPlan) renderPlan(curPlan);
 }
+// ---------- plan time taken: the chip in the plan head and its hover card ----------
+// The chip text is "Time 2h 0m"; the card is CAUI.timeCard(p.time). The card lives in the page
+// (not in #view), so it survives the poll; bindPlanTime re-points it at the fresh anchor each render.
+let planTimeOpen = false, planTimeTap = 0;
+const planTimeChip = (p) => `<span class="plan-time" id="planTime" tabindex="0" role="button" aria-describedby="timeCard" aria-label="Time taken ${esc(CAUI.fmtDur(p.time.totalMs))}">Time ${CAUI.fmtDur(p.time.totalMs)}</span>`;
+function showPlanTime() {
+  const card = $('timeCard'), anchor = $('planTime');
+  if (!card || !anchor || !curPlan || !curPlan.time) return;
+  const wasHidden = card.hidden;
+  card.innerHTML = CAUI.timeCard(curPlan.time);
+  card.hidden = false;
+  if (wasHidden) { card.classList.remove('tc-in'); void card.offsetWidth; card.classList.add('tc-in'); }
+  CAUI.place(card, anchor, { side: 'bottom', align: 'start' });
+  planTimeOpen = true;
+}
+function hidePlanTime() { planTimeOpen = false; const card = $('timeCard'); if (card) { card.hidden = true; card.classList.remove('tc-in'); } }
+function bindPlanTime() {
+  const anchor = $('planTime'), card = $('timeCard'), p = curPlan;
+  if (card) {
+    if (anchor && p && p.time && planTimeOpen) { card.innerHTML = CAUI.timeCard(p.time); card.hidden = false; CAUI.place(card, anchor, { side: 'bottom', align: 'start' }); }
+    else if (!planTimeOpen) card.hidden = true;
+  }
+  if (!anchor) return;
+  const toggle = (e) => { e.preventDefault(); planTimeOpen ? hidePlanTime() : showPlanTime(); };
+  anchor.addEventListener('mouseenter', showPlanTime);
+  anchor.addEventListener('mouseleave', hidePlanTime);
+  anchor.addEventListener('focus', showPlanTime);
+  anchor.addEventListener('blur', hidePlanTime);
+  anchor.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hidePlanTime(); anchor.blur(); } });
+  anchor.addEventListener('pointerup', (e) => { if (e.pointerType === 'touch') { planTimeTap = Date.now(); toggle(e); } });
+  anchor.addEventListener('click', (e) => { if (e.detail !== 0 && Date.now() - planTimeTap > 500) toggle(e); });
+}
 function renderPlan(p) {
   const laneCard = (l) => `<div class="lane-card">
       <span class="spot" data-spot="lane:${esc(l.id)}" data-role="${l.phase === 'review' ? 'reviewer' : 'builder'}" data-scale="0.75" data-work="${l.running ? 1 : 0}"></span>
@@ -1090,7 +1157,7 @@ function renderPlan(p) {
       ${planState(p) === 'waiting' ? `<div class="small" style="margin-top:6px">No lane is running. The lead starts the next lane, or closes the plan with <code>ca plan close ${esc(p.id)} --reason "..."</code>.</div>` : ''}
       ${p.goal ? `<p class="goal">${esc(p.goal)}</p>` : ''}
       <div class="plan-path">${esc(p.file)}</div>
-      <div class="plan-tok" title="${esc(tokTitle(p.tokens) || planTokTitle)}">${tokLabel(p.tokens)}</div>
+      <div class="plan-tok" title="${esc(tokTitle(p.tokens) || planTokTitle)}">${tokLabel(p.tokens)}${p.time ? ` · ${planTimeChip(p)}` : ''}</div>
     </div>
     ${p.now ? `<div class="leadband"><span class="spot" data-spot="lead:${esc(p.id)}" data-role="lead" data-scale="0.75"></span><span class="who">${p.closed ? 'Outcome' : 'Lead now'}</span><span class="vdiv"></span><span class="txt">${esc(p.now)}</span></div>` : ''}
     <div class="box tokbox"><h4>Tokens by model</h4>${modelTable(p.tokensByModel)}</div>
@@ -1104,6 +1171,7 @@ function renderPlan(p) {
   applyEntryRise();
   mountSprites();
   syncBarPad();
+  bindPlanTime();
 }
 
 function pipeline(d) {
@@ -1131,7 +1199,7 @@ function renderLane(d, keep) {
   const na = (v) => (v == null || v === '' || v === '-') ? 'n/a' : esc(v);
   const metric = (lb, val, title) => `<span class="m"${title ? ` title="${esc(title)}"` : ''}><span class="lb">${lb}</span><b>${val}</b></span>`;
   const tokens = CAUI.fmtTokens(CAUI.tokenTotal(t));
-  const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed))}${metric('Idle', na(d.idle))}${metric('Tokens', tokens, CAUI.tokenDetail(t))}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
+  const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Elapsed', na(d.elapsed), d.time ? CAUI.timeRowsByPhase(d.time.byPhase) : '')}${metric('Idle', na(d.idle))}${metric('Tokens', tokens, CAUI.tokenDetail(t))}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
   const tokRows = (() => { const rows = CAUI.tokenSplit(d.tokensBy); const max = Math.max(1, ...rows.map((r) => r.total)); return `<div class="tokby">${rows.map((r) => `<div class="tokrow" data-role="${r.role}" data-total="${r.total}" title="${esc(r.label)}: ${esc(CAUI.tokenDetail(r.t))}"><span class="tk-lb">${esc(r.label)}</span><span class="tk-n">${CAUI.fmtTokens(r.total)}</span><span class="tk-bar"><i class="${r.role}" style="width:${Math.round((100 * r.total) / max)}%"></i></span></div>`).join('')}</div>`; })();
   const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
   const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(st.label)}${d.reason ? ' &middot; ' + esc(d.reason) : ''}`;
@@ -1413,7 +1481,7 @@ window.__lanes = { state: () => {
   return {
     route: { kind: route.kind, id: route.id },
     rail: { plans: plans.map((p) => ({ id: p.id, selected: route.kind === 'plan' && route.id === p.id })), finished: lanes.filter((l) => !inPlan.has(l.id) && !l.running).map((l) => l.id) },
-    plan: route.kind === 'plan' && curPlan ? { waves: curPlan.waves.map((w, i) => ({ name: w.name, collapsed: waveCollapsed.has(`${curPlan.id}::${i}`), lanes: w.lanes.map((l) => ({ id: l.id, href: `#/lane/${l.id}`, stepsOpen: stepsOpen.has(l.id) })) })), tokens: CAUI.tokenTotal(curPlan.tokens), suggestButtons: [...document.querySelectorAll('.lane-card .sugbtn')].map((b) => b.dataset.lane) } : null,
+    plan: route.kind === 'plan' && curPlan ? { waves: curPlan.waves.map((w, i) => ({ name: w.name, collapsed: waveCollapsed.has(`${curPlan.id}::${i}`), lanes: w.lanes.map((l) => ({ id: l.id, href: `#/lane/${l.id}`, stepsOpen: stepsOpen.has(l.id) })) })), tokens: CAUI.tokenTotal(curPlan.tokens), time: curPlan.time ? { total: curPlan.time.totalMs, label: 'Time ' + CAUI.fmtDur(curPlan.time.totalMs), cardOpen: !!($('timeCard') && !$('timeCard').hidden) } : null, suggestButtons: [...document.querySelectorAll('.lane-card .sugbtn')].map((b) => b.dataset.lane) } : null,
     lane: route.kind === 'lane' && detail ? { id: detail.id, phase: detail.phase, liveSegment: document.querySelector('.seg.live')?.textContent || '', tab, follow: tget(detail.id).follow, transcriptScrollTop: tget(detail.id).top, transcriptAtBottom: tget(detail.id).atBottom, steps: detail.steps.map((x) => ({ n: x.n, state: x.state })), draft: drafts.get(detail.id) || '', sending: !!(inFlight && inFlight.laneId === detail.id),
       tokens: { total: CAUI.tokenTotal(detail.tokens), build: CAUI.tokenTotal(detail.tokensBy && detail.tokensBy.build), review: CAUI.tokenTotal(detail.tokensBy && detail.tokensBy.review), other: CAUI.tokenTotal(detail.tokensBy && detail.tokensBy.other) },
       actions: [...document.querySelectorAll('#bar .ctlbar [data-action]')].map((b) => b.dataset.action), suggest: detail.suggest || '', noteOpen: ctlNotes.has(detail.id) } : null,
@@ -1550,7 +1618,7 @@ document.addEventListener('input', (e) => {
   const n = ctlNotes.get(ta.dataset.noteText);
   if (n) n.text = ta.value;
 });
-window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; entryRise = true; crPrevIds = new Set(); refresh(true); };
+window.onhashchange = () => { route = parseRoute(); tab = 'log'; detail = null; entryRise = true; crPrevIds = new Set(); hidePlanTime(); refresh(true); };
 syncRail();
 $('notify').onclick = toggleNotify; renderNotify(); updateFreshness();
 route = parseRoute(); refresh(true); setInterval(() => refresh(false), 2500); setInterval(pollLog, 1500);
