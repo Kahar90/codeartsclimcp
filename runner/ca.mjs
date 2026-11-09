@@ -1697,6 +1697,30 @@ function projectOf(repo) {
   projectCache.set(repo, v);
   return v;
 }
+// How long a lane really worked, ignoring the gaps while it was paused between runs. Windows are one
+// [start, end] per run plus the current run; the phase timeline is clipped to those windows so paused
+// gaps never count. The window time before the first phase entry is waiting.
+function laneTime(s, isAlive) {
+  const win = [];
+  const push = (a, b) => { if (a == null || b == null) return; if (!Number.isFinite(a) || !Number.isFinite(b)) return; if (b <= a) return; win.push([a, b]); };
+  for (const r of s.runs || []) if (r && r.startedAt != null) push(r.startedAt, r.finishedAt != null ? r.finishedAt : (isAlive ? Date.now() : s.lastEventAt));
+  const curEnd = s.finishedAt != null ? s.finishedAt : (isAlive ? Date.now() : s.lastEventAt);
+  push(s.runStartedAt || s.startedAt, curEnd);
+  win.sort((a, b) => a[0] - b[0]);
+  const ms = win.reduce((t, [a, b]) => t + (b - a), 0);
+  const byPhase = { wait: 0, build: 0, checks: 0, fix: 0, review: 0, other: 0 };
+  const map = (p) => p === 'starting' || p === 'restart' || p === 'backoff' ? 'wait' : p === 'build' ? 'build' : p === 'gate' ? 'checks' : p === 'fix' ? 'fix' : p === 'review' ? 'review' : 'other';
+  const overlap = (a, b) => { let t = 0; for (const [wa, wb] of win) { const lo = a > wa ? a : wa, hi = b < wb ? b : wb; if (hi > lo) t += hi - lo; } return t; };
+  const phases = s.phases || [];
+  if (!phases.length) byPhase.other = ms;
+  else {
+    const end = win.reduce((m, [, b]) => (b > m ? b : m), 0);
+    for (let i = 0; i < phases.length; i++) { const at = phases[i].at; const nx = i + 1 < phases.length ? phases[i + 1].at : end; if (at == null || nx == null || nx <= at) continue; byPhase[map(phases[i].phase)] += overlap(at, nx); }
+    const first = phases[0].at;
+    if (first != null) for (const [wa, wb] of win) { const hi = wb < first ? wb : first; if (hi > wa) byPhase.wait += hi - wa; }
+  }
+  return { ms, byPhase, windows: win };
+}
 function laneView(l) {
   const s = l.s; const pg = stepProgress(s);
   const isAlive = alive(s.pid); const h = health(s);
@@ -1704,7 +1728,7 @@ function laneView(l) {
   const { bucket, reason: bucketWhy, handled } = bucketFor(l);
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
-    startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0,
+    startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0, time: laneTime(s, isAlive),
     actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
