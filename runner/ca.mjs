@@ -1163,69 +1163,87 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       if (S.resumedBy) say(`resumed by ${S.resumedBy}`);
     }
     await send(sid, first, BUILD);
+    // A final "needs fixes" verdict no longer ends the lane. The findings go back to the same builder
+    // session (context kept), the gates run again and the review runs again, up to REVIEW_FIXES rounds.
+    // Review fix rounds do not count in S.fixes and every existing exit path (stop, timeout, auth,
+    // infra/unverified, write failure) still ends the outer loop as before.
+    let reviewFixRounds = 0;
     for (;;) {
-      const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
-      sid = r.sid; S.buildSession = sid;
-      if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; if (r.keys) S.keysMessage = r.keys; break; }
-      // The builder is idle: let a step review still in flight finish (bounded by its own timeout) so
-      // its finding can be steered in before the gates run.
-      if (stepReviewRunning) { try { await stepReviewRunning; } catch {} }
-      const srFiles = inboxStepReviewFiles();
-      if (srFiles.length && (S.stepReviewContinues || 0) >= CFG.fixes) {
-        for (const f of srFiles) { try { fs.rmSync(path.join(dir, 'inbox', f), { force: true }); } catch {} }
-        L(`== step-review steers capped at ${CFG.fixes}; not looping again`);
+      let cleanEnd = false;
+      for (;;) {
+        const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
+        sid = r.sid; S.buildSession = sid;
+        if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; if (r.keys) S.keysMessage = r.keys; break; }
+        // The builder is idle: let a step review still in flight finish (bounded by its own timeout) so
+        // its finding can be steered in before the gates run.
+        if (stepReviewRunning) { try { await stepReviewRunning; } catch {} }
+        const srFiles = inboxStepReviewFiles();
+        if (srFiles.length && (S.stepReviewContinues || 0) >= CFG.fixes) {
+          for (const f of srFiles) { try { fs.rmSync(path.join(dir, 'inbox', f), { force: true }); } catch {} }
+          L(`== step-review steers capped at ${CFG.fixes}; not looping again`);
+        }
+        if (await pumpInbox(sid)) {
+          if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
+          continue; // a steer arrived right at the end: let the builder handle it
+        }
+        phase('gate', 'running gates');
+        // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
+        // passes the final review can start and run while the CHECK lines run.
+        let g = await gitCleanGate();
+        if (!g.ok) {
+          // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
+          if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
+          if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+          say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+          phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+          continue;
+        }
+        // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
+        // it reviews. A CHECK that fails or cannot run aborts and discards this overlapped review.
+        const fr = !CFG.noReview ? await startFinalReview() : null;
+        g = await runChecks();
+        if (!g.ok) {
+          if (fr) await discardFinalReview(fr);
+          // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
+          // repair the machine), but a human must look, so exit 4 like needs review.
+          if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
+          if (++S.fixes > CFG.fixes) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; exitCode = 1; break; }
+          say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+          phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+          continue;
+        }
+        // The checks passed: wait for the overlapped review to end and record its verdict.
+        if (fr) {
+          phase('review', 'reviewing');
+          const rr = await fr.promise;
+          if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
+          await applyFinalReview(fr.sid, rr, fr.head0);
+          if (exitCode === 3) break;
+        }
+        reason = ''; exitCode = 0; cleanEnd = true; break;
       }
-      if (await pumpInbox(sid)) {
-        if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
-        continue; // a steer arrived right at the end: let the builder handle it
-      }
-      phase('gate', 'running gates');
-      // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
-      // passes the final review can start and run while the CHECK lines run.
-      let g = await gitCleanGate();
-      if (!g.ok) {
-        // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
-        if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
-        if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
-        say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
-        continue;
-      }
-      // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
-      // it reviews. A CHECK that fails or cannot run aborts and discards this overlapped review.
-      const fr = !CFG.noReview ? await startFinalReview() : null;
-      g = await runChecks();
-      if (!g.ok) {
-        if (fr) await discardFinalReview(fr);
-        // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
-        // repair the machine), but a human must look, so exit 4 like needs review.
-        if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
-        if (++S.fixes > CFG.fixes) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; exitCode = 1; break; }
-        say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
-        continue;
-      }
-      // The checks passed: wait for the overlapped review to end and record its verdict.
-      if (fr) {
+      syncCommits();
+
+      // REVIEW (read-only plan agent, different model). It reads code, not checks, so it still runs
+      // when the checks could not run (unverified): a reviewer asking for fixes wins over it. The clean
+      // success path already ran its review beside the checks, so this only covers the rest.
+      if (!finalReviewed && (exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
+        const fr = await startFinalReview();
         phase('review', 'reviewing');
         const rr = await fr.promise;
         if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
         await applyFinalReview(fr.sid, rr, fr.head0);
-        if (exitCode === 3) break;
       }
-      reason = ''; exitCode = 0; break;
-    }
-    syncCommits();
 
-    // REVIEW (read-only plan agent, different model). It reads code, not checks, so it still runs
-    // when the checks could not run (unverified): a reviewer asking for fixes wins over it. The clean
-    // success path already ran its review beside the checks, so this only covers the rest.
-    if (!finalReviewed && (exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
-      const fr = await startFinalReview();
-      phase('review', 'reviewing');
-      const rr = await fr.promise;
-      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-      await applyFinalReview(fr.sid, rr, fr.head0);
+      if (!cleanEnd) break; // a stop, timeout, auth, infra/unverified or write failure ends the lane
+      // The review said needs fixes and the budget still allows a round: send the findings to the same
+      // builder session and go through the build loop, gates and review again.
+      if (!(S.verdict === 'needs fixes' && reviewFixRounds < REVIEW_FIXES && S.buildSession)) break;
+      reviewFixRounds++;
+      say(`review says needs fixes; review fix round ${reviewFixRounds}/${REVIEW_FIXES}`);
+      phase('fix', `review fix round ${reviewFixRounds}`);
+      await send(S.buildSession, `The reviewer found these problems:\n${review || ''}\nFix the real bugs (ignore a finding that contradicts the brief or the lead's steering), run the checks, and commit as "fix: review findings".`, buildModel);
+      sid = S.buildSession;
     }
   } catch (err) {
     forcedResult = '';
