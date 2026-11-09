@@ -1,52 +1,30 @@
 {
-  "title": "Snappy dashboard, direct lane links, faster checks",
-  "goal": "The dashboard stays fast with many plans and lanes; Office's Open in Lanes lands on the agent's detail; the check suite gives a fast default run so features ship sooner. Release 0.5.4.",
-  "lead": "Claude Opus 5.5",
-  "status": "done",
-  "startedAt": "2026-11-09T16:20:00.000Z",
-  "now": "Closed: 0.5.4 released: polls about 25 ms (was 1 s at 100 lanes), lane loading state, fast and full check sets (1.5 min and 4 min)",
+  "title": "when the final review says \"VERDICT: needs fixes\", fix it inside the same lane instead of ending the lane",
+  "goal": "when the final review says \"VERDICT: needs fixes\", fix it inside the same lane instead of ending the lane",
+  "lead": "lead",
+  "status": "running",
+  "now": "",
   "waves": [
     {
-      "name": "Wave 1 · Poll cost",
+      "name": "Lanes",
       "lanes": [
-        "perf"
-      ],
-      "note": "Contract: checks/perf.check.mjs (100 lanes, 8 plans, median under 60 ms; baseline about 1000 ms)."
+        "reviewfix"
+      ]
     }
   ],
   "lanes": [
     {
-      "task": "perf",
-      "repo": "../ca-office-wt-perf",
-      "model": "maas/deepseek-v4.1-flash",
-      "kind": "code",
-      "why": "mtime-keyed JSON cache and one lanes()/plans() snapshot per request instead of re-reading every file per plan and per lane",
-      "files": [
-        "runner/ca.mjs"
-      ]
+      "task": "reviewfix",
+      "repo": ".",
+      "why": "when the final review says \"VERDICT: needs fixes\", fix it inside the same lane instead of ending the lane"
     }
-  ],
-  "next": [
-    "Lead: Office agent window Open in Lanes goes to #/lane/<id>",
-    "Lead: time every check, split into a fast default (npm run check) and the full release suite (npm run check:full)",
-    "Merge perf, run the fast suite, then the full suite once before the release",
-    "Release 0.5.4: push, install from a packed copy, sync the skill, restart the dashboard"
   ],
   "decisions": [
     {
-      "at": "2026-11-09T16:25:00.000Z",
-      "text": "Lag cause measured, not guessed: browser main thread about 3% busy; the server spends 200 to 330 ms per poll (1 s at 100 lanes), 70% in readFileSync+JSON.parse because planView calls lanes() per plan and every lane status calls plans(). Two open tabs keep the single-threaded dashboard about half busy."
-    },
-    {
-      "at": "2026-11-09T17:05:26.490Z",
-      "text": "Plan closed: 0.5.4 released: polls about 25 ms (was 1 s at 100 lanes), lane loading state, fast and full check sets (1.5 min and 4 min)."
+      "at": "2026-11-09T18:51:22.874Z",
+      "text": "Plan created by the runner: lane reviewfix started without an open plan."
     }
   ],
-  "risks": [
-    "A cache that hands out shared objects could leak one request's mutation into the next.",
-    "Dropping slow browser checks from the default run could let a UI regression through: the full suite still runs before every release."
-  ],
-  "leadSession": "C:\\Users\\n00958341\\.claude\\projects\\D--Coding-ca-office\\81aabbfd-fafc-453e-98ce-e14bc47f05be.jsonl",
-  "leadSince": "2026-11-09T16:20:00.000Z",
-  "closedAt": "2026-11-09T17:05:26.490Z"
+  "next": [],
+  "risks": []
 }
