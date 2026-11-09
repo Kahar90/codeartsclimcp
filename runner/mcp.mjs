@@ -223,13 +223,15 @@ const TOOLS = [
   },
   {
     name: 'ca_wait',
-    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). With any: true it returns as soon as one lane has a result (the finished lanes in lanes, the rest in running), so an early failure is seen at once when lanes run in parallel. Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). With any: true it returns as soon as one lane has a result (the finished lanes in lanes, the rest in running), so an early failure is seen at once when lanes run in parallel. With steps: true it also returns (exit 10) as soon as a lane commits a new step, so you can look at it and steer early instead of waiting for the lane to end. Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 10 a step was committed, 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
     inputSchema: {
       type: 'object',
       properties: {
         lanes: { type: 'array', items: { type: 'string' }, description: 'lane ids or task names to wait for (as in ca_status)' },
         timeout_s: { type: 'number', description: 'how long to block at most, seconds (default 45, max 55)' },
         any: { type: 'boolean', description: 'true: return as soon as any one lane has a result (an early failure is seen at once when lanes run in parallel); the still-running lanes are listed in running' },
+        steps: { type: 'boolean', description: 'also return when a lane commits a new step, so you can look at it and steer early' },
+        after: { type: ['number', 'object'], description: 'the commits value from the previous step event; default the count when the call starts' },
         compact: { type: 'boolean', description: 'default true: one small row per lane {lane, status {key, label, attention}, progress "d/t", commits, tokens, next}; set false for the full status rows' },
       },
       required: ['lanes'],
@@ -494,15 +496,26 @@ function lastJsonObject(s) {
   return null;
 }
 
-// ca_wait: exit codes 0, 1, 3, 4, 5 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
+// ca_wait: exit codes 0, 1, 3, 4, 5, 10 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
 const WAIT_NEXT = {
   0: 'read ca_summary for each lane and verify the work',
   1: 'read ca_summary; ca_resume continues a failed, stopped or checks-failing lane with a note',
   3: 'keys missing or rejected: ask the human to run ca auth (a local form opens; never ask for keys in chat), then ca_resume the lane',
   4: 'read ca_summary: the reviewer asked for changes, or the checks could not run (unverified)',
   5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
+  10: 'a step was committed: look at it now (screenshot the ui files), steer the lane if it went wrong, then call ca_wait again with steps: true and after set to the commits value',
   124: 'still running: call ca_wait again',
 };
+// ca wait --after takes a plain count or a lane=count list; an MCP after may be a number or {lane: count}.
+function afterFlag(after) {
+  if (after === undefined || after === null) return [];
+  if (typeof after === 'number') return ['--after', String(after)];
+  if (typeof after === 'object' && !Array.isArray(after)) {
+    const parts = Object.entries(after).filter(([, v]) => typeof v === 'number').map(([k, v]) => `${k}=${v}`);
+    return parts.length ? ['--after', parts.join(',')] : [];
+  }
+  return [];
+}
 async function waitResult(a) {
   const lanes = needLanes(a.lanes);
   // Capped below the ~60 s tool timeout of common MCP clients: a longer block comes back as a client error.
@@ -513,9 +526,13 @@ async function waitResult(a) {
   // compact defaults to true: the lead gets one small decision row per lane. Set compact: false for the
   // full status rows (progress object, tokensBy, paths) when it needs to inspect a lane.
   const compactArg = a.compact === false ? [] : ['--compact'];
-  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), '--json', ...compactArg, '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
+  // steps: also return (exit 10) when a lane commits a new step; after: the baseline (a number, or
+  // {lane: count}) from the previous step event. Calls without steps are unchanged.
+  const stepsArg = a.steps === true ? ['--steps'] : [];
+  const afterArg = afterFlag(a.after);
+  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), ...stepsArg, ...afterArg, '--json', ...compactArg, '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
-  if (![0, 1, 3, 4, 5, 124].includes(r.code) || !final) {
+  if (![0, 1, 3, 4, 5, 10, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();
     return { content: [{ type: 'text', text: `ca_wait exited ${r.code}${raw ? ':\n' + raw : ' with no output'}` }], isError: true };
   }
