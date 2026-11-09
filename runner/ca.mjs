@@ -402,6 +402,12 @@ async function runLane(repoArg, task, opts = {}) {
   const REVIEW = (brief.match(/^\s*REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.review;
   const stepReviewLine = (brief.match(/^\s*STEP_REVIEW:\s*([\w-]+)/m) || [])[1];
   const STEP_REVIEW = process.env.STEP_REVIEW !== '0' && !/^off$/i.test(stepReviewLine || '') && !CFG.noReview;
+  // REVIEW_FIXES: how many review-fix rounds a final "needs fixes" verdict may trigger in place. A brief
+  // line wins over the env var; the default is 1 and 0 restores the old "end the lane" behaviour.
+  const reviewFixesLine = (brief.match(/^\s*REVIEW_FIXES:\s*(\d+)/m) || [])[1];
+  const reviewFixesEnv = process.env.REVIEW_FIXES;
+  const REVIEW_FIXES = reviewFixesLine !== undefined ? Math.max(0, Number(reviewFixesLine))
+    : (reviewFixesEnv !== undefined && reviewFixesEnv !== '' && Number.isFinite(Number(reviewFixesEnv)) ? Math.max(0, Number(reviewFixesEnv)) : 1);
   const START = (resumed && resumed.start) || git(repo, 'rev-parse', 'HEAD');
   const dirtyAll = () => git(repo, 'status', '--porcelain').split(/\r?\n/).filter((l) => l && !/^.. "?(tasks\/|\.codeartsdoer)/.test(l));
   const PRE_DIRTY = new Set(dirtyAll());
