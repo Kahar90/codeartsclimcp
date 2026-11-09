@@ -73,6 +73,15 @@ summaries, not transcripts.
   once, instead of in a fix round at the end. The final review then starts as soon as the work tree
   is clean and runs while the CHECK lines run. Turn step reviews off for one lane with a brief line
   `STEP_REVIEW: off`, or everywhere with env `STEP_REVIEW=0` (both cost review tokens, not time).
+- A final "needs fixes" verdict is fixed inside the lane: the findings go back to the same builder
+  session, the gates run again and a focused re-review checks only the fix (`REVIEW_FIXES`, default 1
+  round; a brief line `REVIEW_FIXES: 2` allows more, 0 ends the lane at the first verdict as before).
+  You only get "needs review" when the findings survive that round.
+- Workers run in the CodeArts sandbox, which has no local network: a check that starts a server cannot
+  run in the worker's own shell. The runner gives every lane a helper the worker uses instead
+  (`node tasks/<task>.lane/check.mjs <N|all>`): it runs the CHECK line outside the sandbox and prints the
+  real output. When the worker ran every CHECK line green on the final commit, the gate reuses those
+  results instead of running them again. Briefs need nothing extra for this; the runner tells the worker.
 
 Precise briefs reduce ambiguity; they cannot disable model reasoning. Keep file reads and tool
 outputs targeted, batch independent reads, and avoid rereading full files. Token savings require
