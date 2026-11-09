@@ -19,7 +19,9 @@
 //                                  --resume: continue a paused/stopped/failed lane in place, same id and step count,
 //                                  plus the lead's notes from tasks/<task>.resume.md if present)
 //        ca status [--json] [--all]        table of lanes (--json adds id, task, repo, result, progress)
-//        ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]  block until lanes end (--any: first); exit = worst lane
+//        ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet] [--steps] [--after N|lane=N,...]
+//                                  block until lanes end (--any: first); exit = worst lane
+//                                  --steps also returns (exit 10, CA_STEP) when a lane commits a new step; pass the printed commits as --after next time
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
 //        ca workspace <repo> <task> [--from <branch>]   prepare a parallel lane workspace as a local
@@ -70,7 +72,8 @@
 //        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed or checks failing,
 //        2 usage or unknown lane, 3 missing credentials, 4 needs review or unverified (a check
-//        could not run), 5 paused at LANE_TIMEOUT (resume with --resume), 124 wait timeout.
+//        could not run), 5 paused at LANE_TIMEOUT (resume with --resume), 10 a step was committed
+//        (ca wait --steps; look at it and call again with --after), 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
