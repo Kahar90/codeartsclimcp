@@ -138,6 +138,21 @@ const fmtDur = (ms) => {
 const oneLine = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const compact = (n) => { n = Number(n) || 0; if (n < 1000) return String(n); if (n < 1e6) { const v = n / 1000; return `${v < 10 ? v.toFixed(1) : Math.round(v)}k`.replace('.0k', 'k'); } return `${(n / 1e6).toFixed(n < 1e7 ? 2 : n < 1e8 ? 1 : 0)}M`; };
 const readJSON = (f, d = null) => { for (let i = 0; i < 3; i++) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return d; } } return d; };
+// The dashboard polls the same small registry, state and plan files every 2 s: parse each once and reuse it
+// while statSync mtimeMs and size are unchanged. Returns a fresh structuredClone so no caller can mutate the
+// cached value (lanes() and planView hand their objects to CLI writers that do mutate state). Missing file or a
+// path that is not a regular file: null, and the entry is dropped. Parse failures are not cached (retried next call).
+const jsonCache = new Map();
+function readJSONCached(file) {
+  let st; try { st = fs.statSync(file); } catch { jsonCache.delete(file); return null; }
+  if (!st.isFile()) { jsonCache.delete(file); return null; }
+  const c = jsonCache.get(file);
+  if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) return structuredClone(c.value);
+  let ok = false; let value = null;
+  for (let i = 0; i < 3; i++) { try { value = JSON.parse(fs.readFileSync(file, 'utf8')); ok = true; break; } catch (e) { if (e.code === 'ENOENT') { jsonCache.delete(file); return null; } } }
+  if (ok) jsonCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, value });
+  return structuredClone(value);
+}
 // state.json is read every 2 s by status, wait and the dashboard: a plain overwrite let readers see a half-written
 // file and the lane vanished from the list for one poll. Write a temp file and rename it over the old one; on
 // Windows a reader holding the file open makes rename fail with EPERM, so retry briefly, then fall back.
@@ -1137,10 +1152,19 @@ function cmdDetach(repoArg, task) {
 }
 
 // ---------- control commands ----------
+// The dashboard answers /api/plans, /api/lanes and /api/overview every 2 s and maps a view over every plan and
+// lane, so lanes() and plans() must run once per poll, not once per plan or per lane. The request handler sets
+// reqSnap at the start of a request and the snapshot goes stale on the next one; outside the dashboard it stays
+// null and every call reads live, so CLI commands behave exactly as before.
+let reqSnap = null;
+function lanesSnapshot() { if (!reqSnap) return lanes(); if (!reqSnap.lanes) reqSnap.lanes = lanes(); return reqSnap.lanes; }
+function plansSnapshot() { if (!reqSnap) return plans(); if (!reqSnap.plans) reqSnap.plans = plans(); return reqSnap.plans; }
+// planView needs one id -> lane lookup; build it once per request instead of once per plan.
+function laneIndex() { if (!reqSnap) return new Map(lanes().map((l) => [l.id, l])); const ls = lanesSnapshot(); if (!reqSnap.laneIndex) reqSnap.laneIndex = new Map(ls.map((l) => [l.id, l])); return reqSnap.laneIndex; }
 function lanes() {
   let files = []; try { files = fs.readdirSync(REG).filter((f) => f.endsWith('.json')); } catch {}
   // Skip non-lane json in the registry (acks.json): a registration always carries a string dir.
-  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r || typeof r.dir !== 'string') return null; const s = readJSON(path.join(r.dir, 'state.json')) || readJSON(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
+  return files.map((f) => { const r = readJSONCached(path.join(REG, f)); if (!r || typeof r.dir !== 'string') return null; const s = readJSONCached(path.join(r.dir, 'state.json')) || readJSONCached(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
     .sort((a, b) => (b.s.startedAt || 0) - (a.s.startedAt || 0));
 }
 // Lanes written before 'paused' existed recorded a timeout as failed (timeout).
@@ -1199,25 +1223,34 @@ function setAck(id, seen, finishedAt, note = '') { const a = { ...readAcks() }; 
 // The bucket a person sees: any finished lane the lead acknowledged is handled, and a DEAD or running
 // lane can never be marked away (it needs resume or stop). The ended lanes of a closed plan are never
 // attention either: the lead closed the plan, so nothing is left for the human.
+// While a poll builds a view over every lane, one lane object is reused by laneRow, laneStatusOf, laneView and
+// bucketFor, and each of them wants the same liveness, health and bucket. Compute them once per lane object (a
+// WeakMap, so nothing is attached to the lane and nothing leaks from one poll to the next).
+const laneMemo = new WeakMap();
+function laneMemoFor(l) { let m = laneMemo.get(l); if (!m) { m = {}; laneMemo.set(l, m); } return m; }
+function laneAlive(l) { const m = laneMemoFor(l); if (m.alive === undefined) m.alive = alive(l.s.pid); return m.alive; }
+function laneHealthOf(l) { const m = laneMemoFor(l); if (m.health === undefined) m.health = health(l.s); return m.health; }
 function bucketFor(l) {
-  const s = l.s; const r = laneBucket({ s, alive: alive(s.pid), health: health(s) });
+  const m = laneMemoFor(l); if (m.bucket) return m.bucket;
+  const s = l.s; const r = laneBucket({ s, alive: laneAlive(l), health: laneHealthOf(l) });
+  let out;
   if (s.result && laneSeen(l.id, s.finishedAt)) {
-    const note = ackNote(l.id); return { bucket: r.bucket === 'attention' ? 'ended' : r.bucket, reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
-  }
-  if (r.bucket === 'attention' && s.result && closedPlanLanes().has(l.id)) return { bucket: 'ended', reason: r.reason, handled: false };
-  return r;
+    const note = ackNote(l.id); out = { bucket: r.bucket === 'attention' ? 'ended' : r.bucket, reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
+  } else if (r.bucket === 'attention' && s.result && closedPlanLanes().has(l.id)) out = { bucket: 'ended', reason: r.reason, handled: false };
+  else out = r;
+  m.bucket = out; return out;
 }
 function bucketOf(l) { return bucketFor(l).bucket; }
 // Lane ids that belong to a closed plan: their ended lanes need nothing from the human. Cached by the
 // registered plans' ids and mtimes, so a poll over many lanes reads the plan files once.
 let closedLanes = { key: null, ids: new Set() };
 function closedPlanLanes() {
-  const rs = plans();
+  const rs = plansSnapshot();
   const key = rs.map((r) => `${r.id}:${r.mtime}`).join('|');
   if (closedLanes.key === key) return closedLanes.ids;
   const ids = new Set();
   for (const r of rs) {
-    const p = readJSON(r.file) || {};
+    const p = r.plan || readJSONCached(r.file) || {};
     if (!planClosed(p)) continue;
     const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
     for (const pl of p.lanes || []) { if (!pl || pl.removed) continue; ids.add(laneId(path.resolve(base, pl.repo || '.'), pl.task)); }
@@ -1244,7 +1277,7 @@ function kindOf(l) {
 }
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
-  return { lane: l.id, bucket: bucketOf(l), health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
+  return { lane: l.id, bucket: bucketOf(l), health: laneHealthOf(l), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
     commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
 const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
@@ -1542,7 +1575,7 @@ async function removePlan(r, { by = 'ca plan rm' } = {}) {
   try {
     const snapshot = readJSON(r.file) || {};
     const base = path.resolve(path.dirname(r.file), '..', snapshot.repo || '.');
-    const reg = new Map(lanes().map((l) => [l.id, l]));
+  const reg = laneIndex();
     const wanted = (snapshot.lanes || []).filter(Boolean).map((pl) => laneId(path.resolve(base, pl.repo || '.'), pl.task));
     const laneIds = []; const killed = [];
     for (const id of wanted) {
@@ -1973,10 +2006,20 @@ function laneAlreadyPlanned(repo, task) {
 }
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
-  return files.map((f) => readJSON(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
+  const out = [];
+  for (const f of files) {
+    const r = readJSONCached(path.join(PLANS, f)); if (!r || typeof r.file !== 'string') continue;
+    let st; try { st = fs.statSync(r.file); } catch { continue; }
+    if (!st.isFile()) continue;
     // A plan whose file is marked removed: true was deleted: never list it again.
-    .filter((r) => { const p = readJSON(r.file); return !(p && p.removed === true); })
-    .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+    const p = readJSONCached(r.file); if (p && p.removed === true) continue;
+    const o = { ...r, mtime: st.mtimeMs };
+    // planView and closedPlanLanes need this plan's JSON: hand it the parsed object so one poll never reads
+    // the same file twice. Non-enumerable, so it never leaks into JSON output or list rendering; both read it.
+    Object.defineProperty(o, 'plan', { value: p, enumerable: false, configurable: true });
+    out.push(o);
+  }
+  return out.sort((a, b) => b.mtime - a.mtime);
 }
 // The registered open plan that already lists this lane, resolving each lane entry's repo the same
 // way planView and noteResume do (the plan file's folder, then p.repo, then the lane entry repo).
@@ -2221,7 +2264,7 @@ function laneTime(s, isAlive) {
 }
 function laneView(l) {
   const s = l.s; const pg = stepProgress(s);
-  const isAlive = alive(s.pid); const h = health(s);
+  const isAlive = laneAlive(l); const h = laneHealthOf(l);
   const { actions, suggest, why } = laneActions({ s, alive: isAlive, health: h, canResume: fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`)) });
   const { bucket, reason: bucketWhy, handled } = bucketFor(l);
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
@@ -2392,8 +2435,8 @@ function glanceOf(view) {
   return out('idle', '');
 }
 function planView(r) {
-  const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
-  const reg = new Map(lanes().map((l) => [l.id, l]));
+  const p = r.plan || readJSONCached(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+  const reg = laneIndex();
   // A lane entry marked removed: true was deleted with its lane or plan: it must never come back as "planned".
   const planned = (p.lanes || []).filter((pl) => pl && !pl.removed).map((pl) => {
     const repo = path.resolve(base, pl.repo || '.'); const id = laneId(repo, pl.task); const l = reg.get(id);
@@ -2522,6 +2565,7 @@ function cmdDash(args) {
   });
   const readBody = async (req) => { try { return { body: await readJson(req) }; } catch (e) { return { error: { error: e.statusCode === 413 ? 'request body too large' : 'invalid JSON body' }, code: e.statusCode || 400 }; } };
   const srv = http.createServer(async (req, res) => {
+    reqSnap = {}; // one lanes()/plans() snapshot per request; rebuilt on the next poll
     const u = new URL(req.url, 'http://x');
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     try {
@@ -2546,22 +2590,22 @@ function cmdDash(args) {
         const files = ['dash.html', 'office.html', 'assets/workshop.js', 'assets/workshop.css'].map((f) => path.join(HERE, f));
         return json({ version: Math.max(0, ...files.map((f) => { try { return Math.round(fs.statSync(f).mtimeMs); } catch { return 0; } })) });
       }
-      if (u.pathname === '/api/lanes') return json(lanes().map(laneView));
+      if (u.pathname === '/api/lanes') return json(lanesSnapshot().map(laneView));
       if (u.pathname === '/api/overview') {
         // The office view in one call: attention buckets and lanes not finished over 3 days ago.
-        const ls = lanes().filter((l) => !l.s.result || now() - (l.s.finishedAt || 0) < 3 * 24 * 3600e3).map(laneView);
+        const ls = lanesSnapshot().filter((l) => !l.s.result || now() - (l.s.finishedAt || 0) < 3 * 24 * 3600e3).map(laneView);
         const counts = { attention: 0, running: 0, done: 0, ended: 0 };
         for (const v of ls) counts[v.bucket] = (counts[v.bucket] || 0) + 1;
         return json({ counts, lanes: ls });
       }
-      if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
+      if (u.pathname === '/api/plans') return json(plansSnapshot().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
       const pm = u.pathname.match(/^\/api\/plans\/(.+)\/remove$/);
       if (pm) {
         // Exact registered-plan id only (ids may carry ~ and .): decode the segment, never die().
         if (req.method !== 'POST') return json({ error: 'use POST /api/plans/<id>/remove' }, 405);
         const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
         const pid = decodeURIComponent(pm[1]);
-        const pr = plans().find((x) => x.id === pid);
+        const pr = plansSnapshot().find((x) => x.id === pid);
         if (!pr) return json({ error: `no registered plan has id "${pid}"` }, 404);
         const res = await removePlan(pr, { by: 'dashboard' });
         if (res.error) return json({ error: res.error }, res.code || 500);
@@ -2608,7 +2652,7 @@ function cmdDash(args) {
       }
       const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack|remove)$/);
       if (m) {
-        const q = decodeURIComponent(m[1]); const all = lanes();
+        const q = decodeURIComponent(m[1]); const all = lanesSnapshot();
         const pr = pickOne(all, q, (x) => x.id, (x) => x.task);
         if (pr.matches) return json({ error: `ambiguous lane "${q}": matches ${pr.matches.join(', ')}; use the full id` }, 409);
         const l = pr.hit;
