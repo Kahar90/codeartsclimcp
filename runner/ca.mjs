@@ -1664,8 +1664,16 @@ function stepFiles(repo, fresh) {
   const out = git(repo, 'diff', '--name-only', `${first}^`, last);
   return out ? out.split(/\r?\n/).filter(Boolean).slice(0, 50) : [];
 }
-function stepEvent(l, s, base) {
-  const log = s.commitLog || [];
+// The lane's commit log read live from the lane repo: state.json is refreshed by the supervisor at most
+// every 5 s inside a turn, so a step committed shortly before the lane ends can be invisible there and the
+// finished-lane rule would win. git is the source of truth; fall back to state.json only without a start.
+function liveLog(l, s) {
+  if (!l.repo || !s || !s.start) return (s && s.commitLog) || [];
+  const out = git(l.repo, 'log', '--reverse', '--format=%h%x09%s', `${s.start}..HEAD`);
+  if (!out) return [];
+  return out.split(/\r?\n/).map((ln) => { const [hash, ...r] = ln.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; });
+}
+function stepEvent(l, log, base) {
   const fresh = log.slice(base);
   const files = stepFiles(l.repo, fresh);
   return { lane: l.id, commits: log.length, new: fresh.map((c) => ({ hash: c.hash, subject: c.subject, step: stepOf(c.subject) })), files, ui: files.some((f) => UI_EXT.test(f)) };
@@ -1733,7 +1741,7 @@ async function cmdWait(args) {
     // --steps: a lane that passed its baseline has a new step. Wake the lead with one CA_STEP line per
     // such lane and exit 10; the finished-lane rule above wins, so an ended lane still reports its result.
     if (stepsMode) {
-      const evs = states.filter(({ l, s }) => (s.commits || 0) > baseline.get(l.id)).map(({ l, s }) => stepEvent(l, s, baseline.get(l.id)));
+      const evs = states.map(({ l, s }) => ({ l, log: liveLog(l, s) })).filter(({ l, log }) => log.length > baseline.get(l.id)).map(({ l, log }) => stepEvent(l, log, baseline.get(l.id)));
       if (evs.length) {
         for (const o of evs) process.stdout.write(`CA_STEP ${JSON.stringify(o)}\n`);
         if (asJson) {
