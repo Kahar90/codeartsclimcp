@@ -737,6 +737,7 @@ async function runLane(repoArg, task, opts = {}) {
   // has been busy and is idle again. Any error is recorded, never retried, never fails the lane.
   let stepReviewRunning = null;    // the promise of the review in flight, or null
   let stepReviewCancel = false;    // set when the builder went idle and the grace ran out
+  let stepReviewTo = '';           // the head the in-flight step review covers, so a cancel can mark it reviewed
   // Commits up to here are already covered by a step review; a resumed lane continues after its last one.
   let lastReviewedHash = (S.stepReviews.length && S.stepReviews[S.stepReviews.length - 1].hash) || START;
   const reviewedAlready = (h) => spawnSync('git', ['merge-base', '--is-ancestor', h, lastReviewedHash], { cwd: repo, windowsHide: true }).status === 0;
@@ -796,6 +797,7 @@ async function runLane(repoArg, task, opts = {}) {
     const steps = [...new Set(stepFresh.map((c) => Number((c.subject.match(/^step\s+(\d+):/i) || [])[1])))].filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
     const subjects = stepFresh.map((c) => c.subject);
     const n = S.stepReviews.length + 1;
+    stepReviewTo = to;
     stepReviewRunning = runStepReview(n, steps, lastReviewedHash, to, subjects).catch(() => null).finally(() => { stepReviewRunning = null; });
   };
 
@@ -850,7 +852,7 @@ async function runLane(repoArg, task, opts = {}) {
       // A check the worker asked for may run for minutes: its bash tool is waiting on the helper, which
       // is normal, so keep the tool watchdog from aborting that wait.
       if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
-      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) maybeStepReview(); }
+      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview().catch((err) => L(`! speculative review start failed: ${oneLine(String((err && err.message) || err), 200)}`)); maybeStepReview(); } }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
         try {
@@ -1204,8 +1206,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     save(true);
     review = text; finalReviewed = true;
   };
-  const startFinalReview = async (prev) => {
-    const head0 = git(repo, 'rev-parse', 'HEAD');
+  // One builder for the final review prompt, so the normal and the speculative review send the exact
+  // same text: the template (or tasks/<task>.review.md), the step-review appendix and, for a fix round,
+  // the previous findings block that names the fix range.
+  const finalReviewPrompt = (prev) => {
     const rf = path.join(repo, 'tasks', `${task}.review.md`);
     let rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
       : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
@@ -1216,6 +1220,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         + `Review only the fix: git log --oneline ${prev.to}..HEAD and git diff ${prev.to}..HEAD. `
         + `Say whether each finding is fixed and whether the fix broke anything; same output format and VERDICT line.`;
     }
+    return rb;
+  };
+  const startFinalReview = async (prev) => {
+    const head0 = git(repo, 'rev-parse', 'HEAD');
+    const rb = finalReviewPrompt(prev);
     const rsid = await newSession(`${task} review`); S.reviewSession = rsid; reviewSessions.add(rsid);
     L(`== review (${REVIEW}, read-only plan agent) session ${rsid}${prev ? `; fix round ${prev.round}` : ''}`);
     await send(rsid, rb, REVIEW, 'plan');
@@ -1226,11 +1235,137 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   const discardFinalReview = async (fr) => {
     if (!fr) return;
     const s = sx(fr.sid);
+    // A speculative review's own poller has no drive() loop to notice the abort: flag it so it stops at once
+    // instead of spinning to its 60 s "missing" deadline (which would delay the fix-round message).
+    if (fr.spec) specReviewCancel = true;
     try { await server.api('POST', `/session/${fr.sid}/abort`, {}); } catch (err) { L(`! review abort failed: ${err.message}`); }
     s.aborting = true; s.busy = false; s.sawBusy = true;
     try { await fr.promise; } catch {}
     s.aborting = false;
+    if (fr.spec) specReviewCancel = false;
     if (S.reviewSession === fr.sid) S.reviewSession = null;
+  };
+
+  // ---- speculative final review ----
+  // The builder spends 30 s to 2.6 min after its last step commit (final checks, wrap-up reply) before the
+  // gates, and only then did the final review start. As soon as every numbered step has a "step N:" commit
+  // and the work tree is clean, the final review starts in its own session while the builder wraps up. It is
+  // an independent poller like runStepReview: never drive()/send()/waitTurn(), which belong to the builder.
+  // State: S.specReview = { head, at, used }. When the builder goes idle and the git clean gate passes, a
+  // review whose HEAD is still the one it saw is used as the final review; otherwise it is aborted and the
+  // normal review runs. An in-flight step review is cancelled when the speculative one starts (it covers it).
+  let specReview = null; // { sid, sidP, head, from, at, promise, used } for the current round, or null
+  let specReviewStarting = false; // reserved while maybeSpecReview settles a step review before it starts
+  let specReviewCancel = false;   // set when the speculative review is discarded, so its poller stops at once
+  const startSpecReview = (prev) => {
+    const head = git(repo, 'rev-parse', 'HEAD');
+    const at = now();
+    const rb = finalReviewPrompt(prev);
+    const rec = { sid: null, sidP: null, head, from: prev && prev.to ? prev.to : START, at, used: false, promise: null };
+    S.specReview = { head, at, used: false };
+    S.reviewStartedAt = at;
+    save(true);
+    specReviewCancel = false;
+    // Create the session up front and keep the id promise: beginFinalReview and discardSpecReview need the
+    // session even before the review promise finishes, so it can never be read as a not-yet-assigned null.
+    rec.sidP = newSession(`${task} review (speculative)`);
+    rec.promise = (async () => {
+      try {
+        rec.sid = await rec.sidP;
+        reviewSessions.add(rec.sid);
+        sent.add(rb.trim()); // the runner's own prompt: never list it as a TUI steer
+        await server.api('POST', `/session/${rec.sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: rb }] });
+        L(`== speculative review (${REVIEW}, plan agent) session ${rec.sid} on ${head.slice(0, 8)}: starts while the builder wraps up`);
+        const deadline = at + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false, text = '';
+        while (!done) {
+          if (specReviewCancel) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'cancelled', text }; }
+          if (now() > deadline) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'timeout', text }; }
+          await sleep(3000);
+          let st; try { st = (await server.api('GET', '/session/status', null, 10000))[rec.sid]?.type; } catch { st = undefined; }
+          if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
+          try { text = lastAssistantText(await server.api('GET', `/session/${rec.sid}/message`)); } catch {}
+          if (sawBusy || text) done = true;
+          else if (now() - at > 60000) return { sid: rec.sid, ok: false, reason: 'missing', text };
+        }
+        return { sid: rec.sid, ok: true, reason: '', text };
+      } catch (err) { L(`! speculative review error: ${oneLine(String((err && err.message) || err), 200)}`); return { sid: rec.sid, ok: false, reason: 'error', text: '' }; }
+    })().catch(() => ({ sid: rec.sid, ok: false, reason: 'error', text: '' }));
+    specReview = rec;
+    return rec;
+  };
+  const maybeSpecReview = async () => {
+    if (CFG.noReview || specReview || specReviewStarting) return;
+    const pg = stepProgress(S);
+    if (!pg.total || pg.done !== pg.total) return;
+    if (dirty().length) return;
+    // Reserve the round before any await: a tick that runs during the grace below must not start a second
+    // review alongside this one (startSpecReview sets specReview at once, but the guard also covers the gap).
+    specReviewStarting = true;
+    try {
+      startSpecReview(S.reviewRounds[S.reviewRounds.length - 1]);
+      // The speculative review reads the whole range, so cancel a step review still in flight, after the same
+      // short grace the idle path allows (a nearly done finding can still reach the builder). Once cancelled,
+      // mark the commits that review covered as reviewed so maybeStepReview does not relaunch it next tick.
+      if (stepReviewRunning) {
+        const sr = stepReviewRunning; const covered = stepReviewTo;
+        const settled = await Promise.race([sr.then(() => true, () => true), sleep(CFG.stepReviewGrace * 1000).then(() => false)]);
+        if (!settled) {
+          stepReviewCancel = true;
+          L(`== speculative review starts: step review still running after ${CFG.stepReviewGrace}s; cancelled (the final review covers those commits)`);
+          try { await sr; } catch {}
+          stepReviewCancel = false;
+          if (covered) lastReviewedHash = covered;
+        }
+      }
+    } finally { specReviewStarting = false; }
+  };
+  const discardSpecReview = async () => {
+    const rec = specReview; if (!rec) return;
+    const sid = rec.sid || (rec.sidP ? await rec.sidP.catch(() => null) : null);
+    const s = sid ? sx(sid) : null;
+    if (sid) { try { await server.api('POST', `/session/${sid}/abort`, {}); } catch (err) { L(`! speculative review abort failed: ${err.message}`); } }
+    if (s) { s.aborting = true; s.busy = false; s.sawBusy = true; }
+    specReviewCancel = true;
+    try { await rec.promise; } catch {}
+    specReviewCancel = false;
+    if (s) s.aborting = false;
+    specReview = null; // release the round: a discarded review must not block maybeSpecReview in the next fix round (S.specReview stays for the contract)
+  };
+  // Start (or reuse) the final review for the current round. A speculative review whose HEAD is still the
+  // current HEAD is awaited in place of the normal review (its text and verdict go through applyFinalReview
+  // unchanged); a stale one is aborted and the normal final review starts as before. Returns a normalized
+  // handle { sid, head, from, at, promise, spec } or null when review is off.
+  const beginFinalReview = async () => {
+    if (CFG.noReview) return null;
+    const head = git(repo, 'rev-parse', 'HEAD');
+    if (specReview && specReview.head === head) {
+      specReview.used = true;
+      if (S.specReview) S.specReview.used = true;
+      save(true);
+      L(`== final review: using the speculative review on ${head.slice(0, 8)}`);
+      const sid = specReview.sid || (specReview.sidP ? await specReview.sidP.catch(() => null) : null);
+      return { sid, head, from: specReview.from, at: specReview.at, promise: specReview.promise, spec: true };
+    }
+    if (specReview) await discardSpecReview(); // stale: HEAD moved after it started, so abort and review again now
+    const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
+    return { sid: fr.sid, head: fr.head0, from: fr.from, at: fr.at, promise: fr.promise, spec: false };
+  };
+  // Await the overlapped final review and record it. A speculative review that did not finish (a transient
+  // error, a review past the timeout, or a credentials error its poller cannot report) falls back to the
+  // normal review, which drive()s the session with retries and detects auth, instead of turning the lane into
+  // "needs review" with an empty verdict.
+  const finishFinalReview = async (fr) => {
+    let rr = await fr.promise;
+    if (!rr.ok && fr.spec && rr.reason !== 'cancelled') {
+      L(`== speculative review did not finish (${rr.reason}); running the normal final review`);
+      await discardSpecReview();
+      if (S.specReview) { S.specReview.used = false; save(true); }
+      const fr2 = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
+      fr = { sid: fr2.sid, head: fr2.head0, from: fr2.from, at: fr2.at, promise: fr2.promise, spec: false };
+      rr = await fr2.promise;
+    }
+    if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
+    await applyFinalReview(fr.sid, rr, fr.head, fr.from, fr.at);
   };
 
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
@@ -1343,11 +1478,12 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           continue;
         }
         // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
-        // it reviews. A CHECK that fails or cannot run aborts and discards this overlapped review.
-        const fr = !CFG.noReview ? await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]) : null;
+        // it reviews. A speculative review that is still valid is awaited in place of a new one; a stale
+        // one is aborted and replaced. A CHECK that fails or cannot run aborts and discards this review.
+        const fr = await beginFinalReview();
         g = await runChecks();
         if (!g.ok) {
-          if (fr) await discardFinalReview(fr);
+          if (fr) { await discardFinalReview(fr); if (fr.spec) specReview = null; }
           // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
           // repair the machine), but a human must look, so exit 4 like needs review.
           if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
@@ -1359,9 +1495,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         // The checks passed: wait for the overlapped review to end and record its verdict.
         if (fr) {
           phase('review', 'reviewing');
-          const rr = await fr.promise;
-          if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-          await applyFinalReview(fr.sid, rr, fr.head0, fr.from, fr.at);
+          await finishFinalReview(fr);
           if (exitCode === 3) break;
         }
         reason = ''; exitCode = 0; cleanEnd = true; break;
@@ -1372,11 +1506,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // when the checks could not run (unverified): a reviewer asking for fixes wins over it. The clean
       // success path already ran its review beside the checks, so this only covers the rest.
       if (!finalReviewed && (exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
-        const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
+        const fr = await beginFinalReview();
         phase('review', 'reviewing');
-        const rr = await fr.promise;
-        if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-        await applyFinalReview(fr.sid, rr, fr.head0, fr.from, fr.at);
+        await finishFinalReview(fr);
       }
 
       if (!cleanEnd) break; // a stop, timeout, auth, infra/unverified or write failure ends the lane
@@ -1384,6 +1516,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // builder session and go through the build loop, gates and review again.
       if (!(S.verdict === 'needs fixes' && reviewFixRounds < REVIEW_FIXES && S.buildSession)) break;
       reviewFixRounds++;
+      specReview = null; // a review fix round starts fresh: the next round may speculate again once its fix is committed and the tree is clean
       say(`review says needs fixes; review fix round ${reviewFixRounds}/${REVIEW_FIXES}`);
       phase('fix', `review fix round ${reviewFixRounds}`);
       await send(S.buildSession, `The reviewer found these problems:\n${review || ''}\nFix the real bugs (ignore a finding that contradicts the brief or the lead's steering), run the checks, and commit as "fix: review findings".` + CHECK_HELP, buildModel);
