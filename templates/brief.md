@@ -1,4 +1,4 @@
-MODEL: maas/deepseek-v4.1-flash   (optional line: build model for this lane; REVIEW_MODEL: too)
+MODEL: maas/deepseek-v4.1-flash   (optional line: build model for this lane; REVIEW_MODEL: too; STEP_REVIEW: off skips the per-step reviews)
 You are working in a git repo (current directory). <one sentence goal, the files to touch, the stack>.
 Do the steps in order. After each step that works, run its checks, then
 `git add -A && git commit -m "step N: <summary>"` (N = the step number; the dashboard tracks

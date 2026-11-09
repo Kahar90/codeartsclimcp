@@ -31,7 +31,13 @@ Windows allow git, Git Bash and node in Defender's Controlled Folder Access, or 
 Documents), otherwise every commit fails.
 
 Run: in `ca_wait`, wait with `any: true` when lanes run in parallel, so an early failure is seen at
-once (the finished lanes come back, the rest as still running).
+once (the finished lanes come back, the rest as still running). Add `steps: true` (and `after`, the
+`commits` value from the previous answer) to also wake on each step commit: look at UI steps right
+away (screenshot the changed files) and steer early instead of fixing everything after the lane.
+
+Speed without losing quality: two or three small parallel lanes beat one long lane; write the
+contract check first and run the brief's existing CHECK lines on main before starting; do your own
+share (docs, the next brief) while lanes run; verify once after the merge, not per step.
 
 Parallel lanes: give each its own clone with `ca_workspace {repo, task, from}` (CLI
 `ca workspace <repo> <task> [--from <branch>]`), which makes `../<repo>-wt-<task>` on branch

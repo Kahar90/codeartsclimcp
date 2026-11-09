@@ -12,6 +12,9 @@ A feature is not finished until the installed copy runs it:
 3. With no lane running: `node scripts/install-local.mjs` (packs main, installs it globally, reruns
    `ca setup` for every harness, restarts the dashboard). Then reconnect the MCP server (`/mcp`).
 4. Push main to origin when the human has asked for it.
+Steps 1 (check:full) to 4 in one command, after step 2's version bump and changelog:
+`node tools/ship.mjs [--push]` (commits the release files, runs check:full, install-local, push; run it
+in the background while you write the report).
 
 ## Before starting lanes
 - Parallel lanes run in local clones, never `git worktree add`: a worktree's git dir lives in the main repo's
