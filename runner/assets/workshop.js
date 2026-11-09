@@ -185,7 +185,9 @@
     var lrows = lanes.map(function (l) {
       return '<div class="tc-row"><span class="tc-l">' + esc(l.task) + '</span><span class="tc-v">' + fmtDur(l.ms) + '</span></div>';
     }).join('');
-    var foot = 'Started ' + esc(fmtClock(time.startedAt)) + (time.live ? ' \u00b7 still running' : (time.endedAt != null ? ' \u00b7 finished ' + esc(fmtClock(time.endedAt)) : ''));
+    // A lane runs while the plan is open and the trailing verify segment is still 0 after some lane time.
+    function laneLive(t) { var g = {}; (t.segments || []).forEach(function (x) { g[x.key] = x.ms; }); return (g.lanes || 0) > 0 && !(g.verify > 0); }
+    var foot = 'Started ' + esc(fmtClock(time.startedAt)) + (time.live ? (laneLive(time) ? ' \u00b7 lanes running' : ' \u00b7 plan still open') : (time.endedAt != null ? ' \u00b7 finished ' + esc(fmtClock(time.endedAt)) : ''));
     return '<div class="tc-kicker">' + (time.live ? 'Time so far' : 'Time taken') + '</div>' +
       '<div class="tc-big">' + fmtDur(time.totalMs) + '</div>' +
       (bar ? '<div class="tc-bar">' + bar + '</div>' : '') +

@@ -8,7 +8,9 @@
   "waves": [
     {
       "name": "Wave 1 · Time taken",
-      "lanes": ["timetaken"],
+      "lanes": [
+        "timetaken"
+      ],
       "note": "Contract: checks/time.check.mjs (fake lanes, exact minutes per segment and phase). One lane: backend shape and both pages share CAUI.timeCard."
     }
   ],
@@ -19,13 +21,22 @@
       "model": "maas/deepseek-v4.1-flash",
       "kind": "code",
       "why": "laneTime + plan time in ca.mjs, startedAt/closedAt stamps, CAUI.fmtDur/timeCard, hover cards in Lanes and Office",
-      "files": ["runner/ca.mjs", "runner/assets/workshop.js", "runner/assets/workshop.css", "runner/dash.html", "runner/office.html", "README.md", "docs/workflow.md"]
+      "files": [
+        "runner/ca.mjs",
+        "runner/assets/workshop.js",
+        "runner/assets/workshop.css",
+        "runner/dash.html",
+        "runner/office.html",
+        "README.md",
+        "docs/workflow.md"
+      ]
     }
   ],
   "next": [
     "Read the summary, run every check on main",
     "Lead eye review: hover card in Lanes and Office at desktop and phone, live plan ticking",
-    "Sync the skill, tell the lead to write startedAt in SKILL.md"
+    "Sync the skill, tell the lead to write startedAt in SKILL.md",
+    "Generic extra providers in the runner: user-local providers file outside the repo (openai-compatible, key by env var name), RATE_FALLBACK_MODEL knob unset by default; no provider, model or key of this machine in shipped code"
   ],
   "decisions": [
     {
@@ -35,10 +46,19 @@
     {
       "at": "2026-11-09T14:20:00.000Z",
       "text": "Fixed a timing flake in checks/lanes.check.mjs (doctor rows can take seconds): poll for them instead of a fixed 1.8 s wait."
+    },
+    {
+      "at": "2026-11-09T14:31:26.807Z",
+      "text": "User added a paid model DeepSeek-V4.1-Flash-1017: key stored as DEEPSEEK_API_KEY (user env), probe lane on deepseek/deepseek-flash DONE in 17 s through a patched runner copy. Policy: MaaS by default, paid model only for rate limits or extra parallel lanes. Runner wiring (deepseek provider, rate-limit fallback, doctor row) waits until the timetaken lane merges, since both touch runner/ca.mjs."
+    },
+    {
+      "at": "2026-11-09T14:32:46.910Z",
+      "text": "Overrule my own plan: the paid model stays a local preference. The runner gets a generic, opt-in extra-provider mechanism instead of a hardcoded deepseek provider."
     }
   ],
   "risks": [
     "Hover card re-rendered by the 2 s poll could flicker or close while open.",
     "Top bar overflow on phones with one more chip in Office."
-  ]
+  ],
+  "leadSession": "C:\\Users\\n00958341\\.claude\\projects\\D--Coding-ca-office\\81aabbfd-fafc-453e-98ce-e14bc47f05be.jsonl"
 }
