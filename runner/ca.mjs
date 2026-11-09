@@ -396,6 +396,57 @@ async function runLane(repoArg, task, opts = {}) {
   const checks = [...brief.matchAll(/^\s*(?:[-*]\s*)?CHECK:\s*`?(.+?)`?\s*$/gm)].map((m) => m[1]);
   const stepList = [...brief.matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) }));
   const stepCount = stepList.length;
+  // The worker's bash tool runs inside a sandbox that blocks the loopback network, so a check that
+  // starts a local server hangs or fails there. Write a helper that asks this runner (outside the
+  // sandbox) to run a CHECK line. Listing embeds the commands, so it needs no runner. Written now,
+  // after the lane dir exists and before the first prompt.
+  {
+    const helper = [
+      '// Check service helper written by the runner for this lane. The CodeArts sandbox blocks the',
+      '// loopback network, so a check that starts a local server hangs or fails in the worker shell.',
+      '// This asks the runner (outside the sandbox) to run a CHECK line and prints its result.',
+      `//   node tasks/${task}.lane/check.mjs        list the CHECK lines`,
+      `//   node tasks/${task}.lane/check.mjs <N>    run CHECK line N (1-based)`,
+      `//   node tasks/${task}.lane/check.mjs all     run every line in order, stop at the first failure`,
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      'const CHECKS = ' + JSON.stringify(checks) + ';',
+      'const dir = path.dirname(path.resolve(process.argv[1]));',
+      "const reqDir = path.join(dir, 'checkreq');",
+      "const arg = String(process.argv[2] || '').trim();",
+      'if (!arg) {',
+      "  CHECKS.forEach((c, i) => console.log((i + 1) + '. ' + c));",
+      '  process.exit(0);',
+      '}',
+      "const id = '' + Date.now() + Math.floor(Math.random() * 1e9);",
+      'fs.mkdirSync(reqDir, { recursive: true });',
+      "const reqFile = path.join(reqDir, id + '.json');",
+      "const resFile = path.join(reqDir, id + '.result.json');",
+      'fs.writeFileSync(reqFile, JSON.stringify({ id, arg, at: Date.now() }));',
+      'const waitMs = (Number(process.env.CHECK_TIMEOUT) || 900) * 1000 + 60000;',
+      'const deadline = Date.now() + waitMs;',
+      'let res = null;',
+      'while (Date.now() < deadline) {',
+      "  try { res = JSON.parse(fs.readFileSync(resFile, 'utf8')); break; } catch {}",
+      '  await new Promise((r) => setTimeout(r, 250));',
+      '}',
+      'if (!res) {',
+      "  console.log('check service: the runner did not answer within ' + Math.round(waitMs / 1000) + 's');",
+      "  console.log('exit 124');",
+      '  try { fs.rmSync(reqFile, { force: true }); } catch {}',
+      '  try { fs.rmSync(resFile, { force: true }); } catch {}',
+      '  process.exit(124);',
+      '}',
+      "const out = String(res.out || '').replace(/\\s+$/, '');",
+      'if (out) console.log(out);',
+      "console.log('exit ' + res.code);",
+      'try { fs.rmSync(reqFile, { force: true }); } catch {}',
+      'try { fs.rmSync(resFile, { force: true }); } catch {}',
+      'process.exit(res.code);',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(dir, 'check.mjs'), helper);
+  }
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
