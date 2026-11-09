@@ -1146,6 +1146,8 @@ function cmdDetach(repoArg, task) {
 let reqSnap = null;
 function lanesSnapshot() { if (!reqSnap) return lanes(); if (!reqSnap.lanes) reqSnap.lanes = lanes(); return reqSnap.lanes; }
 function plansSnapshot() { if (!reqSnap) return plans(); if (!reqSnap.plans) reqSnap.plans = plans(); return reqSnap.plans; }
+// planView needs one id -> lane lookup; build it once per request instead of once per plan.
+function laneIndex() { if (!reqSnap) return new Map(lanes().map((l) => [l.id, l])); const ls = lanesSnapshot(); if (!reqSnap.laneIndex) reqSnap.laneIndex = new Map(ls.map((l) => [l.id, l])); return reqSnap.laneIndex; }
 function lanes() {
   let files = []; try { files = fs.readdirSync(REG).filter((f) => f.endsWith('.json')); } catch {}
   // Skip non-lane json in the registry (acks.json): a registration always carries a string dir.
@@ -1208,13 +1210,22 @@ function setAck(id, seen, finishedAt, note = '') { const a = { ...readAcks() }; 
 // The bucket a person sees: any finished lane the lead acknowledged is handled, and a DEAD or running
 // lane can never be marked away (it needs resume or stop). The ended lanes of a closed plan are never
 // attention either: the lead closed the plan, so nothing is left for the human.
+// While a poll builds a view over every lane, one lane object is reused by laneRow, laneStatusOf, laneView and
+// bucketFor, and each of them wants the same liveness, health and bucket. Compute them once per lane object (a
+// WeakMap, so nothing is attached to the lane and nothing leaks from one poll to the next).
+const laneMemo = new WeakMap();
+function laneMemoFor(l) { let m = laneMemo.get(l); if (!m) { m = {}; laneMemo.set(l, m); } return m; }
+function laneAlive(l) { const m = laneMemoFor(l); if (m.alive === undefined) m.alive = alive(l.s.pid); return m.alive; }
+function laneHealthOf(l) { const m = laneMemoFor(l); if (m.health === undefined) m.health = health(l.s); return m.health; }
 function bucketFor(l) {
-  const s = l.s; const r = laneBucket({ s, alive: alive(s.pid), health: health(s) });
+  const m = laneMemoFor(l); if (m.bucket) return m.bucket;
+  const s = l.s; const r = laneBucket({ s, alive: laneAlive(l), health: laneHealthOf(l) });
+  let out;
   if (s.result && laneSeen(l.id, s.finishedAt)) {
-    const note = ackNote(l.id); return { bucket: r.bucket === 'attention' ? 'ended' : r.bucket, reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
-  }
-  if (r.bucket === 'attention' && s.result && closedPlanLanes().has(l.id)) return { bucket: 'ended', reason: r.reason, handled: false };
-  return r;
+    const note = ackNote(l.id); out = { bucket: r.bucket === 'attention' ? 'ended' : r.bucket, reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
+  } else if (r.bucket === 'attention' && s.result && closedPlanLanes().has(l.id)) out = { bucket: 'ended', reason: r.reason, handled: false };
+  else out = r;
+  m.bucket = out; return out;
 }
 function bucketOf(l) { return bucketFor(l).bucket; }
 // Lane ids that belong to a closed plan: their ended lanes need nothing from the human. Cached by the
@@ -1226,7 +1237,7 @@ function closedPlanLanes() {
   if (closedLanes.key === key) return closedLanes.ids;
   const ids = new Set();
   for (const r of rs) {
-    const p = readJSONCached(r.file) || {};
+    const p = r.plan || readJSONCached(r.file) || {};
     if (!planClosed(p)) continue;
     const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
     for (const pl of p.lanes || []) { if (!pl || pl.removed) continue; ids.add(laneId(path.resolve(base, pl.repo || '.'), pl.task)); }
@@ -1253,7 +1264,7 @@ function kindOf(l) {
 }
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
-  return { lane: l.id, bucket: bucketOf(l), health: health(s), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
+  return { lane: l.id, bucket: bucketOf(l), health: laneHealthOf(l), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
     commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
 const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
@@ -1551,7 +1562,7 @@ async function removePlan(r, { by = 'ca plan rm' } = {}) {
   try {
     const snapshot = readJSON(r.file) || {};
     const base = path.resolve(path.dirname(r.file), '..', snapshot.repo || '.');
-  const reg = new Map(lanesSnapshot().map((l) => [l.id, l]));
+  const reg = laneIndex();
     const wanted = (snapshot.lanes || []).filter(Boolean).map((pl) => laneId(path.resolve(base, pl.repo || '.'), pl.task));
     const laneIds = []; const killed = [];
     for (const id of wanted) {
@@ -1982,10 +1993,20 @@ function laneAlreadyPlanned(repo, task) {
 }
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
-  return files.map((f) => readJSONCached(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
+  const out = [];
+  for (const f of files) {
+    const r = readJSONCached(path.join(PLANS, f)); if (!r || typeof r.file !== 'string') continue;
+    let st; try { st = fs.statSync(r.file); } catch { continue; }
+    if (!st.isFile()) continue;
     // A plan whose file is marked removed: true was deleted: never list it again.
-    .filter((r) => { const p = readJSONCached(r.file); return !(p && p.removed === true); })
-    .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+    const p = readJSONCached(r.file); if (p && p.removed === true) continue;
+    const o = { ...r, mtime: st.mtimeMs };
+    // planView and closedPlanLanes need this plan's JSON: hand it the parsed object so one poll never reads
+    // the same file twice. Non-enumerable, so it never leaks into JSON output or list rendering; both read it.
+    Object.defineProperty(o, 'plan', { value: p, enumerable: false, configurable: true });
+    out.push(o);
+  }
+  return out.sort((a, b) => b.mtime - a.mtime);
 }
 // The registered open plan that already lists this lane, resolving each lane entry's repo the same
 // way planView and noteResume do (the plan file's folder, then p.repo, then the lane entry repo).
@@ -2230,7 +2251,7 @@ function laneTime(s, isAlive) {
 }
 function laneView(l) {
   const s = l.s; const pg = stepProgress(s);
-  const isAlive = alive(s.pid); const h = health(s);
+  const isAlive = laneAlive(l); const h = laneHealthOf(l);
   const { actions, suggest, why } = laneActions({ s, alive: isAlive, health: h, canResume: fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`)) });
   const { bucket, reason: bucketWhy, handled } = bucketFor(l);
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
@@ -2401,7 +2422,7 @@ function glanceOf(view) {
   return out('idle', '');
 }
 function planView(r) {
-  const p = readJSONCached(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+  const p = r.plan || readJSONCached(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
   // A lane entry marked removed: true was deleted with its lane or plan: it must never come back as "planned".
   const planned = (p.lanes || []).filter((pl) => pl && !pl.removed).map((pl) => {
