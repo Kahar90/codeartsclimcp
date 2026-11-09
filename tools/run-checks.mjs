@@ -4,6 +4,7 @@
 //   --full    every check, browser checks included (run once before a release, and in CI)
 //   name      only checks whose file name contains it (browser checks included when they match)
 // A check drives a browser when it imports checks/lib/chrome.mjs; at most 3 of those run at once.
+// A check whose source says "run-checks: solo" (timing budgets) runs alone after the parallel batch.
 // Timings go to checks/out/timings.json so slow checks stay visible.
 // Under GitHub Actions every FAIL line, and any check that exits non-zero without a FAIL line,
 // is turned into an ::error annotation so the failure shows inline on the pull request.
@@ -35,10 +36,12 @@ if (!files.length) {
 // Previous timings put the slowest checks first, so a parallel run is not held up by a late long one.
 const timingsFile = path.join(dir, 'out', 'timings.json');
 let prev = {}; try { prev = JSON.parse(fs.readFileSync(timingsFile, 'utf8')); } catch {}
-const queue = [...files].sort((a, b) => (prev[b] || 0) - (prev[a] || 0));
+const isSolo = (f) => /run-checks: solo/.test(fs.readFileSync(path.join(dir, f), 'utf8'));
+const solo = files.filter(isSolo);
+const queue = files.filter((f) => !solo.includes(f)).sort((a, b) => (prev[b] || 0) - (prev[a] || 0));
 const browser = new Set(files.filter(isBrowser));
 const MAX_BROWSER = 3;
-const t0 = Date.now(); const results = []; let running = 0, runningBrowser = 0;
+const t0 = Date.now(); const results = []; let running = 0, runningBrowser = 0, jobsNow = jobs;
 
 function runOne(file) {
   return new Promise((resolve) => {
@@ -51,8 +54,8 @@ function runOne(file) {
 }
 await new Promise((done) => {
   const pump = () => {
-    if (!queue.length && !running) return done();
-    while (running < jobs && queue.length) {
+    if (!queue.length && !running) { if (!solo.length) return done(); queue.push(solo.shift()); jobsNow = 1; }
+    while (running < jobsNow && queue.length) {
       const i = queue.findIndex((f) => !browser.has(f) || runningBrowser < MAX_BROWSER);
       if (i < 0) break;
       const [file] = queue.splice(i, 1); const b = browser.has(file);

@@ -1,6 +1,7 @@
 // Contract check for dashboard poll cost (fake lanes, never starts CodeArts). Both pages poll
 // /api/plans and /api/lanes every 2 s, so these must stay cheap as plans and lanes pile up:
 // 8 plans x 10 lanes plus 20 loose lanes, median answer time per route under a budget.
+// run-checks: solo (a timing budget: tools/run-checks.mjs runs it alone, not beside other checks)
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
