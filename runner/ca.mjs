@@ -1778,6 +1778,55 @@ function leadView(p) {
   if (!Object.keys(out).length) { const m = (typeof p.lead === 'string' && p.lead) || 'lead'; out[m] = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, steps: 0, total: null, who: 'lead', source: 'none' }; }
   return out;
 }
+// How long a plan took and where the time went. The plan runs from its start (a stamped startedAt, else
+// its first decision or lane) to its close (closedAt, else the last sign of work, else now). The span is
+// split into lead planning, lanes running (the union of every lane window, so parallel lanes never double
+// count), lead between lanes and lead verifying. Worker time per phase and per lane is summed separately.
+function planTime(p, r, planned) {
+  const tsn = (t) => { if (t == null || t === '') return null; const n = typeof t === 'number' ? t : new Date(t).getTime(); return Number.isFinite(n) ? n : null; };
+  const win = [];
+  for (const x of planned || []) for (const w of (x.time && x.time.windows) || []) if (Array.isArray(w) && w[0] != null && w[1] != null) win.push([w[0], w[1]]);
+  const firstStart = win.length ? Math.min(...win.map((w) => w[0])) : null;
+  const lastEnd = win.length ? Math.max(...win.map((w) => w[1])) : null;
+  const dts = (p.decisions || []).map((d) => tsn(d && d.at)).filter((n) => n != null);
+  let startedAt = tsn(p.startedAt);
+  if (startedAt == null) { const c = [...dts, ...(firstStart != null ? [firstStart] : [])]; startedAt = c.length ? Math.min(...c) : (r.mtime || Date.now()); }
+  const isClosed = /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || '');
+  let endedAt = tsn(p.closedAt);
+  if (endedAt == null && isClosed) { const c = []; if (lastEnd != null) c.push(lastEnd); if (dts.length) c.push(Math.max(...dts)); endedAt = c.length ? Math.max(...c) : startedAt; }
+  const live = endedAt == null;
+  let end = endedAt != null ? endedAt : Date.now();
+  if (end < startedAt) end = startedAt;
+  const totalMs = end - startedAt;
+  const unionLen = (ws, lo, hi) => {
+    const iv = ws.map((w) => [Math.max(w[0], lo), Math.min(w[1], hi)]).filter((w) => w[1] > w[0]).sort((a, b) => a[0] - b[0]);
+    let t = 0, a = null, b = null;
+    for (const [s, e] of iv) { if (a == null) { a = s; b = e; } else if (s <= b) { if (e > b) b = e; } else { t += b - a; a = s; b = e; } }
+    return a == null ? 0 : t + (b - a);
+  };
+  let planning, lanesMs, verify, between;
+  if (!win.length) { planning = totalMs; lanesMs = 0; verify = 0; between = 0; }
+  else {
+    planning = Math.max(0, firstStart - startedAt);
+    lanesMs = unionLen(win, startedAt, end);
+    verify = (planned || []).some((x) => x.running) ? 0 : Math.max(0, end - lastEnd);
+    between = Math.max(0, totalMs - planning - lanesMs - verify);
+  }
+  const segments = [
+    { key: 'planning', label: 'Lead planning', ms: planning },
+    { key: 'lanes', label: 'Lanes running', ms: lanesMs },
+    { key: 'between', label: 'Lead between lanes', ms: between },
+    { key: 'verify', label: 'Lead verifying', ms: verify },
+  ];
+  const byPhase = { wait: 0, build: 0, checks: 0, fix: 0, review: 0, other: 0 };
+  let workTotal = 0; const lanesArr = [];
+  for (const x of planned || []) {
+    const t = x.time; if (!t || !(t.ms > 0)) continue;
+    workTotal += t.ms; for (const k of Object.keys(byPhase)) byPhase[k] += (t.byPhase && t.byPhase[k]) || 0;
+    lanesArr.push({ task: x.task, ms: t.ms, byPhase: t.byPhase });
+  }
+  return { startedAt, endedAt, live, totalMs, segments, work: { totalMs: workTotal, byPhase }, lanes: lanesArr };
+}
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
@@ -1847,7 +1896,8 @@ function planView(r) {
   // unknown rather than a false 0, so a lane that never reported usage is not silently dropped from the total.
   const tokens = sumTok([sumTokens(planned.map((x) => x.tokens)), ...Object.values(leadModel).filter((e) => e.source !== 'none')]);
   tokens.complete = missing.length === 0; tokens.missing = missing; tokens.count = Object.keys(tokensByModel).length;
-  return { id: r.id, file: r.file, updatedAt: r.mtime, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
+  const time = planTime(p, r, planned);
+  return { id: r.id, file: r.file, updatedAt: r.mtime, time, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
     state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead: { tokensByModel: leadModel },
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
