@@ -6,6 +6,7 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-onboard-'));
@@ -92,15 +93,16 @@ check('never prints secret values', !['CODEARTS_CLI_AK', 'CODEARTS_CLI_SK', 'MAA
 // dashboard: /api/doctor and the first-run empty state
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const dash = spawn(process.execPath, [CA, 'dash', String(port)], { env, stdio: 'ignore' });
+guard({ children: [dash] });
 try {
   let ok = false; for (let i = 0; i < 40 && !ok; i++) { await new Promise((x) => setTimeout(x, 250)); try { ok = (await fetch(`http://127.0.0.1:${port}/api/lanes`)).ok; } catch {} }
   const d = await (await fetch(`http://127.0.0.1:${port}/api/doctor`)).json().catch(() => null);
   check('/api/doctor returns doctor JSON', d && Array.isArray(d.checks) && d.checks.every((c) => c.name && c.status), JSON.stringify(d).slice(0, 160));
   const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
   check('dashboard has a first-run onboarding panel', /id="onboard"/.test(html) && /ca onboard/.test(html) && /\/api\/doctor/.test(html));
-} finally { dash.kill(); }
+} finally { await settle({ children: [dash], code: 0 }); }
 
-fs.rmSync(tmp, { recursive: true, force: true });
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exitCode = fails ? 1 : 0;

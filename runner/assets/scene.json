@@ -1,39 +1,39 @@
 {
   "backplate": "workshop.png",
   "stageSize": [
-    1280,
+    1764,
     720
   ],
   "stations": {
     "lead": {
       "name": "Claude Opus 5.5",
       "foot": [
-        292,
-        356
+        539,
+        346
       ],
       "color": "#dca5ff"
     },
     "builder": {
       "name": "office-scene",
       "foot": [
-        626,
-        354
+        870,
+        342
       ],
       "color": "#94fff2"
     },
     "artist": {
       "name": "office-sprites",
       "foot": [
-        759,
-        601
+        998,
+        589
       ],
       "color": "#ffd591"
     },
     "reviewer": {
       "name": "office-review",
       "foot": [
-        1036,
-        350
+        1276,
+        325
       ],
       "color": "#b0fcb6"
     }
@@ -108,8 +108,8 @@
       "key": "hot1",
       "role": "hot1",
       "foot": [
-        470,
-        250
+        387,
+        431
       ],
       "prop": "hotdesk",
       "plate": "below"
@@ -118,8 +118,8 @@
       "key": "hot2",
       "role": "hot2",
       "foot": [
-        455,
-        470
+        683,
+        422
       ],
       "prop": "hotdesk",
       "plate": "below"
@@ -128,8 +128,8 @@
       "key": "hot3",
       "role": "hot3",
       "foot": [
-        840,
-        290
+        1425,
+        422
       ],
       "prop": "hotdesk",
       "plate": "below"
@@ -138,8 +138,8 @@
       "key": "hot4",
       "role": "hot4",
       "foot": [
-        480,
-        625
+        773,
+        629
       ],
       "prop": "hotdesk",
       "plate": "below"
@@ -148,12 +148,18 @@
       "key": "hot5",
       "role": "hot5",
       "foot": [
-        1010,
-        615
+        1258,
+        548
       ],
       "prop": "hotdesk",
       "plate": "below"
     }
   ],
-  "hotdeskNote": "Lanes beyond the three main stations sit at these hot desks (sprite role hotN, prop hotdesk drawn behind the worker). Foot anchors in stage pixels; compact plate below the foot. More lanes than desks go to the +N list."
+  "hotdeskNote": "Lanes beyond the three main stations sit at these hot desks (sprite role hotN, prop hotdesk drawn behind the worker). Foot anchors in stage pixels; compact plate below the foot. More lanes than desks go to the +N list.",
+  "lamp": [
+    881,
+    121,
+    210,
+    155
+  ]
 }

@@ -9,6 +9,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const CUR = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -47,7 +48,7 @@ const js = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const rd = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 const writeCache = (o) => { fs.mkdirSync(path.dirname(cacheP), { recursive: true }); fs.writeFileSync(cacheP, JSON.stringify(o)); };
 
-const timer = setTimeout(() => { console.log('FAIL timeout'); process.exit(1); }, 300000);
+const timer = setTimeout(async () => { console.log('FAIL timeout'); await settle({ children: kids, code: 1 }); srv.close(); process.exit(1); }, 300000);
 const kids = [];
 try {
   // ---- version compare ----
@@ -123,7 +124,7 @@ try {
 
   // ---- MCP ----
   writeCache({ current: CUR, latest: NEXT2, available: true, notes: [{ version: NEXT2, date: '2026-11-20', items: ['x'] }], checkedAt: Date.now() });
-  const mcp = spawn(process.execPath, [CA, 'mcp'], { cwd: tmp, env: { ...env, CA_NO_UPDATE_CHECK: '' }, stdio: ['pipe', 'pipe', 'pipe'] }); kids.push(mcp);
+  const mcp = spawn(process.execPath, [CA, 'mcp'], { cwd: tmp, env: { ...env, CA_NO_UPDATE_CHECK: '' }, stdio: ['pipe', 'pipe', 'pipe'] }); kids.push(mcp); guard({ children: [mcp] });
   let buf = ''; const waiters = new Map(); let nid = 0;
   mcp.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); const m = js(line); if (m && m.id != null && waiters.has(m.id)) { waiters.get(m.id)(m); waiters.delete(m.id); } } });
   const rpc = (method, params, ms = 30000) => new Promise((res) => { const id = ++nid; const to = setTimeout(() => { waiters.delete(id); res({ timeout: true }); }, ms); waiters.set(id, (m) => { clearTimeout(to); res(m); }); mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
@@ -140,7 +141,7 @@ try {
   // ---- dashboard API ----
   writeCache({ current: CUR, latest: NEXT2, available: true, notes: [{ version: NEXT2, date: '2026-11-20', items: ['x', 'y'] }], checkedAt: Date.now() });
   const dp = await free();
-  const dash = spawn(process.execPath, [CA, 'dash', String(dp)], { cwd: tmp, env: { ...env, CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(0)"` }, stdio: 'ignore' }); kids.push(dash);
+  const dash = spawn(process.execPath, [CA, 'dash', String(dp)], { cwd: tmp, env: { ...env, CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(0)"` }, stdio: 'ignore' }); kids.push(dash); guard({ children: [dash] });
   const base = `http://127.0.0.1:${dp}`;
   let g = null; for (let i = 0; i < 40 && !g; i++) { await wait(250); try { g = await (await fetch(base + '/api/update')).json(); } catch {} }
   check('GET /api/update returns current, latest, available, notes, cmd and the dash pid', g && g.current === CUR && g.latest === NEXT2 && g.available === true && Array.isArray(g.notes) && g.notes[0].items.length === 2 && typeof g.cmd === 'string' && g.pid === dash.pid, JSON.stringify(g));
@@ -155,7 +156,7 @@ try {
   if (back && back.pid) { try { process.kill(back.pid); } catch {} }
   // failing install: the dash stays up and reports the error
   const dp2 = await free();
-  const dash2 = spawn(process.execPath, [CA, 'dash', String(dp2)], { cwd: tmp, env: { ...env, CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(7)"` }, stdio: 'ignore' }); kids.push(dash2);
+  const dash2 = spawn(process.execPath, [CA, 'dash', String(dp2)], { cwd: tmp, env: { ...env, CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(7)"` }, stdio: 'ignore' }); kids.push(dash2); guard({ children: [dash2] });
   for (let i = 0; i < 40; i++) { await wait(250); try { if ((await fetch(`http://127.0.0.1:${dp2}/api/ui`)).ok) break; } catch {} }
   p = await fetch(`http://127.0.0.1:${dp2}/api/update`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); const pf = await p.json().catch(() => null);
   check('a failing install: POST answers ok false with the error and the dashboard stays up', pf && pf.ok === false && /7|fail/i.test(pf.error || '') && (await fetch(`http://127.0.0.1:${dp2}/api/ui`)).ok, JSON.stringify(pf));
@@ -168,9 +169,9 @@ try {
   check('tools/release.mjs --check passes (version and changelog agree)', rel.status === 0, (rel.stdout || '') + (rel.stderr || ''));
 } catch (e) { check('no exception', false, e.stack || e.message); }
 clearTimeout(timer);
-for (const k of kids) { try { k.kill(); } catch {} }
+await settle({ children: kids, code: 0 });
 srv.close();
 for (const r of results) console.log(r);
 const fails = results.filter((r) => r.startsWith('FAIL')).length;
 console.log(`${results.length - fails}/${results.length} passed`);
-process.exit(fails ? 1 : 0);
+process.exitCode = fails ? 1 : 0;

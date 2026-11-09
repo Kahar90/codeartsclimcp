@@ -34,10 +34,12 @@ try {
   let m = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'check', version: '1' } });
   check('initialize answers', m.result && m.result.protocolVersion && m.result.serverInfo?.name && m.result.capabilities?.tools, JSON.stringify(m).slice(0, 200));
   check('initialize has instructions', typeof m.result?.instructions === 'string' && m.result.instructions.length > 40);
+  const ins = m.result?.instructions || '';
+  check('instructions ask the lead to register and keep the plan current', /ca_plan\b/.test(ins) && /ca_plan_update/.test(ins) && /ca_note/.test(ins) && /phase/.test(ins), ins.slice(0, 200));
   srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   m = await rpc('ping', {}); check('ping', m.result && !m.error);
   m = await rpc('tools/list', {}); const tools = m.result?.tools || [];
-  const want = ['ca_doctor', 'ca_init', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_kick', 'ca_resume', 'ca_ack', 'ca_lead_tokens', 'ca_plan', 'ca_plan_list', 'ca_plan_close', 'ca_gc', 'ca_note', 'ca_update_check', 'ca_update'];
+  const want = ['ca_doctor', 'ca_init', 'ca_workspace', 'ca_lane_start', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_steer', 'ca_stop', 'ca_kick', 'ca_resume', 'ca_ack', 'ca_lead_tokens', 'ca_plan', 'ca_plan_list', 'ca_plan_update', 'ca_plan_close', 'ca_plan_rm', 'ca_gc', 'ca_note', 'ca_update_check', 'ca_update'];
   check('tools/list has every tool', want.every((w) => tools.some((x) => x.name === w)), tools.map((x) => x.name).join(','));
   check('tools have descriptions and object schemas', tools.length && tools.every((x) => x.description && x.description.length > 15 && x.inputSchema?.type === 'object'));
   check('required args declared', tools.find((x) => x.name === 'ca_steer')?.inputSchema?.required?.includes('lane'));
@@ -47,7 +49,7 @@ try {
   check('ca_summary returns summary JSON', !m.result?.isError && j && j.result === 'done' && j.verdict === 'ready', text(m).slice(0, 160));
   m = await call('ca_tail', { lane: 'good', lines: 5 }); check('ca_tail returns the transcript tail', !m.result?.isError && /line two/.test(text(m)), text(m).slice(0, 120));
   m = await call('ca_wait', { lanes: ['good'] }); j = parse(text(m));
-  check('ca_wait on a done lane: result JSON with exit 0', !m.result?.isError && j && j.exit === 0 && Array.isArray(j.lanes) && j.lanes[0].result === 'done', text(m).slice(0, 200));
+  check('ca_wait on a done lane: compact row with exit 0', !m.result?.isError && j && j.exit === 0 && Array.isArray(j.lanes) && j.lanes[0].status?.key === 'done' && typeof j.lanes[0].progress === 'string', text(m).slice(0, 200));
   const t0 = Date.now(); m = await call('ca_wait', { lanes: ['slow'], timeout_s: 2 }, 30000); j = parse(text(m));
   check('ca_wait timeout says still running, not an error', !m.result?.isError && j && j.exit === 124 && j.timedOut === true && Date.now() - t0 < 20000, text(m).slice(0, 200));
   // MCP clients (Codex, opencode) cancel a tool call after about 60 s: a huge timeout_s must still answer in time.

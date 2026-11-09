@@ -1,35 +1,37 @@
 # CodeArts lanes
 
+![The Office view: the lead, builder and reviewer at work with a live lane window](docs/images/office.png)
+
+*The Office view, running on built-in demo data. Follow the lead, builder and reviewer as lanes work.*
+
 **Hand coding work to the Huawei CodeArts agent from the coding agent you already use.**
 
 Your agent (Claude Code, Kiro, Cursor, Codex, opencode, VS Code) plans the work. A CodeArts
-**lane** writes the code in your repo, commits each step, runs your tests, fixes what fails
-and gets a review. You read one summary and decide.
+**lane** writes the code in your repo, commits each step, runs your tests, fixes what fails and
+gets a review. You read one summary and decide.
 
-Runs on Windows, macOS and Linux (Node 20+, git).
+[Quick install](#quick-install) · [Use it](#use-it) · [Visual tour](#visual-tour) · [Reference](#reference)
 
-![The Office view: the lead, builder and reviewer at work, with a live lane window](docs/images/office.png)
+## Quick install
 
-## Set it up in one prompt
-
-Open your coding agent and send this:
+Open your coding agent and send this one prompt:
 
 ```text
 Set up CodeArts lanes by following
 https://raw.githubusercontent.com/Kahar90/codeartsclimcp/main/INSTALL.md
 ```
 
-That's it. Your agent installs everything, connects itself and runs a short test lane. Setup
-is once per machine: every repo works afterwards, nothing to set up per project.
+Your agent installs everything, connects itself and runs a short test lane. Setup is once per
+machine: every repo works afterwards, nothing to set up per project.
+
+You need Node 20+, git, and a Huawei Cloud account with CodeArts access. The agent handles the
+rest (the CodeArts CLI, config, trust). Everything runs on Windows, macOS and Linux.
 
 **Your only step:** a browser tab opens and asks for your Huawei Cloud keys. Create an AK/SK at
 [CodeArts CLI auth settings](https://codearts.ap-southeast-1.huaweicloud.com/portal/settings/cli-auth),
 paste them in and click Save. The keys stay on your computer and never go through the chat.
 
-<img src="docs/images/keys-form.png" alt="The local keys form" width="420">
-
-You need a Huawei Cloud account with CodeArts access. Everything else (Node check, the
-CodeArts CLI, git, config) the agent handles.
+<img src="docs/images/keys-form.png" alt="The local keys form opened by setup" width="420">
 
 ## Use it
 
@@ -42,44 +44,55 @@ Restart your coding agent once after setup, then, in any repo, ask for what you 
 | Cursor, Codex, opencode, VS Code | `Use CodeArts lanes to add a /health endpoint with a test` |
 
 A folder that is not a git repo yet is fine: your agent makes it one before the first lane.
+Your agent splits the goal into small steps, starts lanes, waits, checks the result and reports
+back with what was built, the commits and the review verdict. It also registers the plan it is
+working to and keeps it current, so the dashboard shows your agent's phase, its latest activity
+and how long ago it last updated, next to the lanes.
 
-Your agent splits the goal into small steps, starts one or more lanes, waits, checks the
-result and reports back with what was built, the commits and the review verdict.
+## Visual tour
 
-## Watch it work
+Every screenshot below is the dashboard running on its **built-in demo data** (the `?demo=1`
+fixtures), so no real project appears. Open **http://127.0.0.1:4777** while lanes run to watch
+your own.
 
-Open **http://127.0.0.1:4777** while lanes run. The Office view (above) shows who is working on
-what, step by step; the Lanes view has the plan, every lane's progress, the transcript and a
-box to steer a lane mid-run.
+### Control room: what needs you, first
 
 Every plan and lane also shows how long the work took. Hover, focus or tap the **Time** chip on
 a plan (Lanes) or in the Office runstrip to open the breakdown: lead planning, lanes running,
 lead between lanes and lead verifying, plus worker time per phase and per lane.
 
-![The Lanes view: plan, waves, current step and decisions](docs/images/lanes.png)
+![The Control room groups every lane into Needs you, Running, Done and Ended](docs/images/lanes-control-room.png)
 
-## Controls and tokens
+The Lanes home gathers every lane from every project into **Needs you**, **Running**, **Done**
+and **Ended**, with the reason, how long ago it happened and a one-click fix. Nothing leaves
+Needs you by itself: every row has its own decision (Resume, Kick, Mark handled).
 
-From the dashboard, or with `ca kick` and `ca resume`, anyone watching can act on a lane without
-the lead: **kick** a stuck turn (retry the turn, start a fresh session, restart the CodeArts
-server or skip a backoff wait), and **resume** a paused, failed, stopped or DEAD lane where it
-left off, with an optional note the worker applies first. **Mark handled** (`ca ack`) moves a
-failed or paused lane you already dealt with out of Needs you. Every view also shows what the
-lane spent: token totals per agent (builder, reviewer, other sessions) and per model (lead
-included when its harness reports it), per lane and summed per plan.
+### Plan and waves: watch a goal split into steps
 
-The **Control room** (the Lanes home) groups every lane from every project into Needs you,
-Running, Done and Ended, with the reason, how long ago it happened, a one-click fix, project
-filters, a freshness label, the count in the tab title and optional browser notifications.
-Nothing leaves Needs you by itself: every row has its own decision (Resume, Kick, Mark handled),
-and lanes that have waited more than 2 days collect in an **Older than 2 days** group with one
-**Mark all handled** button (`ca ack --stale` from a terminal). Reopen brings a lane back.
+![The plan view shows waves, the current step and the decisions log](docs/images/lanes.png)
 
-## Why it is safe to leave running
+A plan shows each wave of lanes, the current step of every lane and the decisions the agent
+recorded, so you can follow a goal from brief to done. The lead's phase, latest activity and
+update age sit at the top of the plan: a stale age means no update for a while, not that the agent
+stopped.
+
+### Lane detail: transcript, brief, steering and checks
+
+![Lane progress, token usage, brief steps and steering controls](docs/images/lane-detail.png)
+
+Open any lane for its live transcript, the brief it is following, a box to steer it mid-run, and
+the checks the runner ran before reporting done.
+
+## Reference
+
+### Why it is safe to leave running
 
 - **Checked, not trusted:** your test commands are run by the runner itself when the agent
   says it is done. Failures go back to the agent (up to 3 rounds), and uncommitted work is
   never reported as done.
+- **Honest about checks:** a finished lane that could not run its checks reads `unverified`
+  (exit 4), one whose checks still fail reads `checks failing` (exit 1); only a real breakdown
+  reads `failed`.
 - **Never silently stuck:** a watchdog tells running from stuck, resumes stalled sessions and
   backs off when the model service has problems. Rate limits, network drops and a sleeping
   laptop are waited out; a lane that shows `rate limited`, `offline` or `queued` continues by itself.
@@ -89,7 +102,14 @@ and lanes that have waited more than 2 days collect in an **Older than 2 days** 
 - **You stay in control:** starting, steering and stopping lanes ask for your approval;
   everything is a normal git commit you can inspect or revert.
 
-## Keep it current
+### Controls and tokens
+
+Anyone watching can act on a lane without the lead: **kick** a stuck turn (`ca kick`), **resume**
+a paused, failed, stopped or DEAD lane (`ca resume`) with an optional note it applies first, and
+**mark handled** (`ca ack`) to move a dealt-with lane out of Needs you. Every view also shows
+tokens spent per agent and model, per lane and summed per plan.
+
+### Keep it current
 
 - `ca --version` shows what you have; `ca update` installs the latest and refreshes your
   agent's config; `ca doctor` checks everything (each problem comes with the command that fixes it).
@@ -100,13 +120,13 @@ and lanes that have waited more than 2 days collect in an **Older than 2 days** 
 - `ca uninstall` removes exactly what setup added to your agents' config and nothing else
   (`--keys` also deletes your saved keys). See the [changelog](CHANGELOG.md).
 
-## Privacy
+### Privacy
 
 Your code and task briefs are sent to Huawei Cloud models. Your keys stay on your computer (on
 Windows encrypted for your user, elsewhere in a file only your user can read) and are never
 written to the repo or shown to the agent.
 
-## More
+### More
 
 - [Manual setup](docs/manual-setup.md): run the setup commands yourself (or for CI).
 - [Reference](docs/reference.md): every command, exit codes, lane health, models,
@@ -114,6 +134,7 @@ written to the repo or shown to the agent.
 - [Lead workflow](docs/workflow.md): how the agent plans, briefs and verifies lanes.
 - [Real-client checklist](docs/client-checklist.md): the 10-minute manual test for Kiro, Cursor
   and VS Code.
+- [Screenshot sources](docs/images/README.md): how the images above were captured.
 - [AGENTS.md](AGENTS.md) and [INSTALL.md](INSTALL.md): instructions written for coding agents.
 
 Contributing: `npm run check` runs every contract check in `checks/` (fake lanes, no paid model

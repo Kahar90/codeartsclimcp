@@ -18,26 +18,50 @@ summaries, not transcripts.
   offer `ca_update` (it reinstalls, then they restart the agent and any open dashboard).
 
 ## 2. Plan
+- Register the plan as soon as you split the goal: `tasks/plan.json` with `title, goal, lead,
+  status, now, waves[{name, lanes}], lanes[{task, repo, model, why, files}], next, decisions,
+  risks`, then `ca_plan`. The plan is how the human sees your intent, so register it even for a
+  single lane. Never leave a plan open at the end (section 6).
+- Add `startedAt` (an ISO time) when you start planning; `ca plan` fills it in from the first decision or
+  lane if missing, and `ca plan close` records `closedAt`. The dashboard shows the plan's total time and,
+  on hover, lead planning, lanes running, lead between lanes, lead verifying and worker time per phase.
+- Keep it current while the work moves, and only when something real changed:
+  - `ca_note {text, now: true, phase}` for a transition or progress; the phases are `planning`,
+    `building`, `waiting`, `verifying`, `done`. Each now note is timestamped and kept in a bounded
+    recent-activity history both views show, so the dashboard reads the lead phase, latest activity
+    and how long ago you last updated.
+  - `ca_plan_update {id, patch}` for changed scope: a revised `goal`, new `next` tasks, or `waves`
+    and `lanes`. It patches only the fields you send and bumps the revision.
+  - Publish real transitions, not a heartbeat: nothing changed means nothing to post. Never paste
+    private reasoning or chat, only what you did and what is next.
+- Publish activity before long waits, before verification and before closing. When a user message
+  changes scope, publish the revised goal, pending tasks and lanes before starting the added work.
+  Pass the plan id explicitly to notes so concurrent projects cannot steal your updates.
 - Split the goal into lanes that do not touch the same files. Up to 3 lanes at once.
-- Parallel lanes each get a git worktree: `git worktree add ../<repo>-wt-<task> -b lane/<task>`.
-- Optional plan for the dashboard: `tasks/plan.json` with `title, goal, lead, status, now,
-  startedAt (an ISO time; write it when you start planning), waves[{name, lanes}], lanes[{task,
-  repo, model, why, files}], next, decisions, risks`, then `ca_plan`. If startedAt is missing,
-  `ca plan` fills it in from the first decision or lane, so the plan's total time stays stable.
-  `ca plan close` also records `closedAt`; the dashboard then shows how long the whole plan took,
-  split into lead planning, lanes running, lead between lanes and lead verifying. Update the
-  "lead is doing" line with `ca_note` (now: true).
+- Parallel lanes each get a local clone: `ca_workspace {repo, task, from}` (CLI
+  `ca workspace <repo> <task> [--from <branch>]`) makes `../<repo>-wt-<task>` on branch
+  `lane/<task>`. Never use `git worktree add` for a lane: a worktree keeps its git dir in the main
+  repo, outside the lane folder, so the CodeArts sandbox refuses every commit ("Permission denied").
 
 ## 3. Brief (one per lane)
-- `ca_init {repo, task, goal}` writes `tasks/<task>.md` from the template; then edit it:
-  - at most 8 numbered steps, exact files and behaviour, "commit after each step" with subject
-    `step N: ...`;
-  - one `CHECK: <command>` line per check: the runner runs them itself when the worker goes idle
-    and feeds failures back (up to 3 fix rounds);
-  - a step that adds a test hook or script so results can be verified without looking at a UI;
-  - "only touch <files>", "do not ask questions", the safety rules from the template;
+- `ca_init {repo, task, goal}` writes `tasks/<task>.md` from the template; then edit it to be lean:
+  - aim for 1 to 3 outcome steps, and never more than 8. Each step is a piece of behaviour a check
+    can prove, names the exact files and behaviour, and says "commit after each step" with subject
+    `step N: ...`. A step is not a chore list.
+  - one `CHECK: <command>` line per check, and reuse a check another step or lane already has
+    instead of adding a near-duplicate. The runner runs the lines itself when the worker goes idle
+    and feeds failures back (up to 3 fix rounds).
+  - reuse existing test hooks or scripts; add one only when needed to verify new behavior.
+  - "only touch <files>", "do not ask questions", the safety rules from the template.
+  - no separate self-review step: the runner's reviewer gate and your own verification cover it,
+    and the worker commits only steps that work, so a "re-read and fix" step just burns time.
   - no MODEL line by default: flash builds every lane, GLM 5.3 reviews. Add `MODEL: maas/glm-5.3`
     only for very complex lanes (many files across modules, long context, hard design reasoning).
+
+Precise briefs reduce ambiguity; they cannot disable model reasoning. Keep file reads and tool
+outputs targeted, batch independent reads, and avoid rereading full files. Token savings require
+measured evidence across comparable tasks. Workers run targeted checks on changed behavior before
+committing; the runner runs final CHECK gates at idle and the lead verifies the final result.
 
 ## 4. Run and watch
 - `ca_lane_start {repo, task}` (CLI: `ca lane <repo> <task> --detach`). It returns at once.
@@ -65,12 +89,20 @@ summaries, not transcripts.
 - Token counters: each lane tracks its tokens per agent (build, review, other sessions) and per
   model; `ca_status`, `ca_summary` and the plan views carry them, so cost is visible per lane
   and per plan.
+- Reading the numbers: `cache read` is context the model replayed from cache on every turn. It
+  accumulates fast and usually dwarfs the rest, but it is replayed context, not new generation and
+  not the same as price. `reasoning` (thinking) tokens are the model's own deliberation and output
+  tokens are what it wrote; judge cost from input, output, cache-read and cache-write separately.
+  The views show cumulative totals, so a large cache-read total means long context replayed many
+  times, not that many tokens were generated, and turning thinking off does not remove the replay.
 
 ## 5. Judge and verify
 - Exit codes / results: 0 done (review ready), 4 needs review, 1 failed or stopped,
   2 usage or unknown lane, 3 keys missing or rejected (ask the human to run `ca auth`; never ask
   for keys in chat), 5 paused at the time limit (`ca_resume` continues it), 124 still running.
   `ca_wait` returns a `next` hint for each.
+- A finished lane whose CHECK lines could not run (missing tool, sandbox) is `unverified` (exit
+  4); one whose CHECK ran and still failed after the fix rounds is `checks failing` (exit 1).
 - Rate limits, network drops and a crowded model are waited out by the runner; a lane that shows
   `rate limited`, `offline` or `queued` needs nothing from you.
 - `ca_summary {lane}`: commits, gates, fix rounds, interruptions, steering, outside-repo access,
@@ -80,7 +112,9 @@ summaries, not transcripts.
 - Run the checks yourself on the lane's branch; for UI, drive the real app. Check `git status`.
 - Real bug: write `tasks/<task>-fix.md` (finding, file:line, expected behaviour, CHECK line) and
   run it as a new lane. Fix one-liners yourself.
-- Merge worktree lanes into main yourself, run the checks on main, remove the worktree.
+- Merge a lane workspace back yourself with `ca_workspace --land {repo, task}` (CLI
+  `ca workspace --land <repo> <task>`): it refuses on a dirty main tree, fetches and merges the lane
+  branch, then removes the clone. Run the checks on main.
 
 ## 6. Report and close
 What was built, commits, checks and in-app results, verdicts and what you overruled, open items.

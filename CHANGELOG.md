@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.5.3 (2026-11-09)
+
+Updates
+- Time taken: every plan shows how long the work took, from when the lead started planning (`startedAt`
+  in plan.json) to `ca plan close` (or now while it is open). Hover, focus or tap the **Time** chip in Lanes
+  or the Office top bar for the breakdown: lead planning, lanes running, lead between lanes, lead verifying,
+  worker time per phase (build, checks, fix, review, waiting) and per lane. Paused gaps are not lane time.
+- `ca plan` stamps a missing `startedAt`, `ca plan close` records `closedAt`, `ca plan list` prints the total,
+  and every lane carries its own time split (the Elapsed metric shows it on hover).
+
+## 0.5.2 (2026-11-08)
+
+Updates
+- Office uses a wider room (a panorama with more wall, windows and stairs at the sides), so wide
+  screens are filled edge to edge without zooming in: 1280x800, 1920x945 and 2560x1080 all show the
+  whole working area with no band. Stations, hot desks and the ceiling lamp glow were re-placed on the
+  new art; the lamp position now comes from scene.json.
+- Phones show a taller room: the narrow layout crops the outer walls to the stations instead of
+  shrinking the whole panorama into a thin strip.
+
+## 0.5.1 (2026-11-08)
+
+Updates
+- Office fills the stage: no more dark bands beside the room. The room is scaled to cover the whole
+  stage as far as every station sprite and nameplate stays in view, which fully covers 16:9 desktop
+  screens; on ultra-wide screens the leftover area shows a blurred, dimmed copy of the room instead of
+  a flat dark band. The narrow (phone, portrait tablet) layout is unchanged.
+
+## 0.5.0 (2026-11-08)
+
+Updates
+- One truthful status: the server owns every status word. Each lane carries `attention` (does it need
+  you), `steps` (live, complete or hide) and a glyph; each plan carries `badge`, always the glance word.
+  Pills, labels, banners and the sign can no longer disagree, settled lanes never show a stray step
+  fraction ("Handled by lead", "Stopped by lead", "Merged 3/3"), and lanes of a closed plan never need you.
+- Office fits the whole room on any screen (no cropping), draws agents 20% smaller, places the sign where
+  it covers no agent, and animates running lanes again (lane sprites were stuck on idle with real data).
+- Glance toggle (eye button, `g` key) in both views: off gives a plain agent-team view; the choice is
+  shared by both views and remembered.
+- Lanes no longer fail on "Permission denied": `ca workspace <repo> <task>` makes each lane a local clone
+  (a worktree's git dir sits outside the lane folder the CodeArts sandbox allows), `ca workspace --land`
+  merges it back, `ca doctor` warns on a worktree, and the runner commits for a worker whose commit was
+  refused instead of looping.
+- Workers are kept from sleep-polling (`sleep 20+` is refused or steered), a check that crashes after
+  passing counts as failed instead of "couldn't run", and `ca_wait` returns compact rows.
+- `ca ack` handles any finished lane; `ca plan update --patch-file <file>` and `--patch -` (stdin).
+- Every browser check exits cleanly under Node 26; three outdated checks were brought up to date.
+
+
+## 0.4.0 (2026-11-08)
+
+Updates
+- Glance status: every plan has one state (Working, Needs you, Failed, Done, Check Claude) readable from
+  across the room. The Office view hangs a pixel sign over the back wall, lights the room edges in the
+  state color and gives the lead a speech bubble; the Lanes view shows a banner, rail dots and the
+  worst open plan on the Control room. Both set the tab title and favicon; Notify also fires on plan
+  Done, Needs you and Failed.
+- New lead phase `asking`: the lead posts it before ending a turn with a question, so the dashboard
+  shows Needs you. A plan with no lead update for 15 minutes and nothing running reads Check Claude.
+- `ca doctor` has a `repo writable` row: it writes a probe file and a git lock through the worker shell,
+  catching Windows Controlled Folder Access and sandbox ACLs before any lane starts.
+- A lane whose repo cannot be written fails at once (`repo not writable`) instead of spending fix rounds.
+- `ca wait --any` (MCP `any: true`) returns when the first lane ends.
+- `scripts/install-local.mjs` installs this checkout's committed code globally and restarts the dashboard.
+
 ## 0.3.0 (2026-11-08)
 
 Updates

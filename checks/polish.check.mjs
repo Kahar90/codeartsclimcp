@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2); const oi = argv.indexOf('--only'); const ONLY = oi >= 0 ? argv.splice(oi, 2)[1] : null; // office | lanes | update
 const want = (part) => !ONLY || ONLY.split(',').includes(part);
@@ -30,11 +31,13 @@ const reg = path.join(tmp, 'registry'); fs.mkdirSync(reg);
 const dp = await free(), cp = await free();
 const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(dp)], { cwd: tmp, stdio: 'ignore', env: { ...process.env, CA_REGISTRY: reg, CA_DASH: '0', CA_NO_UPDATE_CHECK: '1' } });
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cp}`, `--user-data-dir=${chromeProfileDir('polish')}`, '--no-first-run', '--hide-scrollbars', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
-const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} };
-const timer = setTimeout(() => { console.log('FAIL timeout'); cleanup(); process.exit(1); }, 420000);
+let sock = null;
+const finish = (code) => settle({ socket: sock, children: [chrome, dash], code });
+guard({ children: [chrome, dash] });
+const timer = setTimeout(() => { console.log('FAIL timeout'); finish(1); }, 420000);
 
 let ws = null; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { ws = (await (await fetch(`http://127.0.0.1:${cp}/json/list`)).json()).find((x) => x.type === 'page')?.webSocketDebuggerUrl; } catch {} }
-const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
 let n = 0; const pend = new Map(); sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.id && pend.has(m.id)) { pend.get(m.id)(m.result); pend.delete(m.id); } });
 const send = (method, params = {}) => new Promise((r) => { const i = ++n; pend.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
 const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }))?.result?.value;
@@ -207,8 +210,8 @@ try {
     }
   }
 } catch (e) { check('no exception', false, e.stack || e.message); }
-clearTimeout(timer); cleanup();
+clearTimeout(timer);
 for (const r of results) console.log(r);
 const fails = results.filter((r) => r.startsWith('FAIL')).length;
 console.log(`${results.length - fails}/${results.length} passed; screenshots in ${OUT}`);
-process.exit(fails ? 1 : 0);
+await finish(fails ? 1 : 0);

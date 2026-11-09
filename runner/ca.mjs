@@ -19,9 +19,12 @@
 //                                  --resume: continue a paused/stopped/failed lane in place, same id and step count,
 //                                  plus the lead's notes from tasks/<task>.resume.md if present)
 //        ca status [--json] [--all]        table of lanes (--json adds id, task, repo, result, progress)
-//        ca wait <lane...> [--timeout S] [--json] [--quiet]  block until lanes end; exit = worst lane
+//        ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]  block until lanes end (--any: first); exit = worst lane
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
+//        ca workspace <repo> <task> [--from <branch>]   prepare a parallel lane workspace as a local
+//                                  clone (../<repo-name>-wt-<task>) on branch lane/<task>; --land merges
+//                                  that branch back into <repo> and deletes the clone
 //        ca doctor [--json] [<repo>]       preflight: node, codearts, credentials, git, trust, shell
 //        ca setup <harness> [repo] [--user]   write MCP + rules config for claude|kiro|cursor|codex|vscode|opencode
 //        ca onboard [--harness h] [--repo dir] [--yes] [--smoke] [--dry-run] [--json]   guided first-run setup
@@ -44,9 +47,15 @@
 //                                  the lane folder; --dry-run prints the argv without spawning)
 //        ca dash [port]                    local web dashboard of all lanes (default 4777)
 //        ca gc                             forget lanes finished more than 3 days ago
+//        ca rm <lane> [--keep-logs]        delete a lane: kill its processes, unregister it and drop
+//                                  its lane logs (--keep-logs keeps the lane dir and log; the brief is always kept)
 //        ca plan [<plan.json>]             show the lead's plan on the dashboard (goal, waves, next)
-//        ca plan list | close [id] [--reason t] | rm <id>   plan state; close drops unstarted lanes
-//        ca note [--now] <text>            log a lead decision (--now: set the "lead is doing" line)
+//        ca plan list [--json] | close [id] [--reason t] | rm <id> [--keep-lanes]   plan state; close drops unstarted
+//                                  lanes; rm kills and deletes the plan's lanes (--keep-lanes only unregisters)
+//        ca plan update <id> --patch <json>   change plan fields (title, goal, now, status, phase, next, waves,
+//                                  lanes, risks); bumps revision and updatedAt; refuses unknown fields
+//        ca note [--now] [--plan <id>] [--phase <phase>] <text>   log a lead decision (--now: set the "lead is
+//                                  doing" line; --phase: planning|building|waiting|verifying|asking|done)
 //        ca lead-tokens [--plan id] [--session file]   point the plan at the lead's Claude transcript and print totals
 //        ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]
 //                                  report the lead's own token use on the plan (any harness; --add accumulates)
@@ -59,9 +68,9 @@
 //        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
 //        CA_MAX_LANES_PER_MODEL=maas/glm-5.3=2,default=4 (cap lanes per build model; glm 3,
 //        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
-//        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed, 2 usage or unknown
-//        lane, 3 missing credentials, 4 needs review, 5 paused at LANE_TIMEOUT (resume with --resume),
-//        124 wait timeout.
+//        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed or checks failing,
+//        2 usage or unknown lane, 3 missing credentials, 4 needs review or unverified (a check
+//        could not run), 5 paused at LANE_TIMEOUT (resume with --resume), 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,7 +81,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
-import { laneActions, laneBucket, laneKind } from './controls.mjs';
+import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck, GLYPHS, gitDirInsideRepo, commitRefused, commitFallbackDecision, sleepPoll } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
 import { authProblem } from './authsignal.mjs';
 import { isNetworkError, waitOnline, detectSleep, laneSlots, parseLimits } from './netwait.mjs';
@@ -139,8 +148,8 @@ const writeAtomic = (f, text) => {
   try { fs.writeFileSync(f, text); } catch {} try { fs.rmSync(tmp, { force: true }); } catch {}
 };
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-const killTree = (pid) => { if (!pid) return; if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} } } };
-const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding: 'utf8' }); return (r.stdout || '').trim(); };
+const killTree = (pid) => { if (!pid) return; if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} } } };
+const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }); return (r.stdout || '').trim(); };
 
 // ---------- CodeArts environment (same as installers/codearts.cmd) ----------
 const envCache = {};
@@ -150,7 +159,7 @@ function userEnv(name) {
   if (saved) return saved;
   if (name in envCache) return envCache[name];
   if (process.platform !== 'win32') return '';
-  try { return (envCache[name] = execFileSync('powershell', ['-NoProfile', '-Command', `[Environment]::GetEnvironmentVariable('${name}','User')`], { encoding: 'utf8' }).trim()); } catch { return (envCache[name] = ''); }
+  try { return (envCache[name] = execFileSync('powershell', ['-NoProfile', '-Command', `[Environment]::GetEnvironmentVariable('${name}','User')`], { encoding: 'utf8', windowsHide: true }).trim()); } catch { return (envCache[name] = ''); }
 }
 // The worker's bash tool runs $SHELL. When ca is started from Git Bash, SHELL is the raw MSYS
 // binary (Git\usr\bin\bash.exe), which hangs forever at startup under a console-less native
@@ -160,6 +169,38 @@ function workerShell() {
   const cands = [process.env.CA_SHELL, (process.env.SHELL || '').replace(/\\usr\\bin\\bash\.exe$/i, '\\bin\\bash.exe'),
     path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe')];
   return cands.find((c) => c && /\\bin\\bash\.exe$/i.test(c) && !/\\usr\\bin\\/i.test(c) && fs.existsSync(c)) || process.env.SHELL;
+}
+// A repo a lane cannot write to (Windows Controlled Folder Access, a sandbox ACL, a read-only disk)
+// fails every commit, so a fix round can never help: probe the repo root, the git dir and a lock file
+// in the git dir through the worker shell (Git Bash) before a lane starts. The git dir comes from
+// `git rev-parse --absolute-git-dir`, so a worktree probes its own .git/worktrees/<name> dir. Returns
+// { ok, where, error } with error the first line of the failing output. CA_WRITE_PROBE_FAIL=1 forces a
+// failure for tests.
+function writeProbe(repo) {
+  // A worktree keeps its git dir outside the lane folder (in the main repo's .git/worktrees/<name>),
+  // where the CodeArts sandbox refuses to write: flag it so doctor can warn instead of a false ok.
+  const gd = git(repo, 'rev-parse', '--absolute-git-dir');
+  const worktree = !!gd && !gitDirInsideRepo(repo, gd);
+  if (String(process.env.CA_WRITE_PROBE_FAIL || '') === '1') return { ok: false, where: 'write probe (test hook)', error: 'CA_WRITE_PROBE_FAIL=1 forces a write failure', worktree };
+  const sh = workerShell();
+  const shell = sh && fs.existsSync(sh) ? sh : (process.platform === 'win32' ? 'bash' : (process.env.SHELL || 'sh'));
+  // A folder that is not a git repo yet is fine (onboard or git init makes it one): probe only its root.
+  const gitdir = gd;
+  const spots = [
+    { where: `repo root (${repo})`, file: path.join(repo, '.ca-write-probe') },
+    ...(gitdir ? [{ where: `git dir (${gitdir})`, file: path.join(gitdir, '.ca-write-probe') },
+      { where: `git dir lock (${gitdir})`, file: path.join(gitdir, 'ca-probe.lock') }] : []),
+  ];
+  for (const s of spots) {
+    const f = String(s.file).replace(/\\/g, '/');
+    const r = spawnSync(shell, ['-c', `: > "${f}" && rm -f "${f}"`], { cwd: repo, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+    if (r.status !== 0) {
+      const out = String((r.stderr || '') + (r.stdout || '')).trim();
+      const first = out.split(/\r?\n/).find((l) => l.trim()) || (r.error ? String(r.error.message) : `exit ${r.status}`);
+      return { ok: false, where: s.where, error: first, worktree };
+    }
+  }
+  return { ok: true, where: '', error: '', worktree };
 }
 // Huawei Cloud ModelArts MaaS as a CodeArts custom provider ("maas/<model>"). CodeArts only
 // enables providers named in CUSTOM_PROVIDER_KEYS; the config goes in OPENCODE_CONFIG_CONTENT
@@ -223,7 +264,7 @@ class Server {
     const out = fs.openSync(this.logFile, 'a');
     if (process.env.CA_DUMP_ENV) fs.writeFileSync(process.env.CA_DUMP_ENV, JSON.stringify({ env: redactEnv(caEnv({ CODEARTS_SERVER_PASSWORD: this.pw })), cwd: this.cwd }, null, 1));
     this.child = spawn(EXE, ['serve', '--port', String(this.port), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'WARN'],
-      { cwd: this.cwd, env: caEnv({ CODEARTS_SERVER_PASSWORD: this.pw }), stdio: ['ignore', out, out] });
+      { cwd: this.cwd, env: caEnv({ CODEARTS_SERVER_PASSWORD: this.pw }), stdio: ['ignore', out, out], windowsHide: true });
     this.alive = true;
     this.child.on('exit', (code) => { this.alive = false; this.exitCode = code; });
     const t0 = now();
@@ -308,7 +349,7 @@ async function runLane(repoArg, task, opts = {}) {
     git(repo, 'add', '.gitignore'); git(repo, 'commit', '-qm', 'chore: ignore codearts state and lane files');
   }
   // Folder trust (prefix match in ~/.codeartsdoer/cli-data/settings.json).
-  const tr = spawnSync(process.execPath, [path.join(SKILL, 'scripts', 'trust.mjs'), repo], { encoding: 'utf8' });
+  const tr = spawnSync(process.execPath, [path.join(SKILL, 'scripts', 'trust.mjs'), repo], { encoding: 'utf8', windowsHide: true });
   if (tr.status !== 0) die(`folder trust failed: ${tr.stderr}`, 4);
 
   const live = fs.openSync(path.join(dir, 'live.log'), 'a');
@@ -403,10 +444,26 @@ async function runLane(repoArg, task, opts = {}) {
   const sent = new Set();        // texts we sent (to tell TUI-typed steering apart)
   const seenUser = new Set();    // user partIDs already logged
 
+  // The worker's last reply and last tool output: the gate reads them to tell whether its commit was
+  // refused by the sandbox (then the runner commits instead of wasting a fix round that says "commit").
+  let lastWorkerReply = ''; let lastToolOutput = '';
+  // Sleep-polling wastes tokens: the model replays its whole context on every idle turn. Reject a
+  // permission for it and queue at most one steer per lane telling the worker to run the check in
+  // the foreground instead. Every sighting is recorded as an interruption.
+  let sleepPollSteered = false;
+  const flagSleepPoll = (where) => {
+    S.interruptions.push({ at: now(), phase: S.phase, kind: 'sleep-poll', what: where });
+    save(true);
+  };
+  const queueSleepSteer = () => {
+    if (sleepPollSteered) return; sleepPollSteered = true;
+    try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-sleep.txt`), 'Do not sleep-poll: run the check in the foreground with a timeout and read its output once.'); } catch {}
+    save(true);
+  };
   const flushPart = (pid) => {
     const p = parts.get(pid); if (!p || p.logged) return; p.logged = true;
     const t = (p.text || '').trim(); if (!t) return;
-    if (p.type === 'reasoning') L(`  ~ think: ${oneLine(t, 300)}`); else { L('  assistant:'); block('│ ', t); }
+    if (p.type === 'reasoning') L(`  ~ think: ${oneLine(t, 300)}`); else { lastWorkerReply = t; L('  assistant:'); block('│ ', t); }
   };
   const toolInput = (tool, inp = {}) => oneLine(inp.command ?? inp.filePath ?? inp.path ?? inp.pattern ?? inp.url ?? inp.description ?? JSON.stringify(inp), 200);
 
@@ -463,6 +520,7 @@ async function runLane(repoArg, task, opts = {}) {
             for (const k of parts.keys()) flushPart(k);
             s.tools.set(key, { tool: part.tool, since: now(), input: toolInput(part.tool, st.input) });
             L(`  > ${part.tool}  ${toolInput(part.tool, st.input)}`);
+            { const n = sleepPoll(st.input?.command); if (n) { L(`  ! sleep-poll: ${part.tool} waits sleep ${n}`); flagSleepPoll(`${part.tool}: sleep ${n}`); queueSleepSteer(); } }
             // Global CodeArts permissions may allow external reads/writes; at least make them visible.
             const fp = st.input?.filePath ?? st.input?.path;
             if (typeof fp === 'string' && path.isAbsolute(fp) && !insideRepo(fp)) {
@@ -472,6 +530,7 @@ async function runLane(repoArg, task, opts = {}) {
           } else if ((st.status === 'completed' || st.status === 'error') && s) {
             const t = s.tools.get(key); s.tools.delete(key);
             const took = t ? ` (${dur(now() - t.since)})` : '';
+            lastToolOutput = String(st.error || st.output || '').trim();
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
             if (sid === S.activeSession) S.lastToolAt = now();
@@ -509,7 +568,9 @@ async function runLane(repoArg, task, opts = {}) {
     const kind = p.permission || p.type || 'unknown';
     const pats = [].concat(p.patterns || p.pattern || []).map(String);
     let reply = 'once', why = '';
-    if (kind === 'external_directory' && !(pats.length && pats.every(insideRepo))) { reply = 'reject'; why = `Stay inside the repo ${repo}; do not touch other folders.`; }
+    const sp = sleepPoll([p.command, p.pattern, pats.join(' '), p.title, JSON.stringify(p.metadata || {})].filter(Boolean).join(' '));
+    if (sp) { reply = 'reject'; why = 'Do not sleep-poll: run the check in the foreground with a timeout and read its output once.'; flagSleepPoll(`permission ${kind}: sleep ${sp}`); }
+    else if (kind === 'external_directory' && !(pats.length && pats.every(insideRepo))) { reply = 'reject'; why = `Stay inside the repo ${repo}; do not touch other folders.`; }
     else if (kind === 'doom_loop') { reply = 'reject'; why = 'You repeated the same tool call several times. Stop, think about why it fails, and try a different approach.'; }
     else if (kind === 'read' && pats.some((x) => /\.env/i.test(x))) { reply = 'reject'; why = 'Do not read .env files.'; }
     S.permissions.push({ at: now(), kind, patterns: pats.slice(0, 3), reply });
@@ -772,9 +833,26 @@ Message from the lead: ${rk.text}` : ''), model, agent);
 
   // Files already dirty before the lane started are not this lane's fault: leave them out of the gate.
   const dirty = () => dirtyAll().filter((l) => !PRE_DIRTY.has(l));
+  // The CHECK shell inherits the runner's PATH. A supervisor launched by a service, a daemon or the
+  // CodeArts CLI often has a minimal PATH with no node on it, so `node --check ...` exits 127
+  // "command not found". Put the node running the runner first on PATH so every CHECK line resolves
+  // `node` (and npm beside it) to a real binary.
+  const checkEnv = () => {
+    const key = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+    const dir = path.dirname(process.execPath);
+    const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+    const parts = String(process.env[key] || '').split(path.delimiter).filter(Boolean);
+    if (!parts.some((p) => same(p, dir))) parts.unshift(dir);
+    return { ...process.env, [key]: parts.join(path.delimiter) };
+  };
+  // Run the CHECK lines in the same shell the rest of the runner trusts. On Windows a bare 'bash'
+  // can resolve to WSL's /bin/bash, which does not see the Windows node on PATH (the error reads
+  // "/bin/bash: line 1: node: command not found"); workerShell() picks Git's bash, which inherits
+  // the Windows environment and finds the node that checkEnv() put on PATH.
+  const checkShell = () => { const s = workerShell(); return s && fs.existsSync(s) ? s : 'bash'; };
   const runCheck = (cmd) => new Promise((res) => {
     const t0 = now(); let out = '';
-    const ch = spawn('bash', ['-c', cmd], { cwd: repo, env: { ...process.env, CA_LANE: id }, windowsHide: true });
+    const ch = spawn(checkShell(), ['-c', cmd], { cwd: repo, env: { ...checkEnv(), CA_LANE: id }, windowsHide: true });
     const timer = setTimeout(() => { out += `\n[runner: timed out after ${CFG.checkTimeout}s]`; killTree(ch.pid); }, CFG.checkTimeout * 1000);
     ch.stdout.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
     ch.stderr.on('data', (d) => { out += d; if (out.length > 200000) out = out.slice(-100000); });
@@ -784,16 +862,65 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   async function gates() {
     const d = dirty();
     if (d.length) {
-      S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: d.slice(0, 5).join(', ') }); L(`== gate git clean: FAIL (${d.length} changed)`);
-      return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` };
+      // A dirty tree that cannot be written is a blocked disk, not a code problem: the worker can never
+      // commit it, so end the build loop at once (no fix round) with the same reason as the start probe.
+      const wp = writeProbe(repo);
+      if (!wp.ok) {
+        const why = `repo not writable: ${wp.where}: ${wp.error}`;
+        S.gates.push({ at: now(), gate: 'repo writable', ok: false, detail: why }); L(`== gate repo writable: FAIL (${why})`);
+        return { ok: false, write: true, what: 'repo writable', reason: why };
+      }
+      // The tree is dirty and the runner itself can write: if the worker's own commit was refused
+      // (its reply or tool output shows a git error), commit the work here instead of wasting a fix
+      // round on "commit"; the worker cannot fix a sandbox it is not allowed to write to.
+      const refused = commitRefused(`${lastWorkerReply}\n${lastToolOutput}`);
+      const dec = commitFallbackDecision({ dirty: true, refused, writable: true });
+      if (dec.action === 'fail') {
+        const why = dec.reason;
+        S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: why }); L(`== gate git clean: FAIL (${why})`);
+        return { ok: false, write: true, what: 'commit failed', reason: why };
+      }
+      if (dec.action === 'commit') {
+        const step = stepProgress(S).current;
+        const subject = step ? `step ${step.n}: ${oneLine(step.text, 120)}` : `step ${S.commits + 1}: the worker's uncommitted work`;
+        git(repo, 'add', '-A');
+        const cm = spawnSync('git', ['commit', '-m', subject, '-m', `committed by the runner: the worker's commit was refused (${oneLine(refused, 200)})`], { cwd: repo, encoding: 'utf8', windowsHide: true });
+        if (cm.status !== 0) {
+          const first = String((cm.stderr || '') + (cm.stdout || '')).trim().split(/\r?\n/).find((l) => l.trim()) || `exit ${cm.status}`;
+          const why = `commit failed: ${oneLine(first, 200)}`;
+          S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: why }); L(`== gate git clean: FAIL (${why})`);
+          return { ok: false, write: true, what: 'commit failed', reason: why };
+        }
+        S.interruptions.push({ at: now(), phase: 'gate', kind: 'commit-fallback', what: `${subject} (${oneLine(refused, 160)})` }); save(true);
+        L(`== commit fallback: committed "${subject}" (the worker's commit was refused)`);
+        syncCommits();
+        if (dirty().length) {
+          const why = `commit failed: git clean still failing after the runner's commit`;
+          S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: why }); L(`== gate git clean: FAIL (${why})`);
+          return { ok: false, write: true, what: 'commit failed', reason: why };
+        }
+        S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok (committed by the runner)');
+      } else {
+        S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: d.slice(0, 5).join(', ') }); L(`== gate git clean: FAIL (${d.length} changed)`);
+        return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` };
+      }
+    } else {
+      S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
     }
-    S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
     for (const c of checks) {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
-      const r = await runCheck(c);
+      let r = await runCheck(c);
+      let kind = classifyCheck({ code: r.code, out: r.out });
+      // An infra failure is the machine, not the work: rerun that one check once, 3 s later, before
+      // deciding. A check that cannot run (missing tool, sandbox, timeout) never starts a fix round.
+      if (kind === 'infra') {
+        L(`== gate check could not run (exit ${r.code}); retrying once in 3 s`); await sleep(3000);
+        r = await runCheck(c); kind = classifyCheck({ code: r.code, out: r.out });
+      }
       const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
-      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, ms: r.ms }); save(true);
-      if (r.code !== 0) { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: `check failed: ${c}`, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check, and commit the fix.` }; }
+      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
+      if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` }; }
       L(`== gate check ok (${dur(r.ms)})`);
     }
     return { ok: true };
@@ -825,9 +952,13 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   };
 
   // ---- run ----
-  let exitCode = 1, reason = '', review = null;
+  let exitCode = 1, reason = '', review = null, forcedResult = '';
   server.events(onEvent, (up) => { S.sse = up; }).catch(() => {});
   try {
+    // Probe before the codearts server: a repo the lane cannot write to will fail every commit, so end
+    // the lane at once as failed instead of starting a server and spending model calls on a blocked disk.
+    const wp = writeProbe(repo);
+    if (!wp.ok) { L(`  ! repo not writable: ${wp.where}: ${wp.error}`); throw Object.assign(new Error('repo not writable'), { caWrite: true, where: wp.where, wpError: wp.error }); }
     say(`lane ${id}: starting codearts server in ${repo}`);
     await server.start();
     S.server = { url: server.url, pw: server.pw, pid: server.child.pid, version: server.version }; save(true);
@@ -867,14 +998,24 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('gate', 'running gates');
       const g = await gates();
       if (g.ok) { reason = ''; exitCode = 0; break; }
-      if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+      // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
+      if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
+      // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
+      // repair the machine), but a human must look, so exit 4 like needs review.
+      if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
+      if (++S.fixes > CFG.fixes) {
+        if (g.code !== undefined) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; }
+        else reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`;
+        exitCode = 1; break;
+      }
       say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
       phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
     }
     syncCommits();
 
-    // REVIEW (read-only plan agent, different model)
-    if (exitCode === 0 && !CFG.noReview) {
+    // REVIEW (read-only plan agent, different model). It reads code, not checks, so it still runs
+    // when the checks could not run (unverified): a reviewer asking for fixes wins over it.
+    if ((exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
       const rf = path.join(repo, 'tasks', `${task}.review.md`);
       const rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
         : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
@@ -883,7 +1024,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('review', 'reviewing'); L(`== review (${REVIEW}, read-only plan agent) session ${rsid}`);
       await send(rsid, rb, REVIEW, 'plan');
       const rr = await drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
-      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; if (rr.keys) S.keysMessage = rr.keys; }
+      if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
       let text = '';
       try {
         const msgs = await server.api('GET', `/session/${rr.sid}/message`);
@@ -900,7 +1041,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       review = text;
     }
   } catch (err) {
-    if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
+    forcedResult = '';
+    if (err && err.caWrite) { reason = `repo not writable: ${err.where}: ${err.wpError}`; exitCode = 1; L(`! ${reason}`); }
+    else if (err && err.caAuth) { reason = 'auth'; exitCode = 3; }
     else if (err && err.caStop) { reason = 'stopped'; exitCode = 1; L('== stopped while queued for a model slot'); }
     else { reason = `runner error: ${err.message}`; exitCode = 1; L(`! ${reason}`); }
   }
@@ -908,8 +1051,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // ---- summary ----
   syncCommits();
   // A lane that reaches LANE_TIMEOUT is paused, not failed: the safeguard worked and `--resume` continues it in place.
-  S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done') : (reason === 'stopped' ? 'stopped' : reason === 'timeout' ? 'paused' : 'failed');
-  const finalExit = S.result === 'needs review' ? 4 : S.result === 'paused' ? 5 : exitCode;
+  S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done')
+    : forcedResult === 'unverified' && exitCode === 4 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'unverified')
+    : (forcedResult || (reason === 'stopped' ? 'stopped' : reason === 'timeout' ? 'paused' : 'failed'));
+  const finalExit = S.result === 'needs review' ? 4 : S.result === 'paused' ? 5 : S.result === 'unverified' ? 4 : S.result === 'checks failing' ? 1 : exitCode;
   S.reason = reason; S.exitCode = finalExit; S.phase = 'finished'; S.activity = S.result; S.busy = false; S.finishedAt = now();
   const log = git(repo, 'log', '--oneline', `${START}..HEAD`);
   const left = dirty();
@@ -932,6 +1077,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ...(S.errors.length ? [`errors: ${S.errors.slice(-3).map((x) => x.msg).join(' / ')}`] : []),
     '--- review ---', reviewBody || '(no review)', `VERDICT: ${S.verdict || 'none'}`,
     ...(S.result === 'paused' ? [`paused at the time limit (LANE_TIMEOUT ${CFG.laneTimeout}s). Continue in place: ca lane ${repo} ${task} --resume   (optional lead notes: tasks/${task}.resume.md)`] : []),
+    ...(S.result === 'unverified' ? [`checks could not run (a machine problem, not a test failure): fix the environment, then rerun them. ca resume ${id}`] : []),
+    ...(S.result === 'checks failing' ? [`a check still fails after ${S.fixes} fix rounds. Fix it or resume for another round: ca resume ${id}`] : []),
     `files: ${dir} (live.log, review.md, events.jsonl)`,
   ].join('\n');
   fs.writeFileSync(path.join(dir, 'summary.md'), md + '\n');
@@ -1036,16 +1183,43 @@ const ackAt = (v) => (v && typeof v === 'object' ? v.at : v);
 function laneSeen(id, finishedAt) { return !!(finishedAt && ackAt(readAcks()[id]) === finishedAt); }
 function ackNote(id) { const v = readAcks()[id]; return v && typeof v === 'object' ? v.note || '' : ''; }
 function setAck(id, seen, finishedAt, note = '') { const a = { ...readAcks() }; if (seen && finishedAt) a[id] = note ? { at: finishedAt, note } : finishedAt; else delete a[id]; writeAcks(a); }
-// The bucket a person sees: a finished needs-you lane (failed, paused, needs review) that was marked handled moves to
-// ended until it finishes again. A DEAD or running lane can never be marked away: it needs resume or stop.
+// The bucket a person sees: any finished lane the lead acknowledged is handled, and a DEAD or running
+// lane can never be marked away (it needs resume or stop). The ended lanes of a closed plan are never
+// attention either: the lead closed the plan, so nothing is left for the human.
 function bucketFor(l) {
   const s = l.s; const r = laneBucket({ s, alive: alive(s.pid), health: health(s) });
-  if (r.bucket === 'attention' && s.result && laneSeen(l.id, s.finishedAt)) {
-    const note = ackNote(l.id); return { bucket: 'ended', reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
+  if (s.result && laneSeen(l.id, s.finishedAt)) {
+    const note = ackNote(l.id); return { bucket: r.bucket === 'attention' ? 'ended' : r.bucket, reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
   }
+  if (r.bucket === 'attention' && s.result && closedPlanLanes().has(l.id)) return { bucket: 'ended', reason: r.reason, handled: false };
   return r;
 }
 function bucketOf(l) { return bucketFor(l).bucket; }
+// Lane ids that belong to a closed plan: their ended lanes need nothing from the human. Cached by the
+// registered plans' ids and mtimes, so a poll over many lanes reads the plan files once.
+let closedLanes = { key: null, ids: new Set() };
+function closedPlanLanes() {
+  const rs = plans();
+  const key = rs.map((r) => `${r.id}:${r.mtime}`).join('|');
+  if (closedLanes.key === key) return closedLanes.ids;
+  const ids = new Set();
+  for (const r of rs) {
+    const p = readJSON(r.file) || {};
+    if (!planClosed(p)) continue;
+    const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+    for (const pl of p.lanes || []) { if (!pl || pl.removed) continue; ids.add(laneId(path.resolve(base, pl.repo || '.'), pl.task)); }
+  }
+  closedLanes = { key, ids };
+  return ids;
+}
+// The one status a person sees for this lane, shown the same way in the CLI, MCP and both views.
+// bucketFor already decides whether a finished lane was acknowledged (handled) and whether the lane is
+// an ended lane of a closed plan; pass both through so the label and the attention flag agree everywhere.
+function laneStatusOf(l, s = l.s) {
+  const r = bucketFor(l);
+  const closed = !!s.result && closedPlanLanes().has(l.id);
+  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '', closed });
+}
 // Lane kind for the Office characters; the brief is read once per change (mtime), not on every poll.
 const kindCache = new Map();
 function kindOf(l) {
@@ -1064,7 +1238,7 @@ const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 477
 // A status row for scripts: every laneRow field plus identity, result, progress and file paths.
 function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
-  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '',
+  return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', status: laneStatusOf(l),
     progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
     summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
@@ -1137,7 +1311,7 @@ function cmdSummary(args) {
   const text = fs.existsSync(sm) ? fs.readFileSync(sm, 'utf8') : '';
   if (args.includes('--json')) {
     const pg = stepProgress(s);
-    console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', verdict: s.verdict || '',
+    console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', status: laneStatusOf(l), reason: s.reason || '', verdict: s.verdict || '',
       elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), commits: s.commitLog || [], steps: pg.list,
       gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
     return;
@@ -1306,6 +1480,83 @@ function cmdGc() {
   for (const l of lanes()) if (l.s.result && now() - (l.s.finishedAt || 0) > 3 * 24 * 3600e3) { fs.rmSync(path.join(REG, `${l.id}.json`), { force: true }); fs.rmSync(path.join(REG, 'final', `${l.id}.json`), { force: true }); console.log(`forgot ${l.id}`); }
 }
 
+// ---------- remove lanes and plans ----------
+// Delete a lane for good: stop its supervisor and its codearts server (only the pids this lane
+// recorded, never by name), unregister it, drop its lane logs and mark it removed in every plan
+// that listed it. The brief tasks/<task>.md and any git worktree or branch are never touched.
+async function removeLane(l, { purge = true, by = 'ca rm' } = {}) {
+  if (!l || !l.id) return { error: 'no lane given', code: 400 };
+  const id = l.id; const s = l.s || {};
+  const killed = []; const stop = [];
+  try {
+    if (s.pid && alive(s.pid)) {
+      try { fs.mkdirSync(l.dir, { recursive: true }); fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); } catch {}
+      killTree(s.pid); killed.push(s.pid); stop.push(s.pid);
+    }
+    if (s.server?.pid && alive(s.server.pid)) { killTree(s.server.pid); killed.push(s.server.pid); stop.push(s.server.pid); }
+    const t0 = now();
+    while (now() - t0 < 5000 && stop.some((p) => alive(p))) await sleep(100);
+    const removed = [];
+    const drop = (f) => { try { if (f && fs.existsSync(f)) { fs.rmSync(f, { force: true }); removed.push(f); } } catch {} };
+    drop(path.join(REG, `${id}.json`));
+    drop(path.join(REG, 'final', `${id}.json`));
+    const acks = readAcks();
+    if (Object.prototype.hasOwnProperty.call(acks, id)) { const next = { ...acks }; delete next[id]; writeAcks(next); }
+    if (purge) {
+      try { if (l.dir && fs.existsSync(l.dir)) { fs.rmSync(l.dir, { recursive: true, force: true }); removed.push(l.dir); } } catch {}
+      if (l.repo && l.task) drop(path.join(l.repo, 'tasks', `${l.task}.lane.log`));
+    }
+    for (const r of plans()) {
+      const p = readJSON(r.file) || {};
+      const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+      let changed = false;
+      for (const pl of (p.lanes || [])) {
+        if (pl && laneId(path.resolve(base, pl.repo || '.'), pl.task) === id) { pl.removed = true; changed = true; }
+      }
+      if (!changed) continue;
+      (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Lane ${l.task} deleted from the ${by}` });
+      try { fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n'); } catch {}
+    }
+    return { ok: true, id, killed, removed };
+  } catch (err) { return { error: String((err && err.message) || err), code: 500 }; }
+}
+
+// Delete a plan for good: remove every lane it lists that is still registered (killing its
+// processes and dropping its logs), then mark the plan file closed and removed and unregister it.
+// The plan.json file is kept (marked removed), so a later lane start never resurrects it.
+async function removePlan(r, { by = 'ca plan rm' } = {}) {
+  if (!r || !r.id) return { error: 'no plan given', code: 400 };
+  try {
+    const snapshot = readJSON(r.file) || {};
+    const base = path.resolve(path.dirname(r.file), '..', snapshot.repo || '.');
+    const reg = new Map(lanes().map((l) => [l.id, l]));
+    const wanted = (snapshot.lanes || []).filter(Boolean).map((pl) => laneId(path.resolve(base, pl.repo || '.'), pl.task));
+    const laneIds = []; const killed = [];
+    for (const id of wanted) {
+      const l = reg.get(id); if (!l) continue;
+      const res = await removeLane(l, { by });
+      if (res && res.ok) { laneIds.push(id); killed.push(...(res.killed || [])); }
+    }
+    const p = readJSON(r.file) || snapshot;
+    p.status = 'closed'; p.removed = true; p.now = `Deleted from the ${by}`;
+    (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Plan ${r.id} deleted from the ${by}` });
+    try { fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n'); } catch {}
+    try { fs.rmSync(path.join(PLANS, `${r.id}.json`), { force: true }); } catch {}
+    return { ok: true, id: r.id, lanes: laneIds, killed };
+  } catch (err) { return { error: String((err && err.message) || err), code: 500 }; }
+}
+
+// ca rm <lane> [--keep-logs]: delete a lane for good. findLane dies (exit 2) on an unknown or
+// ambiguous lane, exactly like the other lane commands.
+async function cmdRm(args) {
+  const keep = args.includes('--keep-logs');
+  const q = args.filter((a) => !a.startsWith('--'))[0];
+  const l = findLane(q);
+  const r = await removeLane(l, { purge: !keep, by: 'ca rm' });
+  if (r.error) die(r.error, r.code || 1);
+  console.log(`removed ${r.id}; killed [${r.killed.join(', ') || '-'}]; deleted [${r.removed.join(', ') || '(none)'}]`);
+}
+
 // ---------- engineer workflow: setup, wait, summary, init, doctor ----------
 async function cmdSetup(args) {
   const f = path.join(HERE, 'setup.mjs');
@@ -1329,19 +1580,41 @@ async function cmdOnboard(args) {
 function laneExit(s) {
   if (s.result === 'done') return !s.verdict || s.verdict === 'ready' ? 0 : 4;
   if (s.result === 'needs review') return 4;
+  if (s.result === 'unverified') return 4;
   if (resultOf(s) === 'paused') return 5;
   if (s.result === 'failed' && s.exitCode === 3) return 3;
   return 1;
 }
 const exitRank = (c) => ({ 1: 4, 3: 3, 5: 2, 4: 1 }[c] ?? 0);
 const worstExit = (codes) => codes.reduce((a, b) => (exitRank(b) > exitRank(a) ? b : a), 0);
+// The compact `ca wait --json --compact` row: only what a lead needs to decide and call again, so the
+// context stays small when many lanes are watched. `next` is the per-lane action for its exit code.
+const WAIT_NEXT = {
+  0: 'read ca_summary for each lane and verify the work',
+  1: 'read ca_summary; ca_resume continues a failed, stopped or checks-failing lane with a note',
+  3: 'keys missing or rejected: ask the human to run ca auth (never ask for keys in chat), then ca_resume the lane',
+  4: 'read ca_summary: the reviewer asked for changes, or the checks could not run (unverified)',
+  5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
+  124: 'still running: call ca wait again',
+};
+function compactWaitRow(l, s) {
+  const st = laneStatusOf(l, s); const pg = stepProgress(s);
+  return { lane: l.id, status: { key: st.key, label: st.label, attention: st.attention }, progress: `${pg.done}/${pg.total}`,
+    commits: s.commits || 0, tokens: tokenTotal(s.tokens), next: WAIT_NEXT[s.result ? laneExit(s) : 124] || '' };
+}
 async function cmdWait(args) {
   const asJson = args.includes('--json'); const quiet = args.includes('--quiet');
+  // --compact: with --json, return only the small per-lane decision rows a lead reads when many lanes
+  // run at once. MCP ca_wait turns it on by default.
+  const wantCompact = args.includes('--compact');
+  // --any returns as soon as one lane has a result, so a lead watching parallel lanes sees an early
+  // failure at once instead of waiting for the slowest lane. Others are listed as still running.
+  const any = args.includes('--any');
   const ti = args.indexOf('--timeout');
   const timeoutS = ti >= 0 ? Number(args[ti + 1]) : NaN;
-  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--timeout S] [--json] [--quiet]', 2);
+  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]', 2);
   const qs = args.filter((a, i) => !a.startsWith('--') && !(ti >= 0 && i === ti + 1));
-  if (!qs.length) die('usage: ca wait <lane...> [--timeout S] [--json] [--quiet]', 2);
+  if (!qs.length) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]', 2);
   const targets = qs.map((q) => findLane(q)); // resolve every lane first: unknown -> exit 2
   const deadline = Number.isFinite(timeoutS) && timeoutS > 0 ? now() + timeoutS * 1000 : Infinity;
   const last = new Map(); let lastBeat = 0;
@@ -1360,16 +1633,24 @@ async function cmdWait(args) {
       const key = `${health(s)}|${s.phase}|${pg.current?.n ?? ''}`;
       if (last.get(l.id) !== key) { last.set(l.id, key); if (!quiet) note(l, s); }
     }
-    if (states.every(({ s }) => s.result)) {
-      const objs = states.map(({ l, s }) => ({ lane: l.id, result: s.result, verdict: s.verdict || '', exit: laneExit(s),
+    const finished = states.filter(({ s }) => s.result);
+    if (any ? finished.length > 0 : states.every(({ s }) => s.result)) {
+      const objs = finished.map(({ l, s }) => ({ lane: l.id, result: s.result, status: laneStatusOf(l, s), verdict: s.verdict || '', exit: laneExit(s),
         summaryPath: fs.existsSync(path.join(l.dir, 'summary.md')) ? path.join(l.dir, 'summary.md') : null }));
+      const runningStates = states.filter(({ s }) => !s.result);
+      const running = runningStates.map(({ l }) => l);
       for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
-      if (asJson) process.stdout.write(JSON.stringify({ lanes: objs }) + '\n');
+      if (asJson) {
+        const lanes = wantCompact ? finished.map(({ l, s }) => compactWaitRow(l, s)) : objs;
+        const run = wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : running.map(statusRow);
+        process.stdout.write(JSON.stringify(any ? { lanes, any: true, running: run } : { lanes }) + '\n');
+      } else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
     }
     if (now() >= deadline) {
-      const running = states.filter(({ s }) => !s.result).map(({ l }) => l);
-      if (asJson) console.log(JSON.stringify({ timeout: true, waitedS: timeoutS, lanes: running.map(statusRow) }));
+      const runningStates = states.filter(({ s }) => !s.result);
+      const running = runningStates.map(({ l }) => l);
+      if (asJson) console.log(JSON.stringify({ timeout: true, waitedS: timeoutS, lanes: wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : running.map(statusRow) }));
       else { console.log(`wait: timeout after ${timeoutS}s; still running:`); printRows(running.map(laneRow)); }
       process.exit(124);
     }
@@ -1395,6 +1676,61 @@ function cmdInit(args) {
   if (!git(repo, 'rev-parse', '--git-dir')) console.log('not a git repo yet: run git init && git commit --allow-empty -m init');
   console.log(`next: ca lane ${repoArg} ${task} --detach`);
   console.log(`      ca wait ${laneId(repo, task)}`);
+}
+// `ca workspace <repo> <task>`: prepare a parallel lane workspace as a LOCAL CLONE
+// (../<repo-name>-wt-<task>) on a new branch lane/<task>, from --from (default: the repo's current
+// branch). A clone keeps .git inside the lane folder, so the CodeArts sandbox can commit there; a
+// git worktree keeps its git dir in the main repo (outside the folder) and every sandboxed commit
+// fails with "Permission denied". `--land` fetches lane/<task> from the clone into <repo>, merges it
+// (refusing on a dirty main tree), then deletes the clone folder.
+function cmdWorkspace(args) {
+  const usage = 'usage: ca workspace <repo> <task> [--from <branch>] | ca workspace --land <repo> <task>';
+  const land = args.includes('--land');
+  const fi = args.indexOf('--from');
+  const from = fi >= 0 ? args[fi + 1] : '';
+  if (fi >= 0 && (!from || from.startsWith('--'))) die(usage, 2);
+  const pos = args.filter((a, i) => !a.startsWith('--') && !(fi >= 0 && i === fi + 1));
+  const [repoArg, task] = pos;
+  if (!repoArg || !task) die(usage, 2);
+  const repo = path.resolve(repoArg);
+  if (!git(repo, 'rev-parse', '--git-dir')) die(`not a git repo: ${repo}`, 2);
+  const branch = `lane/${task}`;
+  const clone = path.join(path.dirname(repo), `${path.basename(repo)}-wt-${task}`);
+  const run = (cwd, ...gargs) => spawnSync('git', gargs, { cwd, encoding: 'utf8', windowsHide: true });
+  const fail = (what, r) => die(`${what}: ${oneLine(String((r.stderr || '') + (r.stdout || '')).trim(), 300)}`, 1);
+  if (land) {
+    if (!fs.existsSync(clone)) die(`no workspace to land: ${clone}`, 2);
+    // tasks/ holds the plan and lane logs the lead and runner update while lanes run: they never block a land.
+    const dirtyTree = git(repo, 'status', '--porcelain', '--', '.', ':!tasks');
+    if (dirtyTree) die(`main tree is dirty in ${repo}: commit or stash first, then land\n${oneLine(dirtyTree, 200)}`, 1);
+    const f = run(repo, 'fetch', clone, branch);
+    if (f.status !== 0) fail('git fetch failed', f);
+    const m = run(repo, 'merge', '--no-ff', 'FETCH_HEAD');
+    if (m.status !== 0) die(`git merge failed (resolve it in ${repo}): ${oneLine(String((m.stderr || '') + (m.stdout || '')).trim(), 300)}`, 1);
+    fs.rmSync(clone, { recursive: true, force: true });
+    console.log(`landed ${branch} into ${repo}`);
+    console.log(`removed ${clone}`);
+    const log = git(repo, 'log', '--oneline', '-1');
+    if (log) console.log(`head: ${log}`);
+    return;
+  }
+  if (fs.existsSync(clone)) die(`workspace already exists: ${clone} (land or remove it first)`, 2);
+  const c = run(path.dirname(repo), 'clone', '--local', '--no-hardlinks', repo, clone);
+  if (c.status !== 0) fail('git clone failed', c);
+  // The clone carries the source branches as origin/<name>; a sha needs the plain name, so fall back.
+  const start = from || git(repo, 'rev-parse', '--abbrev-ref', 'HEAD') || 'HEAD';
+  let b = run(clone, 'checkout', '-b', branch, `origin/${start}`);
+  if (b.status !== 0) b = run(clone, 'checkout', '-b', branch, start);
+  if (b.status !== 0) fail('git checkout failed', b);
+  // A brief the repo has not committed yet is not in the clone: copy it so the lane can read it.
+  const briefSrc = path.join(repo, 'tasks', `${task}.md`);
+  const briefDst = path.join(clone, 'tasks', `${task}.md`);
+  if (fs.existsSync(briefSrc) && !fs.existsSync(briefDst)) { fs.mkdirSync(path.dirname(briefDst), { recursive: true }); fs.copyFileSync(briefSrc, briefDst); }
+  console.log(`workspace: ${clone}`);
+  console.log(`branch: ${branch} (from ${from || start})`);
+  console.log(`start the lane: ca lane ${clone} ${task} --detach`);
+  console.log(`merge back: git -C ${repo} fetch ${clone} ${branch} && git -C ${repo} merge --no-ff FETCH_HEAD`);
+  console.log(`or: ca workspace --land ${repoArg} ${task}`);
 }
 // Preflight for engineers and agents: every row is ok | warn | fail, secrets are never printed.
 // Shared by `ca doctor` and the dashboard's GET /api/doctor (same function, no subprocess).
@@ -1424,7 +1760,7 @@ async function doctorData(repoArg) {
   add('maas key', userEnv('MAAS_API_KEY') ? 'ok' : 'warn', userEnv('MAAS_API_KEY') ? 'set' : 'not set, falls back to CodeArts quota models',
     userEnv('MAAS_API_KEY') ? '' : 'ca auth --force adds MAAS_API_KEY for the MaaS models');
 
-  const g = spawnSync('git', ['--version'], { encoding: 'utf8' });
+  const g = spawnSync('git', ['--version'], { encoding: 'utf8', windowsHide: true });
   add('git', g.status === 0 ? 'ok' : 'fail', oneLine(((g.stdout || '') + (g.stderr || '')).trim(), 120) || 'git not found', g.status === 0 ? '' : 'install git');
 
   const settings = readJSON(SETTINGS) || {};
@@ -1436,6 +1772,20 @@ async function doctorData(repoArg) {
   const sh = workerShell();
   const shOk = !!(sh && fs.existsSync(sh));
   add('shell', shOk ? 'ok' : 'fail', sh || 'no SHELL set', shOk ? '' : 'set SHELL or CA_SHELL to Git bash (Git\\bin\\bash.exe)');
+
+  // A repo the lane cannot write to fails every commit, so nothing else works: fail the row hard.
+  // A git worktree is writable by the runner but its git dir lives in the main repo, outside the lane
+  // folder the CodeArts sandbox confines the worker to: warn so the lead uses a clone instead.
+  const wp = writeProbe(repo);
+  if (wp.worktree) {
+    add('repo writable', 'warn', `git dir is outside the lane folder (${git(repo, 'rev-parse', '--absolute-git-dir')})`,
+      'this is a git worktree: its git dir is outside the lane folder, so the CodeArts sandbox refuses commits; use `ca workspace` (a local clone) instead');
+  } else {
+    add('repo writable', wp.ok ? 'ok' : 'fail', wp.ok ? `wrote and removed a probe in ${repo}` : `${wp.where}: ${wp.error}`,
+      wp.ok ? '' : process.platform === 'win32'
+        ? 'Windows Controlled Folder Access or a sandbox ACL is blocking writes: allow git, Git Bash and node in Defender (Controlled Folder Access, Allow an app) or move the repo out of Documents'
+        : 'check the folder permissions');
+  }
 
   try {
     const r = await fetch(`${dashUrl()}/api/lanes`, { signal: AbortSignal.timeout(1500) });
@@ -1537,6 +1887,11 @@ const planStamp = (d = new Date()) => `${d.getFullYear()}${String(d.getMonth() +
 // A plan the lead wrote is only ever appended to; a lane already listed is not added twice.
 function ensurePlan(repo, task, briefText) {
   if (process.env.CA_NO_PLAN === '1') return null;
+  // A lane already listed in another registered OPEN plan (a lead plan for the same work, perhaps in
+  // a separate clone) must not create or register a second plan: dedup by the same id resolution
+  // planView and noteResume use, and leave the local tasks/plan.json untouched.
+  const owner = openPlanFor(repo, task);
+  if (owner) return owner.file;
   const main = projectOf(repo).key;
   const planFile = path.join(main, 'tasks', 'plan.json');
   const rel = (path.relative(main, repo) || '.').split(path.sep).join('/') || '.';
@@ -1577,8 +1932,12 @@ function ensurePlan(repo, task, briefText) {
       if (fs.existsSync(dest)) {
         const oldId = planId(planFile); const newId = `${oldId}~${stamp}`;
         try { fs.rmSync(path.join(PLANS, `${oldId}.json`), { force: true }); } catch {}
-        fs.mkdirSync(PLANS, { recursive: true });
-        fs.writeFileSync(path.join(PLANS, `${newId}.json`), JSON.stringify({ id: newId, file: dest }, null, 2));
+        // A deleted plan (removed: true) is archived for the record but never registered again,
+        // so a new lane can never bring a removed plan back to the dashboard.
+        if (!cur.removed) {
+          fs.mkdirSync(PLANS, { recursive: true });
+          fs.writeFileSync(path.join(PLANS, `${newId}.json`), JSON.stringify({ id: newId, file: dest }, null, 2));
+        }
       }
     }
     const plan = { title: goal, goal, lead: process.env.CA_LEAD || 'lead', status: 'running', now: '',
@@ -1591,15 +1950,65 @@ function ensurePlan(repo, task, briefText) {
     return planFile;
   });
 }
-// True when the lane is already listed in its repo's open plan (a resume must not rewrite that plan).
+// True when the lane is already listed in an open plan: its repo's own plan, or another registered
+// open plan that lists it (a resume must not rewrite or duplicate a plan).
 function laneAlreadyPlanned(repo, task) {
-  try { const main = projectOf(repo).key; const p = readJSON(path.join(main, 'tasks', 'plan.json')); return !!(p && !planClosed(p) && planListsLane(p, main, repo, task)); }
-  catch { return false; }
+  try {
+    if (openPlanFor(repo, task)) return true;
+    const main = projectOf(repo).key; const p = readJSON(path.join(main, 'tasks', 'plan.json')); return !!(p && !planClosed(p) && planListsLane(p, main, repo, task));
+  } catch { return false; }
 }
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
   return files.map((f) => readJSON(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
+    // A plan whose file is marked removed: true was deleted: never list it again.
+    .filter((r) => { const p = readJSON(r.file); return !(p && p.removed === true); })
     .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
+}
+// The registered open plan that already lists this lane, resolving each lane entry's repo the same
+// way planView and noteResume do (the plan file's folder, then p.repo, then the lane entry repo).
+function openPlanFor(repo, task) {
+  const id = laneId(repo, task);
+  for (const r of plans()) {
+    const p = readJSON(r.file) || {};
+    if (planClosed(p) || p.removed) continue;
+    const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+    if ((p.lanes || []).some((pl) => pl && !pl.removed && laneId(path.resolve(base, pl.repo || '.'), pl.task) === id)) return r;
+  }
+  return null;
+}
+// The lead phase a note may report: a small closed set the views render as a badge.
+const LEAD_PHASES = ['planning', 'building', 'waiting', 'verifying', 'asking', 'done'];
+// Bounded activity: keep only the newest entries so a long lead session cannot grow plan.json forever.
+const ACTIVITY_MAX = 20;
+function pushActivity(p, entry) {
+  const a = Array.isArray(p.leadActivity) ? p.leadActivity : [];
+  a.push(entry); p.leadActivity = a.slice(-ACTIVITY_MAX);
+}
+// ca plan update: only these fields may be patched, each with the type the views expect. An unknown field
+// or a wrong type is refused with the field name, never silently dropped, so a typo cannot corrupt a plan.
+const PLAN_PATCH = {
+  title: (v) => typeof v === 'string', goal: (v) => typeof v === 'string', now: (v) => typeof v === 'string',
+  status: (v) => typeof v === 'string', phase: (v) => typeof v === 'string' && LEAD_PHASES.includes(v),
+  next: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string' || (!!x && typeof x === 'object' && typeof x.text === 'string')),
+  // Waves and lanes are rendered by planView, which reads w.name / w.lanes and l.task / l.repo: a non-object
+  // entry (or one missing its required string) would make a view throw, so the shape is checked, not just the type.
+  waves: (v) => Array.isArray(v) && v.every((w) => !!w && typeof w === 'object' && !Array.isArray(w) && typeof w.name === 'string'
+    && (w.lanes === undefined || (Array.isArray(w.lanes) && w.lanes.every((t) => typeof t === 'string')))),
+  lanes: (v) => Array.isArray(v) && v.every((l) => !!l && typeof l === 'object' && !Array.isArray(l) && typeof l.task === 'string'
+    && (l.repo === undefined || typeof l.repo === 'string')),
+  risks: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string'),
+};
+const PLAN_PATCH_HINT = Object.keys(PLAN_PATCH).join(', ');
+function validatePatch(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) die(`--patch must be a JSON object; fields: ${PLAN_PATCH_HINT}`, 2);
+  const keys = Object.keys(patch);
+  if (!keys.length) die(`--patch is empty; fields: ${PLAN_PATCH_HINT}`, 2);
+  for (const k of keys) {
+    if (!Object.hasOwn(PLAN_PATCH, k)) die(`unknown patch field "${k}"; fields: ${PLAN_PATCH_HINT}`, 2);
+    if (!PLAN_PATCH[k](patch[k])) die(`patch field "${k}" has the wrong type`, 2);
+  }
+  return keys;
 }
 // ca plan [file] registers; ca plan list | close [id] [--reason t] | rm <id> manage registered plans.
 const findPlan = (q) => {
@@ -1612,15 +2021,49 @@ const findPlan = (q) => {
 async function cmdPlan(args) {
   const sub = args[0];
   if (sub === 'list' || sub === 'ls') {
-    const all = plans().map(planView); if (!all.length) return console.log('no plan registered (ca plan <repo>/tasks/plan.json)');
+    const all = plans().map(planView);
+    if (args.includes('--json')) return console.log(JSON.stringify(all, null, 2));
+    if (!all.length) return console.log('no plan registered (ca plan <repo>/tasks/plan.json)');
     for (const p of all) console.log(`${p.id.padEnd(24)} ${p.state.padEnd(10)} ${p.title}  (${p.summary})  time ${fmtDur(p.time && p.time.totalMs)}`);
     return;
+  }
+  if (sub === 'update') {
+    // The patch comes from --patch <json>, --patch-file <file> or --patch - (JSON on stdin). The file
+    // and stdin forms exist because Windows PowerShell splits a JSON argument on its spaces.
+    const pi = args.indexOf('--patch'); const fi = args.indexOf('--patch-file');
+    let raw = pi >= 0 ? args[pi + 1] : undefined; let from = 'arg';
+    if (fi >= 0) { const f = args[fi + 1]; if (!f || f.startsWith('--')) die('usage: ca plan update <id> --patch-file <file>', 2); try { raw = fs.readFileSync(f, 'utf8'); } catch { die(`cannot read --patch-file ${f}`, 2); } from = 'file'; }
+    else if (raw === '-') { try { raw = fs.readFileSync(0, 'utf8'); } catch { die('cannot read the patch from stdin', 2); } from = 'stdin'; }
+    const skip = new Set([0]); if (pi >= 0) { skip.add(pi); skip.add(pi + 1); } if (fi >= 0) { skip.add(fi); skip.add(fi + 1); }
+    const q = args.filter((a, i) => !skip.has(i) && !a.startsWith('--'))[0];
+    if (!q || raw === undefined) die('usage: ca plan update <id> --patch <json> | --patch-file <file> | --patch -', 2);
+    let patch; try { patch = JSON.parse(raw); } catch { die(`--patch (${from}) is not valid JSON: ${oneLine(raw, 80)}`, 2); }
+    validatePatch(patch);
+    const r = findPlan(q); if (!r) die(`no registered plan matches "${q}"; ca plan list`, 2);
+    const res = withPlanLock(r.file, () => {
+      const p = readJSON(r.file);
+      if (!p || typeof p !== 'object' || Array.isArray(p)) die(`cannot read plan JSON at ${r.file}`, 2);
+      if (p.removed === true) die(`plan ${r.id} was removed; ca plan list`, 2);
+      if (planClosed(p)) die(`plan ${r.id} is closed; reopen a plan before editing it`, 1);
+      Object.assign(p, patch);
+      p.revision = (Number(p.revision) || 0) + 1;
+      p.updatedAt = new Date().toISOString();
+      writeAtomic(r.file, JSON.stringify(p, null, 2) + '\n');
+      return p;
+    });
+    return console.log(`plan ${r.id} updated (revision ${res.revision})`);
   }
   if (sub === 'close' || sub === 'rm') {
     const ri = args.indexOf('--reason'); const reason = ri >= 0 ? args.slice(ri + 1).join(' ').trim() : '';
     const q = args.slice(1, ri >= 0 ? ri : undefined).find((a) => !a.startsWith('--'));
     const r = findPlan(q); if (!r) die(`no registered plan matches ${q || '(latest)'}; ca plan list`, 2);
-    if (sub === 'rm') { fs.rmSync(path.join(PLANS, `${r.id}.json`), { force: true }); return console.log(`plan ${r.id} unregistered (its plan.json is kept: ${r.file})`); }
+    if (sub === 'rm') {
+      // rm kills and deletes the plan's lanes and marks the plan removed; --keep-lanes only unregisters.
+      if (args.includes('--keep-lanes')) { fs.rmSync(path.join(PLANS, `${r.id}.json`), { force: true }); return console.log(`plan ${r.id} unregistered (its plan.json is kept: ${r.file})`); }
+      const res = await removePlan(r, { by: 'ca plan rm' });
+      if (res.error) die(res.error, res.code || 1);
+      return console.log(`plan ${r.id} removed; lanes [${res.lanes.join(', ') || '-'}]; killed [${res.killed.join(', ') || '-'}]`);
+    }
     const v = planView(r); if (v.waves.some((w) => w.lanes.some((l) => l.running))) die(`plan ${r.id} still has a running lane; ca stop it first`, 1);
     const p = readJSON(r.file) || {}; const unstarted = new Set(v.waves.flatMap((w) => w.lanes).filter((l) => l.health === 'planned').map((l) => l.task));
     for (const pl of p.lanes || []) if (unstarted.has(pl.task)) pl.dropped = true;
@@ -1647,15 +2090,39 @@ async function cmdPlan(args) {
   console.log(`plan ${id} registered: ${p.title || p.goal || f}${u ? '. Dashboard: ' + u : ''}`);
 }
 function cmdNote(args) {
-  const nowFlag = args.includes('--now'); const pi = args.indexOf('--plan'); const pq = pi >= 0 ? args[pi + 1] : null;
-  const text = args.filter((a, i) => a !== '--now' && !(pi >= 0 && (i === pi || i === pi + 1))).join(' ').trim();
-  if (!text) die('usage: ca note [--now] [--plan <id>] <text>', 2);
-  const all = plans(); const r = pq ? all.find((x) => x.id === pq || x.id.includes(pq)) : all[0];
-  if (!r) die('no plan registered (ca plan <repo>/tasks/plan.json)', 2);
-  const p = readJSON(r.file) || {};
-  if (nowFlag) p.now = text; else (p.decisions ||= []).push({ at: new Date().toISOString(), text });
-  fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n');
-  console.log(`${nowFlag ? 'now' : 'decision'} noted on plan ${r.id}`);
+  const hasNow = args.includes('--now');
+  const pi = args.indexOf('--plan'); const pq = pi >= 0 ? args[pi + 1] : null;
+  if (pi >= 0 && (!pq || pq.startsWith('--'))) die('usage: ca note [--now] [--plan <id>] [--phase <phase>] <text>', 2);
+  const hi = args.indexOf('--phase'); const phase = hi >= 0 ? args[hi + 1] : null;
+  if (hi >= 0 && (!phase || phase.startsWith('--'))) die(`--phase needs one of: ${LEAD_PHASES.join(', ')}`, 2);
+  if (phase !== null && !LEAD_PHASES.includes(phase)) die(`unknown phase "${phase}"; use one of: ${LEAD_PHASES.join(', ')}`, 2);
+  const skip = new Set();
+  if (hasNow) skip.add(args.indexOf('--now'));
+  if (pi >= 0) { skip.add(pi); skip.add(pi + 1); }
+  if (hi >= 0) { skip.add(hi); skip.add(hi + 1); }
+  const text = args.filter((a, i) => !skip.has(i)).join(' ').trim();
+  if (!text) die('usage: ca note [--now] [--plan <id>] [--phase <phase>] <text>', 2);
+  // Resolve like every other plan command: an explicit id goes through findPlan (ambiguous ids are refused,
+  // never guessed); a bare note defaults to the newest plan. A closed or removed plan is never written to.
+  const r = pq ? findPlan(pq) : plans()[0];
+  if (!r) die(`no registered plan matches "${pq || '(latest)'}"; ca plan list`, 2);
+  const pre = readJSON(r.file);
+  if (pre && pre.removed === true) die(`plan ${r.id} was removed; ca plan list`, 2);
+  if (pre && planClosed(pre)) die(`plan ${r.id} is closed; reopen a plan before noting on it`, 1);
+  const at = new Date().toISOString();
+  withPlanLock(r.file, () => {
+    const p = readJSON(r.file);
+    if (!p || typeof p !== 'object' || Array.isArray(p)) die(`cannot read plan JSON at ${r.file}`, 2);
+    if (phase !== null) p.phase = phase;
+    if (hasNow || phase !== null) {
+      p.now = text; p.nowAt = at;
+      pushActivity(p, { at, text, ...(phase !== null ? { phase } : {}) });
+    } else {
+      (p.decisions ||= []).push({ at, text });
+    }
+    writeAtomic(r.file, JSON.stringify(p, null, 2) + '\n');
+  });
+  console.log(`${hasNow ? 'now' : 'decision'} noted on plan ${r.id}`);
 }
 // ca lead-tokens [--plan id] [--session file]         point the plan at the lead's transcript, print totals
 // ca lead-tokens --set <model> --input N --output N [--cache-read N] [--cache-write N] [--add]  report numbers
@@ -1747,7 +2214,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0, time: laneTime(s, isAlive),
-    actions, suggest, why, bucket, bucketWhy, project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
+    actions, suggest, why, bucket, bucketWhy, status: laneStatusOf(l), project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.
@@ -1845,27 +2312,99 @@ function planTime(p, r, planned) {
   }
   return { startedAt, endedAt, live, totalMs, segments, work: { totalMs: workTotal, byPhase }, lanes: lanesArr };
 }
+// A lane status key (from laneView/laneStatusOf), falling back to the raw result for a lane that
+// never got one. Plan and wave badges read these so the new results show up correctly.
+const statusKey = (x) => (x && x.status && x.status.key) || (x && x.result) || '';
+// Settled: nothing is left for a human (the new Verified, a plain Done, or an acked Handled lane).
+const settledKey = (k) => k === 'verified' || k === 'done' || k === 'handled';
+// Anything a human must look at, plus the ended-without-a-result states the old badge read the same way.
+const attnKey = (k) => ['checks failing', 'failed', 'unverified', 'stopped', 'killed'].includes(k);
+// One glance state per plan, so a person across the room can tell at once whether the work is
+// running, done, failed or waiting on them. Pure: it reads only the plan view it is handed.
+const QUIET_MS = 15 * 60e3;
+const GLANCE_WORD = { working: 'Working', 'needs-you': 'Needs you', failed: 'Failed', done: 'Done', quiet: 'Check Claude', idle: 'Idle' };
+// The tone and glyph a glance state maps to (status contract part 2): the plan badge is exactly the
+// glance word, tone and glyph, so every pill in both views shows the same thing (never a page guess).
+const GLANCE_TONE = { working: 'run', 'needs-you': 'warn', failed: 'bad', done: 'done', quiet: 'warn', idle: 'idle' };
+const GLANCE_GLYPH = { working: GLYPHS.working, 'needs-you': GLYPHS['needs-you'], failed: GLYPHS.failed, done: GLYPHS.done, quiet: '?', idle: GLYPHS.idle };
+const glanceBad = (k) => k === 'failed' || k === 'checks failing' || k === 'killed';
+const glanceDur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
+function glanceOf(view) {
+  const lanes = (view.waves || []).flatMap((w) => w.lanes || []).filter((x) => x.result !== 'dropped');
+  const lead = view.lead || {};
+  const phase = lead.phase || null;
+  const age = typeof lead.age === 'number' ? lead.age : null;
+  const act = Array.isArray(lead.activity) && lead.activity.length ? lead.activity[lead.activity.length - 1] : null;
+  const lastText = act && act.text ? act.text : '';
+  const leadMs = lead.updatedAt ? Date.parse(lead.updatedAt) : 0;
+  const ms = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : (Number.isFinite(Date.parse(v || '')) ? Date.parse(v) : 0));
+  const laneMs = Math.max(0, ...lanes.map((x) => Math.max(ms(x.finishedAt), ms(x.startedAt))));
+  const atIso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null);
+  const out = (state, detail, at = null) => ({ state, word: GLANCE_WORD[state], detail: oneLine(detail || '', 89), at });
+  // a. the plan is closed: a bad lane makes it failed, otherwise done. The detail is the close reason
+  // without a leading "Closed:" or "Done:" (status contract part 2).
+  if (view.closed) {
+    const bad = lanes.find((x) => glanceBad(statusKey(x)));
+    if (bad) return out('failed', `${bad.task} failed: ${statusKey(bad)}`);
+    const nowTxt = String(view.now || '');
+    const reason = /^\s*(Closed|Done|Plan closed)\b/i.test(nowTxt) ? nowTxt.replace(/^\s*(Closed|Done|Plan closed)\s*:\s*/i, '').trim() : '';
+    return out('done', reason || `All ${(view.counts && view.counts.total) || lanes.length} lanes finished`, atIso(Math.max(leadMs, laneMs)));
+  }
+  // b. the lead ended its turn on a question for the human.
+  if (phase === 'asking') return out('needs-you', `Claude is asking: ${lastText || view.now || ''}`, lead.nowAt || lead.updatedAt || null);
+  // c. the lead reports done.
+  if (phase === 'done') return out('done', lastText || 'Claude is done', atIso(Math.max(leadMs, laneMs)));
+  // d. a lane is running.
+  if (view.counts && view.counts.running > 0) {
+    const r = lanes.find((x) => x.running);
+    let detail = `${view.counts.running} of ${view.counts.total} lanes running`;
+    if (r && r.progress && r.progress.total > 0) detail += `, step ${r.progress.done}/${r.progress.total}`;
+    return out('working', detail);
+  }
+  // e. a fresh lead phase means the lead is still working.
+  if (age !== null && age < QUIET_MS && ['planning', 'building', 'waiting', 'verifying'].includes(phase)) return out('working', `Claude is ${phase}`);
+  // f. a lane needs a human: a bad one is failed, any other attention lane is needs-you.
+  const attn = lanes.filter((x) => attnKey(statusKey(x)));
+  if (attn.length) {
+    const bad = attn.find((x) => glanceBad(statusKey(x)));
+    if (bad) return out('failed', `${bad.task} failed: ${statusKey(bad)}`);
+    const a = attn[0];
+    return out('needs-you', `${a.task}: ${(a.status && a.status.label) || statusKey(a)}`);
+  }
+  // g. lanes or a lead phase exist but nothing is fresh or needs a human.
+  if (lanes.length || phase) {
+    return out('quiet', age === null ? 'No lead update yet; Claude may be waiting on you' : `No lead update for ${glanceDur(age)}; Claude may be waiting on you`);
+  }
+  // h. nothing to look at.
+  return out('idle', '');
+}
 function planView(r) {
   const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
-  const planned = (p.lanes || []).map((pl) => {
+  // A lane entry marked removed: true was deleted with its lane or plan: it must never come back as "planned".
+  const planned = (p.lanes || []).filter((pl) => pl && !pl.removed).map((pl) => {
     const repo = path.resolve(base, pl.repo || '.'); const id = laneId(repo, pl.task); const l = reg.get(id);
     let bf = path.join(repo, 'tasks', `${pl.task}.md`);
     if (!fs.existsSync(bf)) bf = path.join(base, 'tasks', `${pl.task}.md`);
     const old = l ? null : laneFromLog(path.join(base, 'tasks', `${pl.task}.lane.log`), { id, task: pl.task, repo, dir: path.join(repo, 'tasks', `${pl.task}.lane`) }, bf);
     const v = l ? laneView(l) : old ? { ...laneView(old), archived: true } : { id, task: pl.task, repo, health: 'planned', phase: 'planned', running: false, result: '',
+      status: { key: 'planned', label: 'Planned', tone: 'idle', reason: 'planned, not started', attention: false, steps: 'live', glyph: GLYPHS.working },
       progress: { done: 0, total: briefSteps(bf).length, current: null } };
     // "dropped": true marks a planned lane the lead decided not to run; it never counts as open work.
-    const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
+    const d = pl.dropped && v.health === 'planned' ? { health: 'dropped', phase: 'dropped', result: 'dropped',
+      status: { key: 'dropped', label: 'Dropped', tone: 'idle', reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started', attention: false, steps: 'hide', glyph: GLYPHS.idle },
+      reason: typeof pl.dropped === 'string' ? pl.dropped : 'dropped by the lead, never started' } : {};
     if (pl.kind && ['code', 'art', 'review', 'docs'].includes(String(pl.kind).toLowerCase())) v.kind = String(pl.kind).toLowerCase(); // plan override
     return { ...v, ...d, plan: { model: pl.model || '', why: pl.why || '', files: pl.files || [], briefExists: fs.existsSync(bf) } };
   });
   const byTask = new Map(planned.map((x) => [x.task, x]));
   // "continues": "<task>" in a plan lane: the older lane was picked up by this one, so it reads as continued, not failed.
-  for (const pl of p.lanes || []) {
+  for (const pl of (p.lanes || []).filter((x) => x && !x.removed)) {
     const old = pl.continues && byTask.get(pl.continues), nu = byTask.get(pl.task);
     if (old && nu && old.result && old.result !== 'done') {
-      Object.assign(old, { health: 'continued', result: 'continued', continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
+      Object.assign(old, { health: 'continued', result: 'continued',
+        status: { key: 'continued', label: 'Continued', tone: 'idle', reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}`, attention: false, steps: 'hide', glyph: GLYPHS.idle },
+        continuedBy: nu.id, reason: `continued in ${pl.task}${old.reason ? ' after ' + old.reason : ''}` });
       // One agent, one station: the successor carries the earlier run(s); views show them as history, not as another lane.
       nu.continues = [...(old.continues || []), { id: old.id, task: old.task, reason: old.reason, commits: old.commits, progress: old.progress, elapsed: old.elapsed }];
       nu.runs = (nu.runs || 1) + (old.runs || 1);
@@ -1875,22 +2414,24 @@ function planView(r) {
   const waves = (p.waves && p.waves.length ? p.waves : [{ name: 'Lanes', lanes: planned.map((x) => x.task) }]).map((w) => {
     const all = (w.lanes || []).map((t) => byTask.get(t)).filter(Boolean);
     const ls = all.filter((x) => !x.folded); const act = ls.filter((x) => x.result !== 'dropped');
-    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => ['done', 'needs review'].includes(x.result)) ? 'done' : act.some((x) => x.running) ? 'running'
-      : act.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : act.some((x) => x.result === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
+    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => settledKey(statusKey(x))) ? 'done' : act.some((x) => x.running) ? 'running'
+      : act.some((x) => attnKey(statusKey(x))) ? 'attention' : act.some((x) => statusKey(x) === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
     return { name: w.name, note: w.note || w.after || '', status: st, lanes: ls, folded: all.length && !ls.length };
   }).filter((w) => !w.folded).map(({ folded, ...w }) => w); // a wave whose lanes all continued elsewhere is history, not a stage
   // The plan badge comes from what the lanes really do, never only from the hand-written status: a plan whose
   // lead said "running" but has no running lane reads as waiting (with how long), so it never looks stuck.
   const allL = waves.flatMap((w) => w.lanes); const live = allL.filter((x) => x.result !== 'dropped');
-  const fin = (x) => ['done', 'needs review'].includes(x.result);
+  // Done counts every settled lane (verified, done, or handled/merged by the lead), so a closed plan whose lanes the lead merged never reads "1/3 lanes done" under a Done badge.
+  const fin = (x) => settledKey(statusKey(x)) || ['done', 'needs review'].includes(x.result);
   const counts = { total: live.length, done: live.filter(fin).length, running: live.filter((x) => x.running).length,
     notStarted: live.filter((x) => x.health === 'planned').length, dropped: allL.length - live.length };
   const ts = (t) => { const n = typeof t === 'number' ? t : new Date(t || 0).getTime(); return Number.isFinite(n) ? n : 0; };
   const lastActivity = Math.max(r.mtime || 0, ...allL.map((x) => Math.max(ts(x.finishedAt), ts(x.startedAt))));
   const closed = /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || '');
+  const allSettled = live.length > 0 && live.every((x) => settledKey(statusKey(x)));
   const state = counts.running ? 'running' : closed ? (counts.done === counts.total ? 'done' : 'closed')
-    : live.some((x) => ['failed', 'stopped', 'killed'].includes(x.result)) ? 'attention' : live.some((x) => x.result === 'paused') ? 'paused'
-    : counts.total && counts.done === counts.total ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
+    : live.some((x) => attnKey(statusKey(x))) ? 'attention' : live.some((x) => statusKey(x) === 'paused') ? 'paused'
+    : allSettled ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
   const idle = Date.now() - lastActivity; const dur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
   const bits = [`${counts.done}/${counts.total} lanes done`];
   if (counts.running) bits.push(`${counts.running} running`);
@@ -1915,10 +2456,24 @@ function planView(r) {
   const tokens = sumTok([sumTokens(planned.map((x) => x.tokens)), ...Object.values(leadModel).filter((e) => e.source !== 'none')]);
   tokens.complete = missing.length === 0; tokens.missing = missing; tokens.count = Object.keys(tokensByModel).length;
   const time = planTime(p, r, planned);
-  return { id: r.id, file: r.file, updatedAt: r.mtime, time, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
-    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead: { tokensByModel: leadModel },
+  // The lead surface: phase, revision and bounded activity, plus the age of the last lead update. Freshness
+  // is the newest of updatedAt (an update) and nowAt (a --now note), so a note refreshes it too. A plan with
+  // neither reports updatedAt/age as null (never a false age), so a legacy plan is not mistaken for stale.
+  const atMs = (v) => (typeof v === 'string' && Number.isFinite(Date.parse(v)) ? Date.parse(v) : 0);
+  const freshMs = Math.max(atMs(p.updatedAt), atMs(p.nowAt)) || null;
+  const lead = { tokensByModel: leadModel, phase: typeof p.phase === 'string' ? p.phase : null,
+    revision: Number(p.revision) || 0, updatedAt: freshMs ? new Date(freshMs).toISOString() : null, nowAt: typeof p.nowAt === 'string' ? p.nowAt : null,
+    age: freshMs ? Date.now() - freshMs : null,
+    activity: Array.isArray(p.leadActivity) ? p.leadActivity.slice(-ACTIVITY_MAX) : [] };
+  const view = { id: r.id, file: r.file, updatedAt: r.mtime, time, title: p.title || r.id, goal: p.goal || '', leadName: p.lead || 'Claude', status: p.status || '', now: p.now || '',
+    state, counts, summary: bits.join(' · '), lastActivity, closed: state === 'done' || state === 'closed', tokens, tokensBy, tokensByModel, lead,
     next: (p.next || []).map((x) => (typeof x === 'string' ? { text: x, done: false } : { text: x.text, done: !!x.done })),
     decisions: (p.decisions || []).slice(-30), risks: p.risks || [], waves };
+  view.glance = glanceOf(view);
+  // The one badge every plan surface shows (status contract part 2): exactly the glance word, tone and
+  // glyph. The views render plan.badge, never a word they compute themselves.
+  view.badge = { word: view.glance.word, tone: GLANCE_TONE[view.glance.state] || 'idle', glyph: GLANCE_GLYPH[view.glance.state] || GLANCE_GLYPH.idle };
+  return view;
 }
 function laneDetail(l) {
   const s = l.s; const rd = (f) => { try { return fs.readFileSync(path.join(l.dir, f), 'utf8'); } catch { return ''; } };
@@ -1987,6 +2542,18 @@ function cmdDash(args) {
         return json({ counts, lanes: ls });
       }
       if (u.pathname === '/api/plans') return json(plans().map(planView).sort((a, b) => (a.closed - b.closed) || (b.lastActivity - a.lastActivity)));
+      const pm = u.pathname.match(/^\/api\/plans\/(.+)\/remove$/);
+      if (pm) {
+        // Exact registered-plan id only (ids may carry ~ and .): decode the segment, never die().
+        if (req.method !== 'POST') return json({ error: 'use POST /api/plans/<id>/remove' }, 405);
+        const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+        const pid = decodeURIComponent(pm[1]);
+        const pr = plans().find((x) => x.id === pid);
+        if (!pr) return json({ error: `no registered plan has id "${pid}"` }, 404);
+        const res = await removePlan(pr, { by: 'dashboard' });
+        if (res.error) return json({ error: res.error }, res.code || 500);
+        return json(res);
+      }
       if (u.pathname === '/api/doctor') return json({ checks: (await doctorData()).checks });
       if (u.pathname === '/api/update') {
         // The update pill: the cached check plus the running dash pid. A stale cache refreshes in
@@ -2026,7 +2593,7 @@ function cmdDash(args) {
         if (!v) return json({ error: 'auth did not return JSON' }, 500);
         return json({ ready: !!v.ready, url: v.url || '' });
       }
-      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack)$/);
+      const m = u.pathname.match(/^\/api\/lane\/([^/]+)\/(log|summary|detail|steer|stop|attach|kick|resume|ack|remove)$/);
       if (m) {
         const q = decodeURIComponent(m[1]); const all = lanes();
         const pr = pickOne(all, q, (x) => x.id, (x) => x.task);
@@ -2057,6 +2624,12 @@ function cmdDash(args) {
           return json({ ok: true, dry: !!r.dry, argv: r.argv, message: r.message });
         }
         if (req.method === 'POST' && m[2] === 'stop') { fs.writeFileSync(path.join(l.dir, 'STOP'), String(now())); return json({ ok: true }); }
+        if (req.method === 'POST' && m[2] === 'remove') {
+          const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
+          const res = await removeLane(l, { purge: rb.body.keepLogs !== true, by: 'dashboard' });
+          if (res.error) return json({ error: res.error }, res.code || 500);
+          return json(res);
+        }
         if (req.method === 'POST' && m[2] === 'ack') {
           // Mark a finished lane seen (or unseen again) for this finishedAt; a later finish is unseen anew.
           const rb = await readBody(req); if (rb.error) return json(rb.error, rb.code);
@@ -2096,7 +2669,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), workspace: () => cmdWorkspace(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); await updateNotice(args); process.exit(0); }
 if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
   let v = '0.0.0'; try { v = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version || v; } catch {}

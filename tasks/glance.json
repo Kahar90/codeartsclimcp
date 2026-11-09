@@ -1,0 +1,114 @@
+{
+  "title": "Glance status: done, failed or needs you at a glance",
+  "goal": "From across the room, tell if the work is running, done, failed or waiting on the human, in both views, keeping the Pixel Workshop look.",
+  "lead": "Claude Opus 5.5",
+  "status": "done",
+  "phase": "done",
+  "now": "Closed: Done: glance status (both views), asking phase, repo writable probe, blocked lanes fail fast, ca wait --any, install-local; 0.4.0 installed and pushed",
+  "waves": [
+    {
+      "name": "Wave 1 - Glance",
+      "lanes": [
+        "glance-core",
+        "glance-office",
+        "glance-lanes"
+      ]
+    },
+    {
+      "name": "Wave 2 - Write guard",
+      "lanes": [
+        "write-guard"
+      ]
+    }
+  ],
+  "lanes": [
+    {
+      "task": "glance-core",
+      "repo": "../codeartsclimcp-wt-glance-core",
+      "why": "One glance state per plan on /api/plans, plus the asking lead phase",
+      "files": [
+        "runner/ca.mjs",
+        "runner/mcp.mjs",
+        "templates/claude-skill.md"
+      ]
+    },
+    {
+      "task": "glance-office",
+      "repo": "../codeartsclimcp-wt-glance-office",
+      "why": "Hanging status sign, room edge light, lead bubble, tab and favicon",
+      "files": [
+        "runner/office.html"
+      ]
+    },
+    {
+      "task": "glance-lanes",
+      "repo": "../codeartsclimcp-wt-glance-lanes",
+      "why": "Glance banner, rail dots, tab, favicon and notifications",
+      "files": [
+        "runner/dash.html"
+      ]
+    },
+    {
+      "task": "write-guard",
+      "repo": "../codeartsclimcp-wt-write-guard",
+      "why": "Catch unwritable repos before a lane starts and end a lane at once when commits are blocked; ca wait --any",
+      "files": [
+        "runner/ca.mjs",
+        "runner/mcp.mjs",
+        "templates/claude-skill.md"
+      ]
+    }
+  ],
+  "next": [
+    "Merge Office and Lanes glance lanes, run every check",
+    "Run write-guard lane, merge, run checks",
+    "Bump version, install locally, regenerate skill, restart dashboard",
+    "Add scripts/install-local.mjs and CLAUDE.md rule",
+    "Push main to origin"
+  ],
+  "decisions": [
+    {
+      "at": "2026-11-08",
+      "text": "Server computes one glance per plan so both views agree; new lead phase asking marks a question for the human."
+    },
+    {
+      "at": "2026-11-08T10:53:15.444Z",
+      "text": "Resumed codeartsclimcp-wt-glance-core--glance-core from the dashboard"
+    },
+    {
+      "at": "2026-11-08T11:15:19.103Z",
+      "text": "Resumed codeartsclimcp-wt-glance-office--glance-office from the ca resume"
+    },
+    {
+      "at": "2026-11-08T11:15:19.197Z",
+      "text": "Resumed codeartsclimcp-wt-glance-lanes--glance-lanes from the ca resume"
+    },
+    {
+      "at": "2026-11-08T12:15:20.777Z",
+      "text": "Plan closed: Done: glance status (both views), asking phase, repo writable probe, blocked lanes fail fast, ca wait --any, install-local; 0.4.0 installed and pushed."
+    }
+  ],
+  "risks": [
+    "Quiet heuristic (15 min without lead update) can fire during a long silent verification"
+  ],
+  "revision": 2,
+  "updatedAt": "2026-11-08T11:48:06.820Z",
+  "nowAt": "2026-11-08T12:15:20.546Z",
+  "leadActivity": [
+    {
+      "at": "2026-11-08T11:14:25.496Z",
+      "text": "Blocked by Windows Controlled Folder Access: run allow-codearts-cfa.ps1 elevated, then the Office and Lanes lanes resume.",
+      "phase": "asking"
+    },
+    {
+      "at": "2026-11-08T11:15:22.601Z",
+      "text": "Folder access fixed; Office and Lanes lanes resumed from their wip commits. Core glance work is committed.",
+      "phase": "building"
+    },
+    {
+      "at": "2026-11-08T12:15:20.546Z",
+      "text": "Glance status and write guard merged, released as 0.4.0, installed locally and pushed to origin.",
+      "phase": "done"
+    }
+  ]
+}

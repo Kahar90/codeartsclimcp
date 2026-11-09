@@ -114,7 +114,14 @@
     var lower = h.toLowerCase();
     if (!h) h = result || 'planned';
     if (/^running/.test(lower)) return { key: 'run', label: 'Running', raw: h };
+    if (lower === 'verified') return { key: 'done', label: 'Verified', raw: h };
     if (lower === 'done') return { key: 'done', label: 'Done', raw: h };
+    // The status model (runner/controls.mjs laneOutcome): a finished lane whose checks could not run, one
+    // whose checks really failed, and one the lead already acked (Merged/Handled) each read on their own.
+    if (lower === 'unverified') return { key: 'warn', label: 'Unverified', raw: h };
+    if (lower === 'checks failing' || lower === 'checks-failing') return { key: 'bad', label: 'Checks failing', raw: h };
+    if (lower === 'handled') return { key: 'idle', label: 'Handled', raw: h };
+    if (lower === 'merged') return { key: 'done', label: 'Merged', raw: h };
     if (lower === 'thinking' || lower === 'quiet') return { key: 'warn', label: h.charAt(0).toUpperCase() + h.slice(1), raw: h };
     if (lower === 'needs review') return { key: 'warn', label: 'Needs review', raw: h };
     // paused: the lane hit its time limit (a safeguard, resumable); continued: a later lane picked it up.
@@ -128,6 +135,13 @@
     if (lower === 'dropped') return { key: 'idle', label: 'Dropped', raw: h };
     if (lower === 'verifying') return { key: 'warn', label: 'Verifying', raw: h };
     return { key: 'idle', label: h.charAt(0).toUpperCase() + h.slice(1), raw: h };
+  }
+  // The one status for a lane, shown the same way as the CLI, MCP, status and summary: the server puts a
+  // { key, label, tone, reason } object on the lane (laneOutcome); older payloads and fixtures fall back
+  // to the health/result pair so every badge keeps working.
+  function laneStatus(l) {
+    if (l && l.status && l.status.key) return l.status;
+    return status(l && l.health, l && l.result);
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function badge(st) { return '<span class="ca-badge s-' + st.key + '">' + esc(st.label) + '</span>'; }
@@ -482,7 +496,7 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initUpdate); else initUpdate();
   }
 
-  window.CAUI = { status: status, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); },
+  window.CAUI = { status: status, laneStatus: laneStatus, esc: esc, badge: badge, shortModel: function (m) { return String(m || '').replace(/^huaweicloud-maas\//, 'codearts/'); },
     tokenTotal: tokenTotal, fmtTokens: fmtTokens, tokenDetail: tokenDetail, tokenSplit: tokenSplit, ACTIONS: ACTIONS, QUICK_STEERS: QUICK_STEERS, control: control,
     place: place, track: track, toast: toast, copyText: copyText, update: initUpdate,
     fmtDur: fmtDur, timeCard: timeCard, timeRowsByPhase: timeRowsByPhase };

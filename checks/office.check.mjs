@@ -6,6 +6,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chromePath = findChrome();
 if (!chromePath) { console.log('SKIP office: no Chrome found (set CHROME_PATH)'); process.exit(0); }
@@ -18,9 +19,10 @@ const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash
 const base = `http://127.0.0.1:${dashPort}`;
 const profile = chromeProfileDir('office');
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
-const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} };
-process.on('exit', cleanup);
-const timer = setTimeout(() => { console.log('FAIL timeout after 120 s'); cleanup(); process.exit(1); }, 120000);
+let sock = null;
+const finish = (code) => settle({ socket: sock, children: [chrome, dash], code });
+guard({ children: [chrome, dash] });
+const timer = setTimeout(() => { console.log('FAIL timeout after 120 s'); finish(1); }, 120000);
 try {
   let up = false; for (let i = 0; i < 40 && !up; i++) { await wait(250); try { up = (await fetch(base + '/api/lanes')).ok; } catch {} }
   check('ca dash starts', up);
@@ -35,7 +37,7 @@ try {
   check('unknown lane gives 404 and the dashboard stays up', stale.status === 404 && alive, `${stale.status} alive=${alive}`);
 
   let ws; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); const p = t.find((x) => x.type === 'page'); if (p) ws = p.webSocketDebuggerUrl; } catch {} }
-  const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+  sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
   let id = 0; const pending = new Map(); const errors = [];
   sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
@@ -179,7 +181,9 @@ try {
   s = await st();
   check('narrow mode below 700 px', (await ev('document.body.classList.contains("narrow")')) === true);
   check('stage fills the width at 390x844', near(s.stage.w, 390), `${s.stage.w}x${s.stage.h}`);
-  check('narrow stage shows the whole room at 16:9', near(s.stage.h, (s.stage.w * 720) / 1280), `${s.stage.w}x${s.stage.h}`);
+  const nroom = await ev('(function(){var r=document.getElementById("room").getBoundingClientRect(),g=document.getElementById("stage").getBoundingClientRect();return {x:r.x-g.x,y:r.y-g.y,w:r.width,h:r.height};})()');
+  check('narrow room spans the stage height and covers its width', near(nroom.h, s.stage.h) && nroom.x <= 1 && nroom.x + nroom.w >= s.stage.w - 1, JSON.stringify(nroom));
+  check('narrow stage is between the full-room and 4:3 heights', s.stage.h >= Math.floor((s.stage.w * 720) / 1764) && s.stage.h <= Math.ceil(s.stage.w * 0.75) + 1, `${s.stage.w}x${s.stage.h}`);
   const listTop = await ev('Math.round(document.getElementById("stlist").getBoundingClientRect().top)');
   check('station list starts right below the narrow stage', Math.abs(listTop - (s.stage.y + s.stage.h)) < 24, `list ${listTop} stage bottom ${s.stage.y + s.stage.h}`);
   check('nameplates hidden when narrow', s.stations.every((x) => x.plate.w === 0));
@@ -329,7 +333,8 @@ try {
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
-clearTimeout(timer); cleanup();
+clearTimeout(timer);
 console.log(results.join('\n'));
 const fails = results.filter((r) => r.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+await finish(fails ? 1 : 0);

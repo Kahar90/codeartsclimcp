@@ -56,10 +56,11 @@ const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = [
   'You are the lead over CodeArts build lanes: the lanes are the workers.',
   'Run ca_doctor first and fix every fail row, write one brief per lane with ca_init, then start it with ca_lane_start.',
+  'Register the plan you are working to with ca_plan when you start, and keep it current: ca_plan_update for a changed goal, next tasks or lanes, and ca_note (now true, with phase planning, building, waiting, verifying, asking or done) for a meaningful transition or progress. Publish real scope changes and transitions, not a heartbeat, and never paste private reasoning or chat.',
   'Block on ca_wait instead of polling ca_status; exit 124 means still running, call it again.',
   'When a lane ends, read ca_summary, judge the reviewer findings against the brief and verify the work yourself by running the repo checks on the branch.',
   'Steer a running lane with ca_steer, kick a stuck turn with ca_kick, stop it with ca_stop, and continue a paused, failed, stopped or DEAD lane with ca_resume.',
-  'The human watches the dashboard at http://127.0.0.1:4777 (Office view at /office).',
+  'The human watches the dashboard at http://127.0.0.1:4777 (Office view at /office), where the plan shows your phase, latest activity and how long ago you last updated it.',
 ].join(' ');
 
 // Append one sentence when a newer codearts-lanes is known, so the agent can tell the user once.
@@ -139,6 +140,13 @@ const needNum = (v, name) => {
   return String(Math.round(n));
 };
 const optStr = (a, name) => (a[name] === undefined || a[name] === null ? [] : [needStr(a[name], name)]);
+// A `--flag value` pair when the value is present, nothing otherwise (for optional string flags).
+const optStrPair = (flag, v) => (v === undefined || v === null || v === '' ? [] : [flag, needStr(v, flag.replace(/^--/, ''))]);
+// The patch must be a plain object: JSON.stringify of anything else is a client error, not a bad argv.
+const needPatch = (v) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new ArgError('patch');
+  return v;
+};
 const needLanes = (v) => {
   if (!Array.isArray(v) || v.length < 1 || !v.every((x) => typeof x === 'string' && x.trim())) throw new ArgError('lanes');
   return v.map((x) => x.trim());
@@ -173,6 +181,24 @@ const TOOLS = [
       ...(a.force ? ['--force'] : [])],
   },
   {
+    name: 'ca_workspace',
+    description: 'Prepare a parallel lane workspace as a LOCAL CLONE at ../<repo-name>-wt-<task> on a new branch lane/<task> (ca workspace), or merge that branch back with land: true (ca workspace --land, which refuses a dirty main tree and removes the clone). Use a clone, never git worktree add: a worktree keeps its git dir in the main repo, outside the lane folder, so the CodeArts sandbox refuses every commit ("Permission denied"). Start the lane in the printed workspace folder.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'path of the main repo the lane works from' },
+        task: { type: 'string', description: 'task name; the clone is <repo-name>-wt-<task> and the branch is lane/<task>' },
+        from: { type: 'string', description: 'branch to start lane/<task> from (default: the repo current branch)' },
+        land: { type: 'boolean', description: 'true: fetch lane/<task> from the clone into repo and merge it (--no-ff), then delete the clone; refuses on a dirty main tree' },
+      },
+      required: ['repo', 'task'],
+    },
+    ok: [0],
+    timeout: 120000,
+    build: (a) => ['workspace', ...(a.land ? ['--land'] : []), needStr(a.repo, 'repo'), needStr(a.task, 'task'),
+      ...optStrPair('--from', a.from)],
+  },
+  {
     name: 'ca_lane_start',
     description: 'Start a lane in the background (ca lane <repo> <task> --detach): a CodeArts worker reads the brief, builds, commits each step and runs the CHECK lines itself. Returns at once; follow it with ca_wait. Use it only after ca_doctor is clean and the brief at tasks/<task>.md exists.',
     inputSchema: {
@@ -189,7 +215,7 @@ const TOOLS = [
   },
   {
     name: 'ca_status',
-    description: 'Snapshot of all lanes as JSON: health, phase, elapsed, step progress, tokens, result, verdict. Use it to see what exists and what finished; to wait for a lane, block on ca_wait instead of polling this.',
+    description: 'Snapshot of all lanes as JSON: status (key, label, tone, reason), health, phase, elapsed, step progress, tokens, result, verdict. status.label is the one word a person sees (Verified, Unverified, Checks failing, Merged, ...); use it instead of reading result. Use it to see what exists and what finished; to wait for a lane, block on ca_wait instead of polling this.',
     inputSchema: { type: 'object', properties: { all: { type: 'boolean', description: 'include lanes that finished more than 24 h ago' } }, required: [] },
     ok: [0],
     timeout: 60000,
@@ -197,12 +223,14 @@ const TOOLS = [
   },
   {
     name: 'ca_wait',
-    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). Returns the per-lane results plus exit (worst lane: 0 done, 1 failed or stopped, 3 keys missing or rejected (run ca auth), 4 needs review, 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). With any: true it returns as soon as one lane has a result (the finished lanes in lanes, the rest in running), so an early failure is seen at once when lanes run in parallel. Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
     inputSchema: {
       type: 'object',
       properties: {
         lanes: { type: 'array', items: { type: 'string' }, description: 'lane ids or task names to wait for (as in ca_status)' },
         timeout_s: { type: 'number', description: 'how long to block at most, seconds (default 45, max 55)' },
+        any: { type: 'boolean', description: 'true: return as soon as any one lane has a result (an early failure is seen at once when lanes run in parallel); the still-running lanes are listed in running' },
+        compact: { type: 'boolean', description: 'default true: one small row per lane {lane, status {key, label, attention}, progress "d/t", commits, tokens, next}; set false for the full status rows' },
       },
       required: ['lanes'],
     },
@@ -210,7 +238,7 @@ const TOOLS = [
   },
   {
     name: 'ca_summary',
-    description: 'Final report of one lane as JSON: result, verdict, commits, gates, fix rounds, interruptions, steering, outside-repo access and the summary text. Read it when a lane ends, judge the reviewer findings against the brief and verify the work yourself; open ca_tail only when the summary points at a problem.',
+    description: 'Final report of one lane as JSON: status (key, label, tone, reason), result, verdict, commits, gates, fix rounds, interruptions, steering, outside-repo access and the summary text. Read it when a lane ends, judge the reviewer findings against the brief and verify the work yourself; open ca_tail only when the summary points at a problem.',
     inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name (as in ca_status)' } }, required: ['lane'] },
     ok: [0],
     timeout: 60000,
@@ -347,6 +375,36 @@ const TOOLS = [
     build: () => ['gc'],
   },
   {
+    name: 'ca_rm',
+    description: "Delete a lane for good (ca rm <lane>): kills the lane's processes, unregisters it and deletes its lane logs; the brief is kept. Set keep_logs to keep the lane folder and log. Use it to clean up a lane nothing will resume.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', description: 'lane id or task name (as in ca_status)' },
+        keep_logs: { type: 'boolean', description: 'keep the lane folder and log instead of deleting them (the brief is always kept)' },
+      },
+      required: ['lane'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['rm', needStr(a.lane, 'lane'), ...(a.keep_logs ? ['--keep-logs'] : [])],
+  },
+  {
+    name: 'ca_plan_rm',
+    description: 'Delete a registered plan and its registered lanes (ca plan rm <id>): kills each lane\'s processes and deletes its lane logs, unregisters the plan and marks it removed so it never appears again. Set keep_lanes to only unregister the plan and leave its lanes alone. Use it to drop a plan whose work is done or abandoned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'registered plan id to delete (as in ca_plan_list)' },
+        keep_lanes: { type: 'boolean', description: 'only unregister the plan; its lanes stay registered (the plan.json file is kept)' },
+      },
+      required: ['id'],
+    },
+    ok: [0],
+    timeout: 60000,
+    build: (a) => ['plan', 'rm', needStr(a.id, 'id'), ...(a.keep_lanes ? ['--keep-lanes'] : [])],
+  },
+  {
     name: 'ca_update_check',
     description: 'Check whether a newer codearts-lanes release exists (ca update --check --json) and return current, latest, available, what is new in each newer version and the install command. Read-only: it never installs anything.',
     inputSchema: { type: 'object', properties: {}, required: [] },
@@ -364,18 +422,35 @@ const TOOLS = [
   },
   {
     name: 'ca_note',
-    description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use it to keep the dashboard current while lanes run.',
+    description: 'Log a lead decision on the registered plan, or set the "lead is doing" line with now: true. Use set_phase to report the lead phase (planning, building, waiting, verifying, asking, done); a now note is timestamped and kept in a bounded recent-activity history the dashboard shows. Use it to keep the dashboard current while lanes run.',
     inputSchema: {
       type: 'object',
       properties: {
         text: { type: 'string', description: 'the decision, or the current activity with now true' },
-        now: { type: 'boolean', description: 'true: set the "lead is doing" line instead of appending a decision' },
+        now: { type: 'boolean', description: 'true: set the "lead is doing" line (timestamped) instead of appending a decision' },
+        plan: { type: 'string', description: 'plan id to write to (default: the newest registered plan)' },
+        phase: { type: 'string', description: 'lead phase to report: planning, building, waiting, verifying, asking or done' },
       },
       required: ['text'],
     },
     ok: [0],
     timeout: 30000,
-    build: (a) => ['note', ...(a.now ? ['--now'] : []), needStr(a.text, 'text')],
+    build: (a) => ['note', ...(a.now ? ['--now'] : []), ...optStrPair('--plan', a.plan), ...optStrPair('--phase', a.phase), needStr(a.text, 'text')],
+  },
+  {
+    name: 'ca_plan_update',
+    description: 'Update fields of a registered plan (ca plan update <id> --patch <json>) without touching the rest: patch a subset of title, goal, now, status, phase, next, waves, lanes and risks. Bumps the revision and updatedAt; an unknown field, a wrong type, a closed plan or an ambiguous id is refused. Use it to publish a changed goal, next tasks or lanes before starting new work.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'registered plan id (as in ca_plan_list); must be unambiguous' },
+        patch: { type: 'object', description: 'object with the fields to change; only title, goal, now, status, phase, next, waves, lanes, risks are allowed' },
+      },
+      required: ['id', 'patch'],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['plan', 'update', needStr(a.id, 'id'), '--patch', JSON.stringify(needPatch(a.patch))],
   },
   {
     name: 'ca_lead_tokens',
@@ -422,9 +497,9 @@ function lastJsonObject(s) {
 // ca_wait: exit codes 0, 1, 3, 4, 5 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
 const WAIT_NEXT = {
   0: 'read ca_summary for each lane and verify the work',
-  1: 'read ca_summary; ca_resume continues a failed or stopped lane with a note',
+  1: 'read ca_summary; ca_resume continues a failed, stopped or checks-failing lane with a note',
   3: 'keys missing or rejected: ask the human to run ca auth (a local form opens; never ask for keys in chat), then ca_resume the lane',
-  4: 'read ca_summary: the reviewer asked for changes',
+  4: 'read ca_summary: the reviewer asked for changes, or the checks could not run (unverified)',
   5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
   124: 'still running: call ca_wait again',
 };
@@ -432,7 +507,11 @@ async function waitResult(a) {
   const lanes = needLanes(a.lanes);
   // Capped below the ~60 s tool timeout of common MCP clients: a longer block comes back as a client error.
   const timeoutS = needCount(a.timeout_s, 'timeout_s', 45, 55);
-  const r = await runCli(['wait', ...lanes, '--json', '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
+  const any = a.any === true;
+  // compact defaults to true: the lead gets one small decision row per lane. Set compact: false for the
+  // full status rows (progress object, tokensBy, paths) when it needs to inspect a lane.
+  const compactArg = a.compact === false ? [] : ['--compact'];
+  const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), '--json', ...compactArg, '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
   if (![0, 1, 3, 4, 5, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();
@@ -450,10 +529,11 @@ async function cliResult(tool, cliArgs) {
   return { content: [{ type: 'text', text }], isError: !ok };
 }
 
-// MCP annotations per tool: read-only tools are safe to auto-approve; the two that end work
-// (ca_stop, ca_plan_close) are destructive; every other tool changes state without destroying it.
+// MCP annotations per tool: read-only tools are safe to auto-approve; the tools that end or delete
+// work (ca_stop, ca_plan_close, ca_rm, ca_plan_rm) are destructive; every other tool changes state
+// without destroying it.
 const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list', 'ca_update_check']);
-const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close']);
+const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close', 'ca_rm', 'ca_plan_rm']);
 const annotationsFor = (name) => (READ_ONLY_TOOLS.has(name)
   ? { readOnlyHint: true }
   : { readOnlyHint: false, destructiveHint: DESTRUCTIVE_TOOLS.has(name) });

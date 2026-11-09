@@ -7,6 +7,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chromePath = findChrome();
 if (!chromePath) { console.log('SKIP lanes: no Chrome found (set CHROME_PATH)'); process.exit(0); }
@@ -19,14 +20,15 @@ const dash = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash
 const base = `http://127.0.0.1:${dashPort}`;
 const profile = chromeProfileDir('lanes');
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, '--no-first-run', ...chromeFlags, 'about:blank'], { stdio: 'ignore' });
-const cleanup = () => { try { chrome.kill(); } catch {} try { dash.kill(); } catch {} };
-process.on('exit', cleanup);
-const timer = setTimeout(() => { console.log('FAIL timeout after 300 s'); cleanup(); process.exit(1); }, 300000);
+let sock = null; let dash2 = null;
+const finish = (code) => settle({ socket: sock, children: [chrome, dash, dash2], code });
+guard({ children: [chrome, dash] });
+const timer = setTimeout(() => { console.log('FAIL timeout after 300 s'); finish(1); }, 300000);
 try {
   let up = false; for (let i = 0; i < 40 && !up; i++) { await wait(250); try { up = (await fetch(base + '/api/lanes')).ok; } catch {} }
   check('ca dash starts', up);
   let ws; for (let i = 0; i < 80 && !ws; i++) { await wait(250); try { const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); const p = t.find((x) => x.type === 'page'); if (p) ws = p.webSocketDebuggerUrl; } catch {} }
-  const sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r));
+  sock = new WebSocket(ws); await new Promise((r) => sock.addEventListener('open', r)); guard({ socket: sock });
   let id = 0; const pending = new Map(); const errors = [];
   sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
@@ -58,9 +60,9 @@ try {
   await send('Page.navigate', { url: base + '/?demo=1' }); await wait(1600);
   check('the default route is the Control room', (await ev('location.hash')) === '' && (await ev('!!document.querySelector(".cr-head h1")')) === true, String(await ev('location.hash')));
   let cr = await st();
-  check('overview counts the buckets', !!cr?.overview?.counts && cr.overview.counts.attention === 3 && cr.overview.counts.running === 2 && cr.overview.counts.done === 2 && cr.overview.counts.ended === 2, JSON.stringify(cr?.overview?.counts));
+  check('overview counts the buckets', !!cr?.overview?.counts && cr.overview.counts.attention === 5 && cr.overview.counts.running === 2 && cr.overview.counts.done === 2 && cr.overview.counts.ended === 3, JSON.stringify(cr?.overview?.counts));
   check('Needs you comes first and holds the stuck and failed lanes', (() => { const s0 = cr?.overview?.sections?.[0]; return !!s0 && s0.bucket === 'attention' && s0.ids.includes('demo-repo--stuck') && s0.ids.includes('demo-repo--stall'); })(), JSON.stringify(cr?.overview?.sections));
-  check('the tab title carries the Needs you count', /^\((3)\) Needs you . Lanes$/.test(cr?.overview?.title || ''), cr?.overview?.title);
+  check('the tab title carries the Needs you count', /^\((5)\) Needs you . Lanes$/.test(cr?.overview?.title || ''), cr?.overview?.title);
   check('no stale banner while polls succeed', cr?.overview?.banner === false, String(cr?.overview?.banner));
   await shot('lanes-control-room');
   check('a bucket tile is a filter toggle', await clickSel('[data-cr="running"]'));
@@ -104,7 +106,7 @@ try {
   const counts = await ev('(function(){const r=document.getElementById("counts").getBoundingClientRect();return {left:Math.round(r.left),right:Math.round(r.right),w:window.innerWidth};})()');
   check('top bar counts inside the viewport at 1280x800', !!counts && counts.left >= 0 && counts.right <= counts.w, JSON.stringify(counts));
   const railJ = JSON.parse(await ev('(function(){return JSON.stringify({plans:document.querySelectorAll("#railBody .rail-card:not(.cr)").length,fin:document.querySelectorAll("#railBody .rail-fin").length});})()') || '{}');
-  check('rail lists 2 plans and 6 finished lanes', railJ.plans === 2 && railJ.fin === 6, JSON.stringify(railJ));
+  check('rail lists 2 plans and 9 finished lanes', railJ.plans === 2 && railJ.fin === 9, JSON.stringify(railJ));
   const laneHref = await ev('document.querySelector(".lane-name")?.getAttribute("href")');
   check('lane card links to the lane route', laneHref === '#/lane/demo-repo--office-layout', String(laneHref));
   check('plan home renders one wave', (await ev('document.querySelectorAll(".wave").length')) === 1);
@@ -284,15 +286,17 @@ try {
   // A temp credentials file with fake keys plus CA_CREDENTIALS_ONLY keeps POST /api/auth off the real keys.
   const cred = path.join(tmp, 'credentials.json'); fs.writeFileSync(cred, JSON.stringify({ CODEARTS_CLI_AK: 'check-ak', CODEARTS_CLI_SK: 'check-sk' }));
   const dash2Port = await freePort();
-  const dash2 = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(dash2Port)], { stdio: 'ignore', env: { ...process.env, CA_SETTINGS: settings, CA_REGISTRY: reg, CA_CREDENTIALS: cred, CA_CREDENTIALS_ONLY: '1', CA_DASH: '0', CODEX_HOME: path.join(tmp, 'codex') } });
-  process.on('exit', () => { try { dash2.kill(); } catch {} });
+  dash2 = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'dash', String(dash2Port)], { stdio: 'ignore', env: { ...process.env, CA_SETTINGS: settings, CA_REGISTRY: reg, CA_CREDENTIALS: cred, CA_CREDENTIALS_ONLY: '1', CA_DASH: '0', CODEX_HOME: path.join(tmp, 'codex') } });
+  guard({ children: [dash2] });
   let up2 = false; for (let i = 0; i < 40 && !up2; i++) { await wait(250); try { up2 = (await fetch(`http://127.0.0.1:${dash2Port}/api/lanes`)).ok; } catch {} }
   await send('Page.navigate', { url: `http://127.0.0.1:${dash2Port}/` }); await wait(1800);
   check('/ without demo and an empty registry shows the onboarding panel', up2 && (await ev('!!document.getElementById("onboard")')) === true, `up=${up2}`);
-  // the first-run test hook: the panel state, the setup prompt and the manual command
-  // (doctor rows arrive from /api/doctor, which can take several seconds: wait for them, up to 20 s)
+  // the first-run test hook: the panel state, the setup prompt and the manual command.
+  // The panel paints at once with "checking this machine..." and fills its rows in when
+  // /api/doctor answers (it runs `codearts --version` and a few probes), so poll for the rows
+  // instead of sampling once: a fixed wait races the doctor on a slower machine.
   let onb = null;
-  for (let i = 0; i < 80; i++) { onb = await ev('window.__lanes.onboard && window.__lanes.onboard()'); if (onb && Array.isArray(onb.rows) && onb.rows.length >= 5) break; await wait(250); }
+  for (let i = 0; i < 40; i++) { onb = await ev('window.__lanes.onboard && window.__lanes.onboard()'); if (onb && Array.isArray(onb.rows) && onb.rows.length >= 5) break; await wait(250); }
   check('the onboard hook reports the panel', !!onb && onb.shown === true, JSON.stringify(onb && { shown: onb.shown, fails: onb.fails, warns: onb.warns }));
   check('the onboard hook exposes the setup prompt with INSTALL.md', !!onb && typeof onb.prompt === 'string' && onb.prompt.includes('INSTALL.md'), onb && onb.prompt);
   check('the onboard hook lists every doctor row with a status', !!onb && Array.isArray(onb.rows) && onb.rows.length >= 5 && onb.rows.every((r) => r.name && ['ok', 'warn', 'fail'].includes(r.status)), JSON.stringify(onb && onb.rows));
@@ -326,7 +330,8 @@ try {
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
   sock.close();
 } catch (e) { check('check script ran', false, String(e && e.stack || e)); }
-clearTimeout(timer); cleanup();
+clearTimeout(timer);
 console.log(results.join('\n'));
 const fails = results.filter((r) => r.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+await finish(fails ? 1 : 0);

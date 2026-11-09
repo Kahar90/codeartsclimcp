@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs'); const caFwd = CA.replace(/\\/g, '/');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-life-'));
@@ -55,6 +55,37 @@ r = ca(['update'], { CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(0)"`
 check('update runs the install command and refreshes stale configs', r.code === 0 && String(js(kiroMcp).mcpServers.codearts.args[0]).replace(/\\/g, '/') === caFwd, `${r.code} ${r.out.slice(0, 300)}`);
 r = ca(['update'], { CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(7)"` });
 check('a failing install command makes update exit 1 and leaves configs alone', r.code === 1 && /exit(ed)? 7|failed/i.test(r.out), `${r.code} ${r.out.slice(0, 200)}`);
+// a recorded harness whose setup fails (here: an unknown harness) must surface, not pass silently
+let mp = js(manifestP); mp.harnesses.bogus = { scope: 'user', caMjs: caFwd, files: [] }; fs.writeFileSync(manifestP, JSON.stringify(mp, null, 2));
+r = ca(['update'], { CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(0)"` });
+check('a failed harness refresh names the harness and says it failed', r.code !== 0 && /bogus/.test(r.out) && /fail/i.test(r.out), `${r.code} ${r.out.slice(0, 300)}`);
+r = ca(['update', '--json'], { CA_UPDATE_CMD: `"${process.execPath}" -e "process.exit(0)"` });
+let uj = null; try { uj = JSON.parse(r.out); } catch {}
+check('update --json on a failed refresh exits nonzero and lists the failed harness', r.code !== 0 && uj && Array.isArray(uj.failed) && uj.failed.some((f) => f.harness === 'bogus') && uj.restart === true, `${r.code} ${r.out.slice(0, 300)}`);
+check('a failed harness refresh still reports the harnesses that did refresh', uj && Array.isArray(uj.refreshed) && uj.refreshed.some((l) => /^codex:/.test(l)), JSON.stringify(uj && uj.refreshed));
+mp = js(manifestP); delete mp.harnesses.bogus; fs.writeFileSync(manifestP, JSON.stringify(mp, null, 2));
+
+// ---- update: a git checkout path with spaces/metacharacters stays one literal argument (no shell) ----
+const { updateInvocation } = await import(pathToFileURL(path.join(ROOT, 'runner', 'lifecycle.mjs')).href);
+const spacedBase = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-upd-'));
+const spaced = path.join(spacedBase, 'checkout with spaces & ; chars');
+let inv = null; let gitOk = false; let gitInfo = '';
+try {
+  fs.mkdirSync(spaced, { recursive: true });
+  const g = (a, cwd) => spawnSync('git', a, { cwd, encoding: 'utf8', windowsHide: true, timeout: 60000 });
+  g(['init'], spaced); g(['config', 'user.email', 'check@local'], spaced); g(['config', 'user.name', 'check'], spaced);
+  fs.writeFileSync(path.join(spaced, 'f.txt'), 'a\n'); g(['add', 'f.txt'], spaced); g(['commit', '-m', 'one'], spaced);
+  const bare = path.join(spacedBase, 'remote.git'); g(['init', '--bare', bare], spacedBase);
+  g(['remote', 'add', 'origin', bare], spaced); g(['push', '-u', 'origin', 'HEAD'], spaced);
+  try { inv = updateInvocation(spaced); } catch {}
+  const rr = (inv && inv.shell === false) ? spawnSync(inv.file, inv.args, { cwd: spaced, shell: false, encoding: 'utf8', windowsHide: true, timeout: 60000 }) : null;
+  gitOk = !!(rr && rr.status === 0);
+  gitInfo = rr ? `code ${rr.status} ${((rr.stderr || '') + (rr.stdout || '')).replace(/\s+/g, ' ').slice(0, 140)}` : 'no git invocation';
+} finally {
+  fs.rmSync(spacedBase, { recursive: true, force: true });
+}
+check('update builds a shell-free git argv whose -C path is one literal argument', inv && inv.shell === false && inv.file === 'git' && inv.args.length === 4 && inv.args[0] === '-C' && inv.args[1] === spaced && inv.args[2] === 'pull' && inv.args[3] === '--ff-only', JSON.stringify(inv));
+check('the structured git argv pulls the offline checkout whose path has spaces and metacharacters', gitOk, gitInfo);
 
 // ---- doctor: CodeArts version vs the last smoke-tested one ----
 const smokeP = path.join(home, '.config', 'codearts-lanes', 'smoke.json'); fs.mkdirSync(path.dirname(smokeP), { recursive: true });

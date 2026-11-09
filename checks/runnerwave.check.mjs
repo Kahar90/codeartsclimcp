@@ -9,6 +9,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { guard, settle } from './lib/exit.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-runnerwave-'));
@@ -68,6 +69,7 @@ check('exact plan id closes only that plan', r.code === 0 && shopPlan.status ===
 // ---- 4. dashboard: Host header, bad JSON, ambiguous lane ----
 const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const dash = spawn(process.execPath, [CA, 'dash', String(port)], { env, stdio: 'ignore' });
+guard({ children: [dash] });
 const req = (method, p, { host, body, type = 'application/json' } = {}) => new Promise((res) => {
   const rq = http.request({ host: '127.0.0.1', port, method, path: p, headers: { host: host || `127.0.0.1:${port}`, ...(body !== undefined ? { 'content-type': type } : {}) } }, (rs) => { let d = ''; rs.on('data', (c) => (d += c)); rs.on('end', () => res({ code: rs.statusCode, body: d })); });
   rq.on('error', (e) => res({ code: 0, body: String(e) })); if (body !== undefined) rq.write(body); rq.end(); });
@@ -101,14 +103,14 @@ try {
   check('ambiguous lane in the dashboard is refused (409), nothing steered', x.code === 409 && inbox('api') === 1 && inbox('api-tests') === 0, `${x.code} ${x.body.slice(0, 120)}`);
   x = await req('GET', '/api/lane/api/detail');
   check('exact task name works in the dashboard', x.code === 200, `${x.code}`);
-} finally { dash.kill(); }
+} finally { await settle({ children: [dash], code: 0 }); }
 
 // ---- 5. Open TUI: the attach spawn survives an exe path with spaces (static) ----
 const src = fs.readFileSync(CA, 'utf8');
 const att = src.slice(src.indexOf("m[2] === 'attach'"), src.indexOf("m[2] === 'attach'") + 900);
 check('attach spawn quotes the exe path or drops windowsVerbatimArguments', !/windowsVerbatimArguments:\s*true/.test(att) || /`"\$\{EXE\}"`|'"' \+ EXE \+ '"'|quote\(EXE\)/.test(att), att.slice(0, 200));
 
-fs.rmSync(tmp, { recursive: true, force: true });
+try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { if (e && (e.code === 'EBUSY' || e.code === 'EPERM')) console.log(`warn: could not remove ${tmp} (${e.code})`); else throw e; }
 console.log(results.join('\n'));
 const fails = results.filter((x) => x.startsWith('FAIL')).length;
-console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exit(fails ? 1 : 0);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS'); process.exitCode = fails ? 1 : 0;
