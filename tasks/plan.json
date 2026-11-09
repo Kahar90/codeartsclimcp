@@ -2,9 +2,9 @@
   "title": "Time taken",
   "goal": "Every plan shows how long the work took (skill invoked to plan closed), and hovering the total shows the breakdown: lead planning, lanes running, lead between lanes, lead verifying, worker time per phase and per lane.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
+  "status": "done",
   "startedAt": "2026-11-09T14:07:24.926Z",
-  "now": "Lane timetaken building against checks/time.check.mjs",
+  "now": "Closed: 0.5.3 released: time taken per plan with hover breakdown. Generic extra providers moved to the next plan.",
   "waves": [
     {
       "name": "Wave 1 · Time taken",
@@ -54,11 +54,17 @@
     {
       "at": "2026-11-09T14:32:46.910Z",
       "text": "Overrule my own plan: the paid model stays a local preference. The runner gets a generic, opt-in extra-provider mechanism instead of a hardcoded deepseek provider."
+    },
+    {
+      "at": "2026-11-09T16:16:03.232Z",
+      "text": "Plan closed: 0.5.3 released: time taken per plan with hover breakdown. Generic extra providers moved to the next plan.."
     }
   ],
   "risks": [
     "Hover card re-rendered by the 2 s poll could flicker or close while open.",
     "Top bar overflow on phones with one more chip in Office."
   ],
-  "leadSession": "C:\\Users\\n00958341\\.claude\\projects\\D--Coding-ca-office\\81aabbfd-fafc-453e-98ce-e14bc47f05be.jsonl"
+  "leadSession": "C:\\Users\\n00958341\\.claude\\projects\\D--Coding-ca-office\\81aabbfd-fafc-453e-98ce-e14bc47f05be.jsonl",
+  "closedAt": "2026-11-09T16:16:03.232Z",
+  "leadSince": "2026-11-09T16:20:00.000Z"
 }
