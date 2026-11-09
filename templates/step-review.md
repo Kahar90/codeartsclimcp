@@ -6,6 +6,9 @@ Spec: `tasks/{TASK}.md`. Read only the numbered items for {STEPS}; the later ste
 being built, so never flag them as missing. Review only the commits in `git show {RANGE}` or
 `git diff {RANGE}`: read the diff, never print whole files. Files under `tasks/` belong to the
 runner (briefs, logs): ignore them, they are never a scope violation.
+Your shell runs in a sandbox with no local network: servers you start and fetch calls print nothing, and
+node starts slowly. Do not probe or debug the environment; judge by reading the code. The runner runs the
+CHECK lines outside the sandbox.
 
 Commits under review:
 {SUBJECTS}
