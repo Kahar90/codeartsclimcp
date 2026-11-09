@@ -138,6 +138,21 @@ const fmtDur = (ms) => {
 const oneLine = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const compact = (n) => { n = Number(n) || 0; if (n < 1000) return String(n); if (n < 1e6) { const v = n / 1000; return `${v < 10 ? v.toFixed(1) : Math.round(v)}k`.replace('.0k', 'k'); } return `${(n / 1e6).toFixed(n < 1e7 ? 2 : n < 1e8 ? 1 : 0)}M`; };
 const readJSON = (f, d = null) => { for (let i = 0; i < 3; i++) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return d; } } return d; };
+// The dashboard polls the same small registry, state and plan files every 2 s: parse each once and reuse it
+// while statSync mtimeMs and size are unchanged. Returns a fresh structuredClone so no caller can mutate the
+// cached value (lanes() and planView hand their objects to CLI writers that do mutate state). Missing file or a
+// path that is not a regular file: null, and the entry is dropped. Parse failures are not cached (retried next call).
+const jsonCache = new Map();
+function readJSONCached(file) {
+  let st; try { st = fs.statSync(file); } catch { jsonCache.delete(file); return null; }
+  if (!st.isFile()) { jsonCache.delete(file); return null; }
+  const c = jsonCache.get(file);
+  if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) return structuredClone(c.value);
+  let ok = false; let value = null;
+  for (let i = 0; i < 3; i++) { try { value = JSON.parse(fs.readFileSync(file, 'utf8')); ok = true; break; } catch (e) { if (e.code === 'ENOENT') { jsonCache.delete(file); return null; } } }
+  if (ok) jsonCache.set(file, { mtimeMs: st.mtimeMs, size: st.size, value });
+  return structuredClone(value);
+}
 // state.json is read every 2 s by status, wait and the dashboard: a plain overwrite let readers see a half-written
 // file and the lane vanished from the list for one poll. Write a temp file and rename it over the old one; on
 // Windows a reader holding the file open makes rename fail with EPERM, so retry briefly, then fall back.
@@ -1127,7 +1142,7 @@ function cmdDetach(repoArg, task) {
 function lanes() {
   let files = []; try { files = fs.readdirSync(REG).filter((f) => f.endsWith('.json')); } catch {}
   // Skip non-lane json in the registry (acks.json): a registration always carries a string dir.
-  return files.map((f) => { const r = readJSON(path.join(REG, f)); if (!r || typeof r.dir !== 'string') return null; const s = readJSON(path.join(r.dir, 'state.json')) || readJSON(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
+  return files.map((f) => { const r = readJSONCached(path.join(REG, f)); if (!r || typeof r.dir !== 'string') return null; const s = readJSONCached(path.join(r.dir, 'state.json')) || readJSONCached(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
     .sort((a, b) => (b.s.startedAt || 0) - (a.s.startedAt || 0));
 }
 // Lanes written before 'paused' existed recorded a timeout as failed (timeout).
@@ -1204,7 +1219,7 @@ function closedPlanLanes() {
   if (closedLanes.key === key) return closedLanes.ids;
   const ids = new Set();
   for (const r of rs) {
-    const p = readJSON(r.file) || {};
+    const p = readJSONCached(r.file) || {};
     if (!planClosed(p)) continue;
     const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
     for (const pl of p.lanes || []) { if (!pl || pl.removed) continue; ids.add(laneId(path.resolve(base, pl.repo || '.'), pl.task)); }
@@ -1960,9 +1975,9 @@ function laneAlreadyPlanned(repo, task) {
 }
 function plans() {
   let files = []; try { files = fs.readdirSync(PLANS).filter((f) => f.endsWith('.json')); } catch {}
-  return files.map((f) => readJSON(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
+  return files.map((f) => readJSONCached(path.join(PLANS, f))).filter((r) => r && fs.existsSync(r.file))
     // A plan whose file is marked removed: true was deleted: never list it again.
-    .filter((r) => { const p = readJSON(r.file); return !(p && p.removed === true); })
+    .filter((r) => { const p = readJSONCached(r.file); return !(p && p.removed === true); })
     .map((r) => ({ ...r, mtime: fs.statSync(r.file).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
 }
 // The registered open plan that already lists this lane, resolving each lane entry's repo the same
@@ -2379,7 +2394,7 @@ function glanceOf(view) {
   return out('idle', '');
 }
 function planView(r) {
-  const p = readJSON(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
+  const p = readJSONCached(r.file) || {}; const base = path.resolve(path.dirname(r.file), '..', p.repo || '.');
   const reg = new Map(lanes().map((l) => [l.id, l]));
   // A lane entry marked removed: true was deleted with its lane or plan: it must never come back as "planned".
   const planned = (p.lanes || []).filter((pl) => pl && !pl.removed).map((pl) => {
