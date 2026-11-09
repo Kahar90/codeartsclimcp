@@ -1752,7 +1752,9 @@ async function cmdWait(args) {
     }
     if (!lastBeat) lastBeat = now();
     else if (now() - lastBeat >= 60000) { lastBeat = now(); if (!quiet) for (const { l, s } of states) if (!s.result) note(l, s); }
-    await sleep(Math.min(2000, deadline - now()));
+    // --steps polls faster: a step commit can be followed by the lane ending well inside the 2 s poll
+    // window, and the finished-lane rule would then win over the step event. 500 ms keeps the lead ahead.
+    await sleep(Math.min(stepsMode ? 500 : 2000, deadline - now()));
   }
 }
 function cmdInit(args) {
