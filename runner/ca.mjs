@@ -107,6 +107,9 @@ const CFG = {
   // Default: MaaS (flash builds, GLM 5.3 reviews). Without MAAS_API_KEY: CodeArts quota models.
   get build() { return process.env.BUILD_MODEL || (HAS_MAAS() ? 'maas/deepseek-v4.1-flash' : 'huaweicloud-maas/GLM-5.2'); },
   get review() { return process.env.REVIEW_MODEL || (HAS_MAAS() ? 'maas/glm-5.3' : 'huaweicloud-maas/GLM-5.1'); },
+  // Step reviews are an early warning (the final review is the gate): on MaaS they use fast flash so they do not
+  // compete with the final review for GLM. Measured under load: 7.2 to 9.8 min lanes vs 4.1 to 13.1 with GLM step reviews.
+  get stepReview() { return process.env.STEP_REVIEW_MODEL || (HAS_MAAS() ? 'maas/deepseek-v4.1-flash' : ''); },
   stall: num('STALL_S', 240),          // model silent this long while busy -> abort + resume
   toolStall: num('TOOL_STALL_S', 900), // one tool call running this long -> abort + resume
   think: num('THINK_S', 480),
@@ -457,7 +460,7 @@ async function runLane(repoArg, task, opts = {}) {
   const REVIEW = (brief.match(/^\s*REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.review;
   // Step reviews are an early warning, not the gate: they may use a faster model (STEP_REVIEW_MODEL env or brief line)
   // so they do not compete with the final review for the review model. The final review always uses REVIEW.
-  const STEP_REVIEWER = (brief.match(/^\s*STEP_REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || process.env.STEP_REVIEW_MODEL || REVIEW;
+  const STEP_REVIEWER = (brief.match(/^\s*STEP_REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.stepReview || REVIEW;
   const stepReviewLine = (brief.match(/^\s*STEP_REVIEW:\s*([\w-]+)/m) || [])[1];
   const STEP_REVIEW = process.env.STEP_REVIEW !== '0' && !/^off$/i.test(stepReviewLine || '') && !CFG.noReview;
   // REVIEW_FIXES: how many review-fix rounds a final "needs fixes" verdict may trigger in place. A brief
