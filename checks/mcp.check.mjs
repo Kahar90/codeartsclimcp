@@ -20,7 +20,7 @@ lane('good', { pid: 999999, startedAt: t - 9e5, finishedAt: t - 6e5, lastEventAt
 lane('slow', { pid: process.pid, startedAt: t, lastEventAt: t, phase: 'build', busy: true, activity: 'thinking' });
 
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 220) : ''}`);
-const srv = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'mcp'], { env: { ...process.env, CA_REGISTRY: reg, CA_DASH: '0' }, stdio: ['pipe', 'pipe', 'pipe'] });
+const srv = spawn(process.execPath, [path.join(ROOT, 'runner', 'ca.mjs'), 'mcp'], { env: { ...process.env, CA_REGISTRY: reg, CA_DASH: '0', CA_MCP_WAIT_CAP_S: '3' }, stdio: ['pipe', 'pipe', 'pipe'] });
 let buf = ''; const msgs = []; const bad = []; const waiters = new Map();
 srv.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue; let m; try { m = JSON.parse(line); } catch { bad.push(line); continue; } msgs.push(m); if (m.id != null && waiters.has(m.id)) { waiters.get(m.id)(m); waiters.delete(m.id); } } });
 let errText = ''; srv.stderr.on('data', (d) => { errText += d; });
@@ -53,8 +53,10 @@ try {
   const t0 = Date.now(); m = await call('ca_wait', { lanes: ['slow'], timeout_s: 2 }, 30000); j = parse(text(m));
   check('ca_wait timeout says still running, not an error', !m.result?.isError && j && j.exit === 124 && j.timedOut === true && Date.now() - t0 < 20000, text(m).slice(0, 200));
   // MCP clients (Codex, opencode) cancel a tool call after about 60 s: a huge timeout_s must still answer in time.
+  check('the shipped ca_wait cap is 55 s (under the ~60 s MCP client timeout)', /Math.min(55, Number(process.env.CA_MCP_WAIT_CAP_S) || 55)/.test(fs.readFileSync(path.join(ROOT, 'runner', 'mcp.mjs'), 'utf8')));
   const t1 = Date.now(); m = await call('ca_wait', { lanes: ['slow'], timeout_s: 3000 }, 90000); j = parse(text(m));
-  check('ca_wait with timeout_s 3000 still answers within 60 s (still running, exit 124)', !m.result?.isError && j?.exit === 124 && Date.now() - t1 < 60000, `${Date.now() - t1} ms ${text(m).slice(0, 120)}`);
+  // The server runs with CA_MCP_WAIT_CAP_S=3 so this takes seconds; the shipped cap itself is asserted from the source.
+  check('ca_wait with timeout_s 3000 is capped (still running, exit 124, answered at the cap)', !m.result?.isError && j?.exit === 124 && Date.now() - t1 < 15000, `${Date.now() - t1} ms ${text(m).slice(0, 120)}`);
   m = await call('ca_steer', { lane: 'good', message: 'x' }); check('ca_steer on a finished lane is a tool error', m.result?.isError === true, text(m).slice(0, 120));
   m = await call('ca_summary', { lane: 'nope' }); check('unknown lane is a tool error with the CLI message', m.result?.isError === true && /no lane matches/.test(text(m)), text(m).slice(0, 120));
   m = await call('ca_kick', { lane: 'slow', mode: 'fresh', message: 'start clean' });

@@ -20,7 +20,8 @@
   },
   "scripts": {
     "check": "node tools/run-checks.mjs",
-    "sync": "node tools/sync-skill.mjs"
+    "sync": "node tools/sync-skill.mjs",
+    "check:full": "node tools/run-checks.mjs --full"
   },
   "license": "MIT",
   "repository": {

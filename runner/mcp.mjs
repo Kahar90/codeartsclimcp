@@ -506,7 +506,9 @@ const WAIT_NEXT = {
 async function waitResult(a) {
   const lanes = needLanes(a.lanes);
   // Capped below the ~60 s tool timeout of common MCP clients: a longer block comes back as a client error.
-  const timeoutS = needCount(a.timeout_s, 'timeout_s', 45, 55);
+  // CA_MCP_WAIT_CAP_S lowers the cap for tests only; the shipped cap is 55 s.
+  const cap = Math.min(55, Number(process.env.CA_MCP_WAIT_CAP_S) || 55);
+  const timeoutS = needCount(a.timeout_s, 'timeout_s', Math.min(45, cap), cap);
   const any = a.any === true;
   // compact defaults to true: the lead gets one small decision row per lane. Set compact: false for the
   // full status rows (progress object, tokensBy, paths) when it needs to inspect a lane.

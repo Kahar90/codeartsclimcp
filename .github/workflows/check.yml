@@ -21,4 +21,4 @@ jobs:
           git config --global user.email ci@example.com
           git config --global user.name ci
       - name: checks
-        run: npm run check
+        run: npm run check:full

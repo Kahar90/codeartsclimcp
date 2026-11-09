@@ -69,12 +69,12 @@ run('git helper hides its window', () => {
   check('git helper keeps cwd, argv and encoding', !!c && c.options.cwd === '/repo' && c.options.encoding === 'utf8' && Array.isArray(c.argv) && c.argv.join(' ') === 'log --oneline', JSON.stringify(c && c.argv));
 });
 
-// 2. the credential read through PowerShell (userEnv on Windows)
-run('credential powershell read hides its window', () => {
+// 2. the user-environment read through reg query (userEnv on Windows)
+run('credential registry read hides its window', () => {
   calls.length = 0;
-  evalExpr(callExpr(`execFileSync('powershell'`, 'execFileSync'), { execFileSync: stub.execFileSync, name: 'CODEARTS_CLI_AK' });
+  evalExpr(callExpr(`execFileSync('reg'`, 'execFileSync'), { execFileSync: stub.execFileSync });
   const c = calls[0];
-  check('credential powershell read hides its window', !!c && c.file === 'powershell' && c.options.windowsHide === true && c.options.encoding === 'utf8', JSON.stringify(c && c.options));
+  check('credential registry read hides its window', !!c && c.file === 'reg' && c.options.windowsHide === true && c.options.encoding === 'utf8', JSON.stringify(c && c.options));
 });
 
 // 3. the killTree taskkill cleanup (Windows branch)

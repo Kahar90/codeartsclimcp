@@ -159,7 +159,20 @@ function userEnv(name) {
   if (saved) return saved;
   if (name in envCache) return envCache[name];
   if (process.platform !== 'win32') return '';
-  try { return (envCache[name] = execFileSync('powershell', ['-NoProfile', '-Command', `[Environment]::GetEnvironmentVariable('${name}','User')`], { encoding: 'utf8', windowsHide: true }).trim()); } catch { return (envCache[name] = ''); }
+  return (envCache[name] = userRegistryEnv()[name.toUpperCase()] || '');
+}
+// Every user-level variable in one `reg query HKCU\Environment` (about 30 ms), instead of one PowerShell
+// start per name (about 750 ms each, which made doctor, auth and lane start slow). Names are matched
+// case-insensitively like Windows does. REG_EXPAND_SZ values are returned unexpanded, as before.
+let regEnv = null;
+function userRegistryEnv() {
+  if (regEnv) return regEnv;
+  regEnv = {};
+  try {
+    const out = execFileSync('reg', ['query', 'HKCU\\Environment'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    for (const line of out.split(/\r?\n/)) { const m = line.match(/^\s{4}(\S.*?)\s{4}REG_(?:SZ|EXPAND_SZ)\s{4}(.*)$/); if (m) regEnv[m[1].toUpperCase()] = m[2].trim(); }
+  } catch {}
+  return regEnv;
 }
 // The worker's bash tool runs $SHELL. When ca is started from Git Bash, SHELL is the raw MSYS
 // binary (Git\usr\bin\bash.exe), which hangs forever at startup under a console-less native
