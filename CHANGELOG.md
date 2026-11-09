@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.6.0 (2026-11-10)
+
+Updates
+- Lanes reach a ready verdict about 2x faster at the same quality. On a fixed benchmark (a 4-step notes API
+  with a 29-check contract; `node tools/bench.mjs` runs it and does the lead's fix lanes until the review says
+  ready and the contract is green), 0.5.4 took a median 14.9 min over 18 runs and needed a whole fix lane in
+  10 of them. 0.6.0 took a median 6.9 min (16.0 min vs 6.9 min in the same rounds, run side by side), the
+  slowest run went from 23.2 to 9.5 min, and no run needed a fix lane. Every run passed the same quality gate.
+  Here is how:
+- Review fix rounds: a "needs fixes" verdict no longer ends the lane. The findings go back to the same builder
+  session (context kept), the gates run again, and a focused re-review checks only the fix (`REVIEW_FIXES`,
+  default 1; a brief line `REVIEW_FIXES: N`; 0 for the old behaviour).
+- Check service: the CodeArts sandbox has no local network, so a worker's (or reviewer's) own run of a check
+  that starts a server hung for minutes, and workers spent more minutes fighting the sandbox. Every lane now
+  has `node tasks/<task>.lane/check.mjs <N|all>`, which runs a CHECK line outside the sandbox and prints the real
+  output. If the worker already ran every CHECK line green on the final commit, the gate reuses those runs.
+- Step reviews: every `step N:` commit gets a short read-only review while the builder works on the next step,
+  and real findings reach the builder at once. On MaaS they use flash, so they do not compete with the GLM final
+  review (`STEP_REVIEW_MODEL`; `STEP_REVIEW: off` or `STEP_REVIEW=0` turns them off). When the builder is done, a
+  step review still running gets a 20 s grace (`STEP_REVIEW_GRACE_S`), then the final review covers its commits.
+- The final review starts as soon as every numbered step is committed and the tree is clean, while the builder
+  wraps up, and keeps running while the CHECK lines run. A newer commit or a failed check discards it and it
+  runs again.
+- Reviewers read the code instead of rerunning the checks the runner already gates, and are told their sandbox
+  has no local network.
+- `ca wait --steps [--after N]` and MCP `ca_wait {steps: true, after}` also return (exit 10, `CA_STEP`) when a
+  lane commits a step, with the changed files and a `ui` flag, so the lead can look at UI steps during the build.
+- New opt-in model `maas/deepseek-v4.1-flash-fast` (flash with thinking off). Measured: about half the latency
+  per call, but lanes took twice as long (more turns and mistakes), so it is not the default.
+- Lead workflow (MCP prompt and skill): prefer small parallel lanes, run a brief's existing checks before
+  starting it, do your own share while lanes run, verify once after the merge.
+- For maintainers: `tools/bench.mjs` times real lanes against a quality gate; `tools/ship.mjs [--push]` runs
+  the release tail (full checks, install, push) in one command.
+
 ## 0.5.4 (2026-11-10)
 
 Updates
