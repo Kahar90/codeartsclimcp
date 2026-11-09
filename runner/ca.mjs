@@ -120,6 +120,7 @@ const CFG = {
   laneTimeout: num('LANE_TIMEOUT', 5400),
   checkTimeout: num('CHECK_TIMEOUT', 900),
   netWait: num('NET_WAIT_S', 1800),    // a network error waits up to this long for the network (no retry spent)
+  stepReviewTimeout: num('STEP_REVIEW_TIMEOUT', 600), // a step review session that never settles is aborted after this long
   noReview: process.env.NO_REVIEW === '1',
 };
 
@@ -399,6 +400,8 @@ async function runLane(repoArg, task, opts = {}) {
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
   const REVIEW = (brief.match(/^\s*REVIEW_MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.review;
+  const stepReviewLine = (brief.match(/^\s*STEP_REVIEW:\s*([\w-]+)/m) || [])[1];
+  const STEP_REVIEW = process.env.STEP_REVIEW !== '0' && !/^off$/i.test(stepReviewLine || '') && !CFG.noReview;
   const START = (resumed && resumed.start) || git(repo, 'rev-parse', 'HEAD');
   const dirtyAll = () => git(repo, 'status', '--porcelain').split(/\r?\n/).filter((l) => l && !/^.. "?(tasks\/|\.codeartsdoer)/.test(l));
   const PRE_DIRTY = new Set(dirtyAll());
@@ -412,6 +415,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
+    stepReviews: [], stepReviewContinues: 0,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -420,7 +424,8 @@ async function runLane(repoArg, task, opts = {}) {
     Object.assign(S, { startedAt: resumed.startedAt || T0, runStartedAt: T0, runs, resumes: runs.length, tokens: { ...S.tokens, ...(resumed.tokens || {}) },
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
-      outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }] });
+      outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0 });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -468,8 +473,9 @@ async function runLane(repoArg, task, opts = {}) {
   const sess = {}; // sid -> { busy, sawBusy, lastAct, tools: Map, error, aborting }
   const sx = (sid) => (sess[sid] ||= { busy: false, sawBusy: false, lastAct: now(), tools: new Map(), error: null, aborting: false });
   const builderSessions = new Set(); // every session that ran the brief (build or fix): tokens bill as build
+  const reviewSessions = new Set();  // the final review plus every step review: tokens bill as review
   const countedSteps = new Set();    // step-finish part ids already billed (a reconnect replays events)
-  const roleOf = (sid) => (sid === S.reviewSession ? 'review' : builderSessions.has(sid) ? 'build' : 'other');
+  const roleOf = (sid) => (sid === S.reviewSession || reviewSessions.has(sid) ? 'review' : builderSessions.has(sid) ? 'build' : 'other');
   const roles = new Map();       // messageID -> role
   const msgModel = new Map();    // messageID -> providerID/modelID of assistant messages
   const sessionModel = new Map(); // sid -> the model the runner sent there (fallback when a message carries none)
@@ -639,16 +645,88 @@ async function runLane(repoArg, task, opts = {}) {
     return k && k.mode ? k : { mode: 'turn', text: '', by: 'unknown', at: now() };
   };
   let curModel = BUILD, curAgent;
+  let lastPumpHadStepReview = false; // did the last pumpInbox() deliver a step-review finding?
   const pumpInbox = async (sid) => {
+    lastPumpHadStepReview = false;
     let files = []; try { files = fs.readdirSync(path.join(dir, 'inbox')).filter((f) => f.endsWith('.txt')).sort(); } catch {}
+    // A step-review finding is for the builder only: leave it for the builder, never steer a review session.
+    if (!builderSessions.has(sid)) files = files.filter((f) => !/stepreview/i.test(f));
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      L('>> steer:'); block('» ', text); S.steers.push({ at: now(), by: 'ca steer', phase: S.phase, text: oneLine(text, 500) });
+      const by = /stepreview/i.test(f) ? 'step review' : 'ca steer';
+      if (by === 'step review') lastPumpHadStepReview = true;
+      L('>> steer:'); block('» ', text); S.steers.push({ at: now(), by, phase: S.phase, text: oneLine(text, 500) });
       process.stdout.write(`[${task} ${hhmmss()}] steer received: ${oneLine(text, 100)}\n`);
       await send(sid, `Message from the lead (steering, applies on top of the brief): ${text}`, curModel, curAgent);
     }
     return files.length;
+  };
+  const inboxStepReviewFiles = () => { try { return fs.readdirSync(path.join(dir, 'inbox')).filter((f) => f.endsWith('.txt') && /stepreview/i.test(f)); } catch { return []; } };
+
+  // A step review is a short read-only pass over one step commit, run while the builder keeps working.
+  // It must never touch drive()/send()/waitTurn(): those set S.activeSession, S.busy and the builder
+  // watchdogs. This is an independent poller: POST prompt_async, then poll the session status until it
+  // has been busy and is idle again. Any error is recorded, never retried, never fails the lane.
+  let stepReviewRunning = null;    // the promise of the review in flight, or null
+  // Commits up to here are already covered by a step review; a resumed lane continues after its last one.
+  let lastReviewedHash = (S.stepReviews.length && S.stepReviews[S.stepReviews.length - 1].hash) || START;
+  const reviewedAlready = (h) => spawnSync('git', ['merge-base', '--is-ancestor', h, lastReviewedHash], { cwd: repo, windowsHide: true }).status === 0;
+  const stepReviewTemplate = () => {
+    try { return fs.readFileSync(path.join(SKILL, 'templates', 'step-review.md'), 'utf8'); }
+    catch { return 'Review git diff {RANGE} for {STEPS} in tasks/{TASK}.md. List only real bugs with file:line. End with "STEP VERDICT: ok" or "STEP VERDICT: fix".'; }
+  };
+  const lastAssistantText = (msgs) => {
+    if (!Array.isArray(msgs)) return '';
+    const last = [...msgs].reverse().find((m) => m.info?.role === 'assistant' && (m.parts || []).some((p) => p.type === 'text' && p.text?.trim()));
+    return last ? last.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim() : '';
+  };
+  const writeStepReviewInbox = (steps, hash, text) => {
+    const body = `Reviewer on ${steps.map((k) => `step ${k}`).join(', ')} (commit ${hash}):\n${text}\n`
+      + `Fix the real bugs in a commit "fix: ${steps.map((k) => `step ${k}`).join(', ')} review" and keep going with the brief; ignore a finding that contradicts the brief or the lead's steering.`;
+    try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-stepreview.txt`), body); } catch {}
+    return body;
+  };
+  const runStepReview = async (n, steps, from, to, subjects) => {
+    const t0 = now(); let sid = null, text = '', verdict = 'error'; const hash = to.slice(0, 12);
+    try {
+      sid = await newSession(`${task} step review ${n}`); reviewSessions.add(sid);
+      const prompt = stepReviewTemplate().replaceAll('{TASK}', task).replaceAll('{STEPS}', steps.map((k) => `step ${k}`).join(', '))
+        .replaceAll('{RANGE}', `${from}..${to}`).replaceAll('{SUBJECTS}', subjects.join('\n'));
+      await server.api('POST', `/session/${sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: prompt }] });
+      L(`== step review ${n} (${REVIEW}, plan agent) session ${sid}: ${from.slice(0, 8)}..${to.slice(0, 8)} for ${steps.map((k) => `step ${k}`).join(', ')}`);
+      const deadline = t0 + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false;
+      while (!done) {
+        if (now() > deadline) { try { await server.api('POST', `/session/${sid}/abort`, {}); } catch {} verdict = 'timeout'; break; }
+        await sleep(3000);
+        let st; try { st = (await server.api('GET', '/session/status', null, 10000))[sid]?.type; } catch { st = undefined; }
+        if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
+        try { text = lastAssistantText(await server.api('GET', `/session/${sid}/message`)); } catch {}
+        if (sawBusy || text) done = true;
+        else if (now() - t0 > 60000) { verdict = 'missing'; break; }
+      }
+      if (verdict !== 'timeout' && verdict !== 'missing') {
+        const m = text.match(/STEP VERDICT:\s*(ok|fix)/i);
+        verdict = m ? m[1].toLowerCase() : (text ? 'missing' : 'error');
+      }
+    } catch (err) { verdict = 'error'; L(`! step review ${n} error: ${oneLine(String((err && err.message) || err), 200)}`); }
+    const rec = { steps, hash, from, at: t0, ms: now() - t0, verdict, text: String(text || '').trim().slice(0, 1500) };
+    S.stepReviews.push(rec); lastReviewedHash = to; save(true);
+    if (verdict === 'fix') writeStepReviewInbox(steps, hash, rec.text);
+    return rec;
+  };
+  const maybeStepReview = () => {
+    if (!STEP_REVIEW || stepReviewRunning) return;
+    const idx = S.commitLog.findIndex((c) => c.hash === lastReviewedHash);
+    const fresh = idx >= 0 ? S.commitLog.slice(idx + 1) : lastReviewedHash === START ? S.commitLog.slice() : S.commitLog.filter((c) => !reviewedAlready(c.hash));
+    const stepFresh = fresh.filter((c) => /^step\s+\d+:/i.test(c.subject));
+    if (!stepFresh.length) return;
+    const to = S.commitLog.length ? S.commitLog[S.commitLog.length - 1].hash : lastReviewedHash;
+    if (!to || to === lastReviewedHash) return;
+    const steps = [...new Set(stepFresh.map((c) => Number((c.subject.match(/^step\s+(\d+):/i) || [])[1])))].filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+    const subjects = stepFresh.map((c) => c.subject);
+    const n = S.stepReviews.length + 1;
+    stepReviewRunning = runStepReview(n, steps, lastReviewedHash, to, subjects).catch(() => null).finally(() => { stepReviewRunning = null; });
   };
 
   // Wait for one turn: idle, error, stall (watchdog), server death, stop or timeout.
@@ -683,7 +761,7 @@ async function runLane(repoArg, task, opts = {}) {
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
       await pumpInbox(sid);
-      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); }
+      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) maybeStepReview(); }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
         try {
@@ -892,7 +970,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ch.on('close', (code) => { clearTimeout(timer); res({ code: code ?? 1, out, ms: now() - t0 }); });
     ch.on('error', (e) => { clearTimeout(timer); res({ code: 127, out: String(e), ms: now() - t0 }); });
   });
-  async function gates() {
+  async function gitCleanGate() {
     const d = dirty();
     if (d.length) {
       // A dirty tree that cannot be written is a blocked disk, not a code problem: the worker can never
@@ -940,6 +1018,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     } else {
       S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
     }
+    return { ok: true };
+  }
+  // The final review starts right after the git clean gate and runs while these CHECK lines run.
+  async function runChecks() {
     for (const c of checks) {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
       let r = await runCheck(c);
@@ -958,6 +1040,58 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     }
     return { ok: true };
   }
+  // The final review runs while the CHECK lines run. It may use drive() because no builder turn runs
+  // during the gates. A stale review (a CHECK failed) is aborted and discarded; the next passing gate
+  // starts a fresh one.
+  const stepReviewAppendix = () => {
+    if (!S.stepReviews.length) return '';
+    const lines = S.stepReviews.map((x) => {
+      // The first finding line: the verdict line is not a finding, so skip it (a review that found
+      // nothing replies with the verdict line alone, which would otherwise read as a finding here).
+      const first = (x.text || '').split(/\r?\n/).map((l) => l.trim()).find((l) => l && !/^STEP VERDICT:/i.test(l)) || '(no findings)';
+      return `step ${(x.steps || []).join(', ')}: ${x.verdict}: ${oneLine(first, 120)}`;
+    });
+    return `\n\nStep reviews already done:\n${lines.join('\n')}`;
+  };
+  const applyFinalReview = async (rsid, rres, head0) => {
+    let text = '';
+    try {
+      const msgs = await server.api('GET', `/session/${rsid}/message`);
+      const last = [...msgs].reverse().find((m) => m.info.role === 'assistant' && m.parts.some((p) => p.type === 'text' && p.text?.trim()));
+      text = last ? last.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim() : '';
+    } catch (err) { L(`! could not read review: ${err.message}`); }
+    fs.writeFileSync(path.join(dir, 'review.md'), text || `(no review text: ${rres.reason || 'empty'})`);
+    const vm = text.match(/VERDICT:\s*(ready|needs fixes)/i);
+    S.verdict = vm ? vm[1].toLowerCase() : `missing${rres.ok ? '' : ' (' + rres.reason + ')'}`;
+    const warn = [];
+    if (git(repo, 'rev-parse', 'HEAD') !== head0) warn.push('reviewer committed changes');
+    if (dirty().length) warn.push('reviewer left changes in the work tree');
+    if (warn.length) { S.errors.push({ at: now(), msg: warn.join('; ') }); L(`! ${warn.join('; ')}`); }
+    review = text; finalReviewed = true;
+  };
+  const startFinalReview = async () => {
+    const head0 = git(repo, 'rev-parse', 'HEAD');
+    const rf = path.join(repo, 'tasks', `${task}.review.md`);
+    let rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
+      : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
+    rb += stepReviewAppendix();
+    const rsid = await newSession(`${task} review`); S.reviewSession = rsid; reviewSessions.add(rsid);
+    L(`== review (${REVIEW}, read-only plan agent) session ${rsid}`);
+    await send(rsid, rb, REVIEW, 'plan');
+    S.reviewStartedAt = now();
+    const promise = drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
+    return { sid: rsid, head0, promise };
+  };
+  const discardFinalReview = async (fr) => {
+    if (!fr) return;
+    const s = sx(fr.sid);
+    try { await server.api('POST', `/session/${fr.sid}/abort`, {}); } catch (err) { L(`! review abort failed: ${err.message}`); }
+    s.aborting = true; s.busy = false; s.sawBusy = true;
+    try { await fr.promise; } catch {}
+    s.aborting = false;
+    if (S.reviewSession === fr.sid) S.reviewSession = null;
+  };
+
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.`;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
 
@@ -985,7 +1119,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   };
 
   // ---- run ----
-  let exitCode = 1, reason = '', review = null, forcedResult = '';
+  let exitCode = 1, reason = '', review = null, forcedResult = '', finalReviewed = false;
   server.events(onEvent, (up) => { S.sse = up; }).catch(() => {});
   try {
     // Probe before the codearts server: a repo the lane cannot write to will fail every commit, so end
@@ -1027,51 +1161,65 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
       sid = r.sid; S.buildSession = sid;
       if (!r.ok) { reason = r.reason; exitCode = r.exit || 1; if (r.keys) S.keysMessage = r.keys; break; }
-      if (await pumpInbox(sid)) continue; // a steer arrived right at the end: let the builder handle it
-      phase('gate', 'running gates');
-      const g = await gates();
-      if (g.ok) { reason = ''; exitCode = 0; break; }
-      // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
-      if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
-      // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
-      // repair the machine), but a human must look, so exit 4 like needs review.
-      if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
-      if (++S.fixes > CFG.fixes) {
-        if (g.code !== undefined) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; }
-        else reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`;
-        exitCode = 1; break;
+      // The builder is idle: let a step review still in flight finish (bounded by its own timeout) so
+      // its finding can be steered in before the gates run.
+      if (stepReviewRunning) { try { await stepReviewRunning; } catch {} }
+      const srFiles = inboxStepReviewFiles();
+      if (srFiles.length && (S.stepReviewContinues || 0) >= CFG.fixes) {
+        for (const f of srFiles) { try { fs.rmSync(path.join(dir, 'inbox', f), { force: true }); } catch {} }
+        L(`== step-review steers capped at ${CFG.fixes}; not looping again`);
       }
-      say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-      phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+      if (await pumpInbox(sid)) {
+        if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
+        continue; // a steer arrived right at the end: let the builder handle it
+      }
+      phase('gate', 'running gates');
+      // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
+      // passes the final review can start and run while the CHECK lines run.
+      let g = await gitCleanGate();
+      if (!g.ok) {
+        // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
+        if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
+        if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+        say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+        continue;
+      }
+      // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
+      // it reviews. A CHECK that fails or cannot run aborts and discards this overlapped review.
+      const fr = !CFG.noReview ? await startFinalReview() : null;
+      g = await runChecks();
+      if (!g.ok) {
+        if (fr) await discardFinalReview(fr);
+        // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
+        // repair the machine), but a human must look, so exit 4 like needs review.
+        if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
+        if (++S.fixes > CFG.fixes) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; exitCode = 1; break; }
+        say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+        continue;
+      }
+      // The checks passed: wait for the overlapped review to end and record its verdict.
+      if (fr) {
+        phase('review', 'reviewing');
+        const rr = await fr.promise;
+        if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
+        await applyFinalReview(fr.sid, rr, fr.head0);
+        if (exitCode === 3) break;
+      }
+      reason = ''; exitCode = 0; break;
     }
     syncCommits();
 
     // REVIEW (read-only plan agent, different model). It reads code, not checks, so it still runs
-    // when the checks could not run (unverified): a reviewer asking for fixes wins over it.
-    if ((exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
-      const rf = path.join(repo, 'tasks', `${task}.review.md`);
-      const rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
-        : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
-      const head0 = git(repo, 'rev-parse', 'HEAD');
-      const rsid = await newSession(`${task} review`); S.reviewSession = rsid;
-      phase('review', 'reviewing'); L(`== review (${REVIEW}, read-only plan agent) session ${rsid}`);
-      await send(rsid, rb, REVIEW, 'plan');
-      const rr = await drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
+    // when the checks could not run (unverified): a reviewer asking for fixes wins over it. The clean
+    // success path already ran its review beside the checks, so this only covers the rest.
+    if (!finalReviewed && (exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
+      const fr = await startFinalReview();
+      phase('review', 'reviewing');
+      const rr = await fr.promise;
       if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-      let text = '';
-      try {
-        const msgs = await server.api('GET', `/session/${rr.sid}/message`);
-        const last = [...msgs].reverse().find((m) => m.info.role === 'assistant' && m.parts.some((p) => p.type === 'text' && p.text?.trim()));
-        text = last ? last.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim() : '';
-      } catch (err) { L(`! could not read review: ${err.message}`); }
-      fs.writeFileSync(path.join(dir, 'review.md'), text || `(no review text: ${rr.reason || 'empty'})`);
-      const vm = text.match(/VERDICT:\s*(ready|needs fixes)/i);
-      S.verdict = vm ? vm[1].toLowerCase() : `missing${rr.ok ? '' : ' (' + rr.reason + ')'}`;
-      const warn = [];
-      if (git(repo, 'rev-parse', 'HEAD') !== head0) warn.push('reviewer committed changes');
-      if (dirty().length) warn.push('reviewer left changes in the work tree');
-      if (warn.length) { S.errors.push({ at: now(), msg: warn.join('; ') }); L(`! ${warn.join('; ')}`); }
-      review = text;
+      await applyFinalReview(fr.sid, rr, fr.head0);
     }
   } catch (err) {
     forcedResult = '';
@@ -1101,6 +1249,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
+    `step reviews: ${STEP_REVIEW ? `${S.stepReviews.length} (ok ${S.stepReviews.filter((x) => x.verdict === 'ok').length}, fix ${S.stepReviews.filter((x) => x.verdict === 'fix').length}, other ${S.stepReviews.filter((x) => x.verdict !== 'ok' && x.verdict !== 'fix').length})` : 'off'}`,
     `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}${S.queuedMs ? ` (queued ${dur(S.queuedMs)} for a model slot)` : ''}`,
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
     ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
@@ -2601,7 +2750,7 @@ function laneDetail(l) {
   let brief = ''; try { brief = fs.readFileSync(path.join(l.repo, 'tasks', `${l.task}.md`), 'utf8'); } catch {}
   return { ...laneView(l), steps: stepProgress(s).list, commits: s.commitLog || [], todos: s.todos || [], files: s.files || [], gates: s.gates || [],
     interruptions: s.interruptions || [], steers: s.steers || [], permissions: s.permissions || [], outside: s.outside || [], errors: s.errors || [],
-    phases: s.phases || [], checks: s.checks || [], verdict: s.verdict || '', brief, review: rd('review.md'), summary: rd('summary.md'), config: s.config || {} };
+    phases: s.phases || [], checks: s.checks || [], verdict: s.verdict || '', brief, review: rd('review.md'), summary: rd('summary.md'), stepReviews: s.stepReviews || [], config: s.config || {} };
 }
 
 // ---------- dashboard ----------
