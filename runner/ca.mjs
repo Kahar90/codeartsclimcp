@@ -421,7 +421,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0,
+    stepReviews: [], stepReviewContinues: 0, reviewRounds: [],
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -1059,34 +1059,46 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     });
     return `\n\nStep reviews already done:\n${lines.join('\n')}`;
   };
-  const applyFinalReview = async (rsid, rres, head0) => {
+  const applyFinalReview = async (rsid, rres, head0, from, at) => {
     let text = '';
     try {
       const msgs = await server.api('GET', `/session/${rsid}/message`);
       const last = [...msgs].reverse().find((m) => m.info.role === 'assistant' && m.parts.some((p) => p.type === 'text' && p.text?.trim()));
       text = last ? last.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim() : '';
     } catch (err) { L(`! could not read review: ${err.message}`); }
-    fs.writeFileSync(path.join(dir, 'review.md'), text || `(no review text: ${rres.reason || 'empty'})`);
+    const body = text || `(no review text: ${rres.reason || 'empty'})`;
     const vm = text.match(/VERDICT:\s*(ready|needs fixes)/i);
     S.verdict = vm ? vm[1].toLowerCase() : `missing${rres.ok ? '' : ' (' + rres.reason + ')'}`;
     const warn = [];
     if (git(repo, 'rev-parse', 'HEAD') !== head0) warn.push('reviewer committed changes');
     if (dirty().length) warn.push('reviewer left changes in the work tree');
     if (warn.length) { S.errors.push({ at: now(), msg: warn.join('; ') }); L(`! ${warn.join('; ')}`); }
+    // review.md holds the latest review; the earlier rounds are kept below it under a heading.
+    const earlier = S.reviewRounds.map((x) => x.text).filter(Boolean);
+    fs.writeFileSync(path.join(dir, 'review.md'), earlier.length ? `${body}\n\n## Earlier review\n\n${earlier.join('\n\n---\n\n')}` : body);
+    const t = Number.isFinite(at) ? at : now();
+    S.reviewRounds.push({ round: S.reviewRounds.length + 1, verdict: S.verdict, at: t, ms: now() - t, from, to: head0, text: body });
+    save(true);
     review = text; finalReviewed = true;
   };
-  const startFinalReview = async () => {
+  const startFinalReview = async (prev) => {
     const head0 = git(repo, 'rev-parse', 'HEAD');
     const rf = path.join(repo, 'tasks', `${task}.review.md`);
     let rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
       : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
     rb += stepReviewAppendix();
+    // A fix round reviews only its own fix: name the previous review's head commit as the range start.
+    if (prev && prev.to) {
+      rb += `\n\nPrevious review findings:\n${prev.text || ''}\n`
+        + `Review only the fix: git log --oneline ${prev.to}..HEAD and git diff ${prev.to}..HEAD. `
+        + `Say whether each finding is fixed and whether the fix broke anything; same output format and VERDICT line.`;
+    }
     const rsid = await newSession(`${task} review`); S.reviewSession = rsid; reviewSessions.add(rsid);
-    L(`== review (${REVIEW}, read-only plan agent) session ${rsid}`);
+    L(`== review (${REVIEW}, read-only plan agent) session ${rsid}${prev ? `; fix round ${prev.round}` : ''}`);
     await send(rsid, rb, REVIEW, 'plan');
     S.reviewStartedAt = now();
     const promise = drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
-    return { sid: rsid, head0, promise };
+    return { sid: rsid, head0, from: prev && prev.to ? prev.to : START, at: S.reviewStartedAt, promise };
   };
   const discardFinalReview = async (fr) => {
     if (!fr) return;
@@ -1200,7 +1212,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         }
         // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
         // it reviews. A CHECK that fails or cannot run aborts and discards this overlapped review.
-        const fr = !CFG.noReview ? await startFinalReview() : null;
+        const fr = !CFG.noReview ? await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]) : null;
         g = await runChecks();
         if (!g.ok) {
           if (fr) await discardFinalReview(fr);
@@ -1217,7 +1229,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           phase('review', 'reviewing');
           const rr = await fr.promise;
           if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-          await applyFinalReview(fr.sid, rr, fr.head0);
+          await applyFinalReview(fr.sid, rr, fr.head0, fr.from, fr.at);
           if (exitCode === 3) break;
         }
         reason = ''; exitCode = 0; cleanEnd = true; break;
@@ -1228,11 +1240,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // when the checks could not run (unverified): a reviewer asking for fixes wins over it. The clean
       // success path already ran its review beside the checks, so this only covers the rest.
       if (!finalReviewed && (exitCode === 0 || forcedResult === 'unverified') && !CFG.noReview) {
-        const fr = await startFinalReview();
+        const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
         phase('review', 'reviewing');
         const rr = await fr.promise;
         if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
-        await applyFinalReview(fr.sid, rr, fr.head0);
+        await applyFinalReview(fr.sid, rr, fr.head0, fr.from, fr.at);
       }
 
       if (!cleanEnd) break; // a stop, timeout, auth, infra/unverified or write failure ends the lane
