@@ -73,6 +73,9 @@ summaries, not transcripts.
   once, instead of in a fix round at the end. The final review then starts as soon as the work tree
   is clean and runs while the CHECK lines run. Turn step reviews off for one lane with a brief line
   `STEP_REVIEW: off`, or everywhere with env `STEP_REVIEW=0` (both cost review tokens, not time).
+- On MaaS, step reviews use fast flash (`STEP_REVIEW_MODEL` to change it). The final review (GLM 5.3) stays the
+  quality gate. It starts as soon as every numbered step is committed and the tree is clean, while the builder
+  wraps up; if the builder commits again, that review is discarded and runs again on the new commit.
 - A final "needs fixes" verdict is fixed inside the lane: the findings go back to the same builder
   session, the gates run again and a focused re-review checks only the fix (`REVIEW_FIXES`, default 1
   round; a brief line `REVIEW_FIXES: 2` allows more, 0 ends the lane at the first verdict as before).
