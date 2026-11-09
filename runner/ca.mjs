@@ -1167,27 +1167,27 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       phase('gate', 'running gates');
       // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
       // passes the final review can start and run while the CHECK lines run.
-      const gc = await gitCleanGate();
-      if (!gc.ok) {
+      let g = await gitCleanGate();
+      if (!g.ok) {
         // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
-        if (gc.write) { reason = gc.reason; exitCode = 1; forcedResult = ''; say(`${gc.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${gc.reason || gc.what})`); break; }
-        if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${gc.what}`; exitCode = 1; break; }
-        say(`gate failed (${gc.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, gc.message, buildModel);
+        if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
+        if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+        say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
         continue;
       }
       // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
       // it reviews. A CHECK that fails or cannot run aborts and discards this overlapped review.
       const fr = !CFG.noReview ? await startFinalReview() : null;
-      const ck = await runChecks();
-      if (!ck.ok) {
+      g = await runChecks();
+      if (!g.ok) {
         if (fr) await discardFinalReview(fr);
         // A check that cannot run ends the build loop as unverified: no fix round (the worker cannot
         // repair the machine), but a human must look, so exit 4 like needs review.
-        if (ck.infra) { reason = `checks couldn't run: ${ck.what} (exit ${ck.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${ck.what}, exit ${ck.code}); no fix round`); break; }
-        if (++S.fixes > CFG.fixes) { reason = `checks failing after ${CFG.fixes} fix rounds: ${ck.what} (exit ${ck.code})`; forcedResult = 'checks failing'; exitCode = 1; break; }
-        say(`gate failed (${ck.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, ck.message, buildModel);
+        if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
+        if (++S.fixes > CFG.fixes) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; exitCode = 1; break; }
+        say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
         continue;
       }
       // The checks passed: wait for the overlapped review to end and record its verdict.
