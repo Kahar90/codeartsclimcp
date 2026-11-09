@@ -17,7 +17,7 @@
 // t, sid, agent, text) and fake-aborts.log (JSON per abort: t, sid, agent).
 const http = require('node:http');
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
 // Keep the fake's own logs out of the lane's git clean gate, whatever the repo's .gitignore says.
 try { const ex = '.git/info/exclude'; const cur = fs.existsSync(ex) ? fs.readFileSync(ex, 'utf8') : ''; if (!/^fake-\*\.log$/m.test(cur)) { fs.mkdirSync('.git/info', { recursive: true }); fs.appendFileSync(ex, '\nfake-*.log\n'); } } catch {}
@@ -44,9 +44,35 @@ function playReview(sid, text) {
   const hit = reviews.find(([re]) => new RegExp(re, 'i').test(text));
   later(sid, reviewMs, () => { answer(sid, hit ? hit[1] : '1. DONE\nVERDICT: ready'); later(sid, 100, () => finish(sid)); });
 }
+// Chained turn: "commit:1+run:all+ok" runs its parts in order inside one turn, then answers.
+//   commit:K   writes page<K>.html and commits it as "step K: thing K"
+//   run:ARG    runs the runner's check helper (tasks/*.lane/check.mjs ARG) like a worker's bash tool
+//              would, and appends {arg, code, out} to fake-checks.log
+//   wait:MS    waits
+async function playChain(sid, kind) {
+  const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (const part of kind.split('+')) {
+    const [verb, arg = ''] = [part.split(':')[0], part.split(':').slice(1).join(':')];
+    if (verb === 'commit') { fs.writeFileSync(`page${arg}.html`, `<p>thing ${arg}</p>\n`); git('add', '-A'); git('commit', '-qm', `step ${arg}: thing ${arg}`); }
+    else if (verb === 'wait') await sleepMs(Number(arg));
+    else if (verb === 'run') {
+      const lane = (fs.readdirSync('tasks').find((d) => d.endsWith('.lane') && fs.existsSync(`tasks/${d}/check.mjs`)));
+      const helper = lane ? `tasks/${lane}/check.mjs` : 'tasks/missing-helper.mjs';
+      const r = await new Promise((res) => {
+        const ch = spawn(process.execPath, [helper, ...(arg ? [arg] : [])], { stdio: ['ignore', 'pipe', 'pipe'] }); let out = '';
+        ch.stdout.on('data', (d) => (out += d)); ch.stderr.on('data', (d) => (out += d));
+        ch.on('close', (code) => res({ code, out })); ch.on('error', (e) => res({ code: -1, out: String(e) }));
+      });
+      fs.appendFileSync('fake-checks.log', JSON.stringify({ t: Date.now(), arg, helper, code: r.code, out: r.out.slice(-2000) }) + '\n');
+    }
+    emit('message.part.updated', { part: { id: `p${++n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: `c${n}`, tool: 'bash', state: { status: 'completed', input: { command: part }, output: 'ok' } } });
+  }
+  answer(sid, 'done'); setTimeout(() => finish(sid), 300);
+}
 function playBuild(sid) {
   const kind = String(script[Math.min(turn, script.length - 1)]); turn++;
   fs.appendFileSync('fake-turns.log', `${kind}\n`);
+  if (/^(commit|run|wait):/.test(kind) || kind.includes('+')) { playChain(sid, kind); return; }
   if (kind === 'ok') { later(sid, 300, () => answer(sid, 'done')); later(sid, 600, () => finish(sid)); return; }
   if (kind.startsWith('steps:')) {
     const ns = kind.slice(6).split(',').map((x) => x.trim()).filter(Boolean);
