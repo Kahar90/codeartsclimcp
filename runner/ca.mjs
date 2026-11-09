@@ -1648,6 +1648,25 @@ function compactWaitRow(l, s) {
   return { lane: l.id, status: { key: st.key, label: st.label, attention: st.attention }, progress: `${pg.done}/${pg.total}`,
     commits: s.commits || 0, tokens: tokenTotal(s.tokens), next: WAIT_NEXT[s.result ? laneExit(s) : 124] || '' };
 }
+// --steps: the lead wakes when a lane commits a NEW step instead of only when the lane ends, so it can
+// look at the step (screenshot the ui files) and steer early. stepOf reads "step N" from a commit subject
+// (null when the subject is not a step). stepFiles is the diff of the first new commit's parent against the
+// last new commit, capped at 50 (a step that rewrites many files still fits one line); empty when the repo
+// is gone or the first new commit has no parent.
+const UI_EXT = /\.(html|css|js|mjs|ts|tsx|jsx|vue|svelte|svg|png)$/i;
+const stepOf = (subject) => { const m = String(subject || '').match(/\bstep\s*(\d+)\b/i); return m ? Number(m[1]) : null; };
+function stepFiles(repo, fresh) {
+  if (!fresh.length) return [];
+  const first = fresh[0].hash; const last = fresh[fresh.length - 1].hash;
+  const out = git(repo, 'diff', '--name-only', `${first}^`, last);
+  return out ? out.split(/\r?\n/).filter(Boolean).slice(0, 50) : [];
+}
+function stepEvent(l, s, base) {
+  const log = s.commitLog || [];
+  const fresh = log.slice(base);
+  const files = stepFiles(l.repo, fresh);
+  return { lane: l.id, commits: log.length, new: fresh.map((c) => ({ hash: c.hash, subject: c.subject, step: stepOf(c.subject) })), files, ui: files.some((f) => UI_EXT.test(f)) };
+}
 async function cmdWait(args) {
   const asJson = args.includes('--json'); const quiet = args.includes('--quiet');
   // --compact: with --json, return only the small per-lane decision rows a lead reads when many lanes
@@ -1656,15 +1675,30 @@ async function cmdWait(args) {
   // --any returns as soon as one lane has a result, so a lead watching parallel lanes sees an early
   // failure at once instead of waiting for the slowest lane. Others are listed as still running.
   const any = args.includes('--any');
+  const usage = 'usage: ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet] [--steps] [--after N|lane=N,...]';
   const ti = args.indexOf('--timeout');
   const timeoutS = ti >= 0 ? Number(args[ti + 1]) : NaN;
-  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]', 2);
-  const qs = args.filter((a, i) => !a.startsWith('--') && !(ti >= 0 && i === ti + 1));
-  if (!qs.length) die('usage: ca wait <lane...> [--any] [--timeout S] [--json] [--compact] [--quiet]', 2);
+  if (ti >= 0 && (!Number.isFinite(timeoutS) || timeoutS < 0)) die(usage, 2);
+  // --steps wakes the lead at each new commit; --after sets the baseline (a count for every lane, or a
+  // lane=count list). A bad value is a usage error, with or without --steps.
+  const stepsMode = args.includes('--steps');
+  const ai = args.indexOf('--after');
+  const afterRaw = ai >= 0 ? args[ai + 1] : '';
+  let afterCount = null; let afterMap = null;
+  if (ai >= 0) {
+    if (!afterRaw || afterRaw.startsWith('--')) die(usage, 2);
+    if (/^\d+$/.test(afterRaw)) afterCount = Number(afterRaw);
+    else { afterMap = {}; for (const part of afterRaw.split(',')) { const m = part.match(/^(.+)=(\d+)$/); if (!m) die(usage, 2); afterMap[m[1]] = Number(m[2]); } }
+  }
+  const qs = args.filter((a, i) => !a.startsWith('--') && !(ti >= 0 && i === ti + 1) && !(ai >= 0 && i === ai + 1));
+  if (!qs.length) die(usage, 2);
   const targets = qs.map((q) => findLane(q)); // resolve every lane first: unknown -> exit 2
+  const readState = (l) => readJSON(path.join(l.dir, 'state.json')) || l.s;
+  // Baseline per lane: the --after value, or the lane's commit count (state.json commits) at wait start.
+  const baseline = new Map();
+  for (const l of targets) baseline.set(l.id, afterCount !== null ? afterCount : (afterMap && Object.prototype.hasOwnProperty.call(afterMap, l.id) ? afterMap[l.id] : (readState(l).commits || 0)));
   const deadline = Number.isFinite(timeoutS) && timeoutS > 0 ? now() + timeoutS * 1000 : Infinity;
   const last = new Map(); let lastBeat = 0;
-  const readState = (l) => readJSON(path.join(l.dir, 'state.json')) || l.s;
   const note = (l, s) => {
     const pg = stepProgress(s);
     process.stderr.write(`[${hhmmss()}] ${l.id} ${health(s)} phase ${s.phase} step ${pg.done}/${pg.total} idle ${s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt))} now ${oneLine(s.activity, 70)}\n`);
@@ -1692,6 +1726,19 @@ async function cmdWait(args) {
         process.stdout.write(JSON.stringify(any ? { lanes, any: true, running: run } : { lanes }) + '\n');
       } else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
+    }
+    // --steps: a lane that passed its baseline has a new step. Wake the lead with one CA_STEP line per
+    // such lane and exit 10; the finished-lane rule above wins, so an ended lane still reports its result.
+    if (stepsMode) {
+      const evs = states.filter(({ l, s }) => (s.commits || 0) > baseline.get(l.id)).map(({ l, s }) => stepEvent(l, s, baseline.get(l.id)));
+      if (evs.length) {
+        for (const o of evs) process.stdout.write(`CA_STEP ${JSON.stringify(o)}\n`);
+        if (asJson) {
+          const hit = new Set(evs.map((o) => o.lane));
+          process.stdout.write(JSON.stringify({ steps: evs, running: states.filter(({ l }) => !hit.has(l.id)).map(({ l, s }) => compactWaitRow(l, s)) }) + '\n');
+        }
+        process.exit(10);
+      }
     }
     if (now() >= deadline) {
       const runningStates = states.filter(({ s }) => !s.result);
