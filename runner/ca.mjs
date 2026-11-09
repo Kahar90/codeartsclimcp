@@ -1088,7 +1088,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
     rb += stepReviewAppendix();
     // A fix round reviews only its own fix: name the previous review's head commit as the range start.
-    if (prev && prev.to) {
+    if (prev && prev.to && prev.verdict === 'needs fixes') {
       rb += `\n\nPrevious review findings:\n${prev.text || ''}\n`
         + `Review only the fix: git log --oneline ${prev.to}..HEAD and git diff ${prev.to}..HEAD. `
         + `Say whether each finding is fixed and whether the fix broke anything; same output format and VERDICT line.`;
