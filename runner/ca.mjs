@@ -1636,10 +1636,12 @@ async function cmdPlan(args) {
   // The lead may not have written startedAt; stamp it once from the plan's first decision or lane so a
   // plan's total time is stable. An existing value is never overwritten.
   if (!p.startedAt) {
-    let mt = Date.now(); try { mt = fs.statSync(f).mtimeMs; } catch {}
-    const v = planView({ id, file: f, mtime: mt });
+    let st = null; try { st = fs.statSync(f); } catch {}
+    const v = planView({ id, file: f, mtime: st ? st.mtimeMs : Date.now() });
     p.startedAt = new Date((v.time && v.time.startedAt) || Date.now()).toISOString();
     fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+    // Stamping is bookkeeping, not lead activity: keep the old mtime so the plan's idle time does not reset.
+    if (st) { try { fs.utimesSync(f, st.atime, st.mtime); } catch {} }
   }
   const u = await ensureDash();
   console.log(`plan ${id} registered: ${p.title || p.goal || f}${u ? '. Dashboard: ' + u : ''}`);
