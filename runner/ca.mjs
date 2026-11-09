@@ -118,6 +118,14 @@ const dur = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
 };
+// Human duration shared by the CLI (ca plan list) and the pages (CAUI.fmtDur): 45s / 12m / 2h 0m / 3d 4h.
+const fmtDur = (ms) => {
+  const s = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
+};
 const oneLine = (s, n = 160) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
 const compact = (n) => { n = Number(n) || 0; if (n < 1000) return String(n); if (n < 1e6) { const v = n / 1000; return `${v < 10 ? v.toFixed(1) : Math.round(v)}k`.replace('.0k', 'k'); } return `${(n / 1e6).toFixed(n < 1e7 ? 2 : n < 1e8 ? 1 : 0)}M`; };
 const readJSON = (f, d = null) => { for (let i = 0; i < 3; i++) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return d; } } return d; };
@@ -1605,7 +1613,7 @@ async function cmdPlan(args) {
   const sub = args[0];
   if (sub === 'list' || sub === 'ls') {
     const all = plans().map(planView); if (!all.length) return console.log('no plan registered (ca plan <repo>/tasks/plan.json)');
-    for (const p of all) console.log(`${p.id.padEnd(24)} ${p.state.padEnd(10)} ${p.title}  (${p.summary})`);
+    for (const p of all) console.log(`${p.id.padEnd(24)} ${p.state.padEnd(10)} ${p.title}  (${p.summary})  time ${fmtDur(p.time && p.time.totalMs)}`);
     return;
   }
   if (sub === 'close' || sub === 'rm') {
@@ -1616,7 +1624,7 @@ async function cmdPlan(args) {
     const v = planView(r); if (v.waves.some((w) => w.lanes.some((l) => l.running))) die(`plan ${r.id} still has a running lane; ca stop it first`, 1);
     const p = readJSON(r.file) || {}; const unstarted = new Set(v.waves.flatMap((w) => w.lanes).filter((l) => l.health === 'planned').map((l) => l.task));
     for (const pl of p.lanes || []) if (unstarted.has(pl.task)) pl.dropped = true;
-    p.status = 'done'; p.now = reason ? `Closed: ${reason}` : 'Plan closed by the lead.';
+    p.status = 'done'; p.now = reason ? `Closed: ${reason}` : 'Plan closed by the lead.'; p.closedAt = new Date().toISOString();
     (p.decisions ||= []).push({ at: new Date().toISOString(), text: `Plan closed${reason ? ': ' + reason : ''}${unstarted.size ? `. Dropped, never started: ${[...unstarted].join(', ')}` : ''}.` });
     fs.writeFileSync(r.file, JSON.stringify(p, null, 2) + '\n');
     return console.log(`plan ${r.id} closed${unstarted.size ? `; dropped ${[...unstarted].join(', ')}` : ''}`);
@@ -1625,6 +1633,14 @@ async function cmdPlan(args) {
   const p = readJSON(f); if (!p) die(`cannot read plan JSON at ${f}`, 2);
   fs.mkdirSync(PLANS, { recursive: true }); const id = planId(f);
   fs.writeFileSync(path.join(PLANS, `${id}.json`), JSON.stringify({ id, file: f }, null, 2));
+  // The lead may not have written startedAt; stamp it once from the plan's first decision or lane so a
+  // plan's total time is stable. An existing value is never overwritten.
+  if (!p.startedAt) {
+    let mt = Date.now(); try { mt = fs.statSync(f).mtimeMs; } catch {}
+    const v = planView({ id, file: f, mtime: mt });
+    p.startedAt = new Date((v.time && v.time.startedAt) || Date.now()).toISOString();
+    fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+  }
   const u = await ensureDash();
   console.log(`plan ${id} registered: ${p.title || p.goal || f}${u ? '. Dashboard: ' + u : ''}`);
 }
