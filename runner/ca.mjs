@@ -644,6 +644,8 @@ async function runLane(repoArg, task, opts = {}) {
   const pumpInbox = async (sid) => {
     lastPumpHadStepReview = false;
     let files = []; try { files = fs.readdirSync(path.join(dir, 'inbox')).filter((f) => f.endsWith('.txt')).sort(); } catch {}
+    // A step-review finding is for the builder only: leave it for the builder, never steer a review session.
+    if (!builderSessions.has(sid)) files = files.filter((f) => !/stepreview/i.test(f));
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
@@ -662,7 +664,9 @@ async function runLane(repoArg, task, opts = {}) {
   // watchdogs. This is an independent poller: POST prompt_async, then poll the session status until it
   // has been busy and is idle again. Any error is recorded, never retried, never fails the lane.
   let stepReviewRunning = null;    // the promise of the review in flight, or null
-  let lastReviewedHash = START;    // commits up to here are already covered by a step review
+  // Commits up to here are already covered by a step review; a resumed lane continues after its last one.
+  let lastReviewedHash = (S.stepReviews.length && S.stepReviews[S.stepReviews.length - 1].hash) || START;
+  const reviewedAlready = (h) => spawnSync('git', ['merge-base', '--is-ancestor', h, lastReviewedHash], { cwd: repo, windowsHide: true }).status === 0;
   const stepReviewTemplate = () => {
     try { return fs.readFileSync(path.join(SKILL, 'templates', 'step-review.md'), 'utf8'); }
     catch { return 'Review git diff {RANGE} for {STEPS} in tasks/{TASK}.md. List only real bugs with file:line. End with "STEP VERDICT: ok" or "STEP VERDICT: fix".'; }
@@ -709,7 +713,7 @@ async function runLane(repoArg, task, opts = {}) {
   const maybeStepReview = () => {
     if (!STEP_REVIEW || stepReviewRunning) return;
     const idx = S.commitLog.findIndex((c) => c.hash === lastReviewedHash);
-    const fresh = idx >= 0 ? S.commitLog.slice(idx + 1) : S.commitLog.slice();
+    const fresh = idx >= 0 ? S.commitLog.slice(idx + 1) : lastReviewedHash === START ? S.commitLog.slice() : S.commitLog.filter((c) => !reviewedAlready(c.hash));
     const stepFresh = fresh.filter((c) => /^step\s+\d+:/i.test(c.subject));
     if (!stepFresh.length) return;
     const to = S.commitLog.length ? S.commitLog[S.commitLog.length - 1].hash : lastReviewedHash;
@@ -752,7 +756,7 @@ async function runLane(repoArg, task, opts = {}) {
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
       await pumpInbox(sid);
-      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); maybeStepReview(); }
+      if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) maybeStepReview(); }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
         try {
