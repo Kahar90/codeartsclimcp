@@ -1298,6 +1298,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     const pg = stepProgress(S);
     if (!pg.total || pg.done !== pg.total) return;
     if (dirty().length) return;
+    // Nothing new to review: in a review fix round the tree is clean at the HEAD the last review already saw
+    // until the fix is committed. Speculating there only spends review tokens on a review that gets discarded.
+    const lastRound = S.reviewRounds[S.reviewRounds.length - 1];
+    if (lastRound && lastRound.to && git(repo, 'rev-parse', 'HEAD').startsWith(String(lastRound.to).slice(0, 7))) return;
     // Reserve the round before any await: a tick that runs during the grace below must not start a second
     // review alongside this one (startSpecReview sets specReview at once, but the guard also covers the gap).
     specReviewStarting = true;
