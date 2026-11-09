@@ -396,6 +396,60 @@ async function runLane(repoArg, task, opts = {}) {
   const checks = [...brief.matchAll(/^\s*(?:[-*]\s*)?CHECK:\s*`?(.+?)`?\s*$/gm)].map((m) => m[1]);
   const stepList = [...brief.matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) }));
   const stepCount = stepList.length;
+  // The worker's bash tool runs inside a sandbox that blocks the loopback network, so a check that
+  // starts a local server hangs or fails there. Write a helper that asks this runner (outside the
+  // sandbox) to run a CHECK line. Listing embeds the commands, so it needs no runner. Written now,
+  // after the lane dir exists and before the first prompt.
+  {
+    const helper = [
+      '// Check service helper written by the runner for this lane. The CodeArts sandbox blocks the',
+      '// loopback network, so a check that starts a local server hangs or fails in the worker shell.',
+      '// This asks the runner (outside the sandbox) to run a CHECK line and prints its result.',
+      `//   node tasks/${task}.lane/check.mjs        list the CHECK lines`,
+      `//   node tasks/${task}.lane/check.mjs <N>    run CHECK line N (1-based)`,
+      `//   node tasks/${task}.lane/check.mjs all     run every line in order, stop at the first failure`,
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      'const CHECKS = ' + JSON.stringify(checks) + ';',
+      'const dir = path.dirname(path.resolve(process.argv[1]));',
+      "const reqDir = path.join(dir, 'checkreq');",
+      "const arg = String(process.argv[2] || '').trim();",
+      'if (!arg) {',
+      "  CHECKS.forEach((c, i) => console.log((i + 1) + '. ' + c));",
+      '  process.exit(0);',
+      '}',
+      "const id = '' + Date.now() + Math.floor(Math.random() * 1e9);",
+      'fs.mkdirSync(reqDir, { recursive: true });',
+      "const reqFile = path.join(reqDir, id + '.json');",
+      "const resFile = path.join(reqDir, id + '.result.json');",
+      "fs.writeFileSync(reqFile + '.tmp', JSON.stringify({ id, arg, at: Date.now() })); fs.renameSync(reqFile + '.tmp', reqFile);",
+      'const waitMs = (Number(process.env.CHECK_TIMEOUT) || 900) * 1000 + 60000;',
+      'const deadline = Date.now() + waitMs;',
+      'let res = null;',
+      'while (Date.now() < deadline) {',
+      "  try { res = JSON.parse(fs.readFileSync(resFile, 'utf8')); break; } catch {}",
+      '  await new Promise((r) => setTimeout(r, 250));',
+      '}',
+      'if (!res) {',
+      "  console.log('check service: the runner did not answer within ' + Math.round(waitMs / 1000) + 's');",
+      "  console.log('exit 124');",
+      '  try { fs.rmSync(reqFile, { force: true }); } catch {}',
+      '  try { fs.rmSync(resFile, { force: true }); } catch {}',
+      '  process.exit(124);',
+      '}',
+      "const out = String(res.out || '').replace(/\\s+$/, '');",
+      'if (out) console.log(out);',
+      "console.log('exit ' + res.code);",
+      'try { fs.rmSync(reqFile, { force: true }); } catch {}',
+      'try { fs.rmSync(resFile, { force: true }); } catch {}',
+      'process.exit(res.code);',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(dir, 'check.mjs'), helper);
+  }
+  // The build prompt, the continuation brief and every gate fix round tell the worker to run a CHECK
+  // line through that helper instead of its sandboxed shell.
+  const CHECK_HELP = `\n\nRun a CHECK line with \`node tasks/${task}.lane/check.mjs <N>\` (1 = first line, \`all\` = every line, no argument lists them). It runs outside your sandbox, where the local network works, and prints the output and exit code. Use it instead of running a check command directly.`;
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
@@ -415,7 +469,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0,
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [],
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -425,7 +479,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0 });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [] });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -729,6 +783,11 @@ async function runLane(repoArg, task, opts = {}) {
     stepReviewRunning = runStepReview(n, steps, lastReviewedHash, to, subjects).catch(() => null).finally(() => { stepReviewRunning = null; });
   };
 
+  // The check service: the worker's helper drops a request file and waits for the result. The tick
+  // below picks up at most one request per lane and runs it in the background so polling continues.
+  const reqDir = path.join(dir, 'checkreq');
+  let checkJobRunning = false;
+
   // Wait for one turn: idle, error, stall (watchdog), server death, stop or timeout.
   async function waitTurn(sid) {
     const s = sx(sid); let lastPoll = 0, lastCommitCheck = 0; let prevTick = now();
@@ -761,6 +820,20 @@ async function runLane(repoArg, task, opts = {}) {
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
       await pumpInbox(sid);
+      // The worker's helper (inside its sandbox) asks this runner to run a CHECK line outside the
+      // sandbox. Pick up one request per tick and run it in the background so the tick never blocks.
+      if (!checkJobRunning) {
+        let reqs = []; try { reqs = fs.readdirSync(reqDir).filter((f) => f.endsWith('.json') && !f.endsWith('.result.json')); } catch {}
+        reqs.sort();
+        if (reqs.length) {
+          const rf = path.join(reqDir, reqs[0]); const req = readJSON(rf);
+          try { fs.rmSync(rf, { force: true }); } catch {}
+          if (req && req.id) { checkJobRunning = true; handleCheckRequest(req).catch((err) => L(`  ! check service error: ${oneLine(String((err && err.message) || err), 200)}`)).finally(() => { checkJobRunning = false; }); }
+        }
+      }
+      // A check the worker asked for may run for minutes: its bash tool is waiting on the helper, which
+      // is normal, so keep the tool watchdog from aborting that wait.
+      if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
       if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) maybeStepReview(); }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
@@ -970,6 +1043,35 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ch.on('close', (code) => { clearTimeout(timer); res({ code: code ?? 1, out, ms: now() - t0 }); });
     ch.on('error', (e) => { clearTimeout(timer); res({ code: 127, out: String(e), ms: now() - t0 }); });
   });
+  // Run one CHECK request from the worker's helper: same shell, env and timeout as the gates. Every
+  // line run is recorded in S.workerChecks, and the result file is written atomically (tmp + rename).
+  const writeCheckResult = (rid, obj) => writeAtomic(path.join(reqDir, `${rid}.result.json`), JSON.stringify(obj));
+  const handleCheckRequest = async (req) => {
+    const head = git(repo, 'rev-parse', 'HEAD');
+    const clean = dirty().length === 0;
+    const arg = String(req.arg || '').trim();
+    const runLine = async (n, cmd) => {
+      L(`  > check service: ${n} ${cmd}`);
+      const t0 = now(); const r = await runCheck(cmd);
+      L(`  < check service: exit ${r.code} (${dur(now() - t0)})`);
+      S.workerChecks.push({ n, cmd, code: r.code, ms: r.ms, at: now(), head, clean }); save(true);
+      return { n, cmd, code: r.code, ms: r.ms, out: r.out };
+    };
+    const lines = [];
+    if (arg === 'all') {
+      for (let i = 0; i < checks.length; i++) { const rec = await runLine(i + 1, checks[i]); lines.push(rec); if (rec.code !== 0) break; }
+    } else if (/^\d+$/.test(arg) && Number(arg) >= 1 && Number(arg) <= checks.length) {
+      lines.push(await runLine(Number(arg), checks[Number(arg) - 1]));
+    } else {
+      const msg = `no CHECK line ${arg}: use 1 to ${checks.length}`;
+      S.workerChecks.push({ n: Number(arg) || 0, cmd: '', code: 2, ms: 0, at: now(), head, clean }); save(true);
+      writeCheckResult(req.id, { id: req.id, code: 2, out: msg, at: now() });
+      return;
+    }
+    const code = lines.length ? lines[lines.length - 1].code : 2;
+    const out = lines.map((x) => `== check ${x.n}: ${x.cmd}\n` + String(x.out || '').replace(/\s+$/, '').split(/\r?\n/).slice(-60).join('\n')).join('\n');
+    writeCheckResult(req.id, { id: req.id, code, out, at: now() });
+  };
   async function gitCleanGate() {
     const d = dirty();
     if (d.length) {
@@ -1013,7 +1115,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok (committed by the runner)');
       } else {
         S.gates.push({ at: now(), gate: 'git clean', ok: false, detail: d.slice(0, 5).join(', ') }); L(`== gate git clean: FAIL (${d.length} changed)`);
-        return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` };
+        return { ok: false, what: 'uncommitted changes', message: `Runner check failed: the turn ended with uncommitted changes:\n${d.slice(0, 20).join('\n')}\nFinish the step these belong to, run its checks, and commit. Do not leave work uncommitted. If a commit fails, put the exact error in your reply.` + CHECK_HELP };
       }
     } else {
       S.gates.push({ at: now(), gate: 'git clean', ok: true }); L('== gate git clean: ok');
@@ -1022,6 +1124,17 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   }
   // The final review starts right after the git clean gate and runs while these CHECK lines run.
   async function runChecks() {
+    // The worker may already have run every CHECK line green on this exact HEAD with a clean tree
+    // (through the check service, outside its sandbox). Reuse those results instead of running them
+    // again; a newer commit, a failed or a missing line, or a dirty tree disables the reuse.
+    const reuseEntries = checks.map((c, i) => { let e = null; for (const x of S.workerChecks) if (x.n === i + 1) e = x; return e; });
+    const curHead = git(repo, 'rev-parse', 'HEAD');
+    if (checks.length && reuseEntries.every((e) => e && e.code === 0 && e.head === curHead && e.clean === true)) {
+      L(`== gate check reused (worker ran it green on ${curHead.slice(0, 7)})`);
+      checks.forEach((c, i) => S.gates.push({ at: now(), gate: c, ok: true, code: 0, kind: 'pass', ms: reuseEntries[i].ms, reused: true }));
+      save(true);
+      return { ok: true };
+    }
     for (const c of checks) {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
       let r = await runCheck(c);
@@ -1035,7 +1148,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
       S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
       if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
-      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` }; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }; }
       L(`== gate check ok (${dur(r.ms)})`);
     }
     return { ok: true };
@@ -1092,7 +1205,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     if (S.reviewSession === fr.sid) S.reviewSession = null;
   };
 
-  const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.`;
+  const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
 
   // Model slots: before a build session starts (and after a fallback model switch), wait until
@@ -1156,7 +1269,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       say(`resuming run ${S.resumes + 1} from ${START.slice(0, 7)} (${done ? done.split(/\r?\n/).length : 0} commits kept${notes ? ', lead notes' : ''})`);
       if (S.resumedBy) say(`resumed by ${S.resumedBy}`);
     }
-    await send(sid, first, BUILD);
+    await send(sid, first + CHECK_HELP, BUILD);
     for (;;) {
       const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
       sid = r.sid; S.buildSession = sid;
@@ -1241,6 +1354,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   const left = dirty();
   const reviewBody = review ? (() => { const ls = review.split(/\r?\n/); const i = ls.findIndex((l) => /^\s*1\.\s/.test(l)); return ls.slice(i >= 0 ? i : Math.max(0, ls.length - 16)).filter((l) => l.trim() && !/^\s*VERDICT:/i.test(l)).slice(0, 24).join('\n'); })() : '';
   const modelBits = Object.entries(S.tokensByModel).map(([m, t]) => `${m} ${tokenTotal(t)}`).join(', ');
+  const wcGreen = S.workerChecks.filter((x) => x.code === 0).length;
+  const gateReused = S.gates.some((g) => g.reused === true);
   const byModel = modelBits ? ` | by model: ${modelBits}` : '';
   const md = [
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
@@ -1249,6 +1364,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
+    `worker checks: ${S.workerChecks.length} runs (${wcGreen} green), gate reused: ${gateReused ? 'yes' : 'no'}`,
     `step reviews: ${STEP_REVIEW ? `${S.stepReviews.length} (ok ${S.stepReviews.filter((x) => x.verdict === 'ok').length}, fix ${S.stepReviews.filter((x) => x.verdict === 'fix').length}, other ${S.stepReviews.filter((x) => x.verdict !== 'ok' && x.verdict !== 'fix').length})` : 'off'}`,
     `interruptions: ${S.interruptions.length ? S.interruptions.map((x) => `${x.phase}/${x.kind}: ${x.what}`).join('; ') : 'none'}${S.queuedMs ? ` (queued ${dur(S.queuedMs)} for a model slot)` : ''}`,
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
