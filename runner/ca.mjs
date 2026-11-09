@@ -1124,6 +1124,17 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   }
   // The final review starts right after the git clean gate and runs while these CHECK lines run.
   async function runChecks() {
+    // The worker may already have run every CHECK line green on this exact HEAD with a clean tree
+    // (through the check service, outside its sandbox). Reuse those results instead of running them
+    // again; a newer commit, a failed or a missing line, or a dirty tree disables the reuse.
+    const reuseEntries = checks.map((c, i) => { let e = null; for (const x of S.workerChecks) if (x.n === i + 1) e = x; return e; });
+    const curHead = git(repo, 'rev-parse', 'HEAD');
+    if (checks.length && reuseEntries.every((e) => e && e.code === 0 && e.head === curHead && e.clean === true)) {
+      L(`== gate check reused (worker ran it green on ${curHead.slice(0, 7)})`);
+      checks.forEach((c, i) => S.gates.push({ at: now(), gate: c, ok: true, code: 0, kind: 'pass', ms: reuseEntries[i].ms, reused: true }));
+      save(true);
+      return { ok: true };
+    }
     for (const c of checks) {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
       let r = await runCheck(c);
