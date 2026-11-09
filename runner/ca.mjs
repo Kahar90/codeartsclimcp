@@ -447,6 +447,9 @@ async function runLane(repoArg, task, opts = {}) {
     ].join('\n');
     fs.writeFileSync(path.join(dir, 'check.mjs'), helper);
   }
+  // The build prompt, the continuation brief and every gate fix round tell the worker to run a CHECK
+  // line through that helper instead of its sandboxed shell.
+  const CHECK_HELP = `\n\nRun a CHECK line with \`node tasks/${task}.lane/check.mjs <N>\` (1 = first line, \`all\` = every line, no argument lists them). It runs outside your sandbox, where the local network works, and prints the output and exit code. Use it instead of running a check command directly.`;
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
@@ -1191,7 +1194,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     if (S.reviewSession === fr.sid) S.reviewSession = null;
   };
 
-  const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.`;
+  const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
 
   // Model slots: before a build session starts (and after a fallback model switch), wait until
@@ -1255,7 +1258,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       say(`resuming run ${S.resumes + 1} from ${START.slice(0, 7)} (${done ? done.split(/\r?\n/).length : 0} commits kept${notes ? ', lead notes' : ''})`);
       if (S.resumedBy) say(`resumed by ${S.resumedBy}`);
     }
-    await send(sid, first, BUILD);
+    await send(sid, first + CHECK_HELP, BUILD);
     for (;;) {
       const r = await drive(sid, buildModel, undefined, S.fixes ? 'fix' : 'build', resumeMsg, contBrief);
       sid = r.sid; S.buildSession = sid;
@@ -1281,7 +1284,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
         if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
         say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message + CHECK_HELP, buildModel);
         continue;
       }
       // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
@@ -1295,7 +1298,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         if (g.infra) { reason = `checks couldn't run: ${g.what} (exit ${g.code})`; exitCode = 4; forcedResult = 'unverified'; say(`check could not run (${g.what}, exit ${g.code}); no fix round`); break; }
         if (++S.fixes > CFG.fixes) { reason = `checks failing after ${CFG.fixes} fix rounds: ${g.what} (exit ${g.code})`; forcedResult = 'checks failing'; exitCode = 1; break; }
         say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+        phase('fix', `fix round ${S.fixes}`); await send(sid, g.message + CHECK_HELP, buildModel);
         continue;
       }
       // The checks passed: wait for the overlapped review to end and record its verdict.
