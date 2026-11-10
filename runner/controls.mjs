@@ -101,7 +101,7 @@ export function laneOutcome({ s, health, handled, note, closed, progress }) {
       o = isInfra(lastFail)
         ? { key: 'unverified', label: 'Unverified', tone: 'warn', reason: `checks couldn't run: ${lastFail.gate} (exit ${lastFail.code})` }
         : { key: 'checks failing', label: 'Checks failing', tone: 'bad', reason: lastFail ? `checks failing: ${lastFail.gate} (exit ${lastFail.code})` : `checks failing: ${s.reason}` };
-    } else if (res === 'needs review') o = { key: 'needs review', label: 'Needs review', tone: 'warn', reason: 'the reviewer asked for fixes' };
+    } else if (res === 'needs review') o = { key: 'needs review', label: 'Needs review', tone: 'warn', reason: s.reason || 'the reviewer asked for fixes' };
     else if (res === 'paused') o = { key: 'paused', label: 'Paused', tone: 'warn', reason: 'paused at the time limit; resume continues it in place' };
     else if (res === 'stopped') { const byLead = /stopped/i.test(`${s.reason || ''} ${s.activity || ''}`); o = { key: 'stopped', label: byLead ? 'Stopped by lead' : 'Stopped', tone: 'idle', reason: byLead ? 'stopped by the lead' : 'Stopped' }; }
     else if (res === 'killed') o = { key: 'killed', label: 'Killed', tone: 'idle', reason: 'killed' };
