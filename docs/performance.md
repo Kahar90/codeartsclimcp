@@ -19,6 +19,8 @@ The November 10, 2026 baseline on Windows, version 0.7.1, passed all three runs:
 410.994 and 546.483 seconds. Median: **410.994 seconds**. All runs used the default flash builder
 and GLM 5.3 final reviewer. No checks or reviews were disabled.
 
+The first combined candidate (`c498fdf`) also passed all three runs, at 546.214, 547.428 and 730.971 seconds. Its median was **547.428 seconds**, slower than the baseline. The earlier exploratory single run at `64b32cb` passed in 410.070 seconds. Neither result meets the 50% delivery target (205.497 seconds). Review and repair dominate the candidate timings; further changes must be measured using the same fixture and gates.
+
 For lead responsiveness, test event-to-alert latency independently using the scripted fake server.
 A model's response time is different from the runner's time to make its question visible through
 `ca wait`, status and the dashboards. The lead must keep waiting with step events enabled and act
