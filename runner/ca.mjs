@@ -567,12 +567,19 @@ async function runLane(repoArg, task, opts = {}) {
     // a stuck step; during a fix round any new commit counts. A commit that landed after the blocker clears
     // it; an older one observed late must not.
     if (S.commits > (S.commitsSeen || 0)) {
+      // Classify every commit that landed since the last tick, not just the tip: a `step N:` commit
+      // followed by a non-step commit in the same window must still restart the clock. The highest new
+      // step number wins, so any `step N:` above every step seen so far counts as a new step.
+      const fresh = S.commitLog.slice(S.commitsSeen || 0);
       S.commitsSeen = S.commits;
-      const subject = S.commitLog[S.commitLog.length - 1]?.subject || '';
-      const m = subject.match(/^step\s*(\d+)\s*:/i);
-      const n = m ? Number(m[1]) : 0;
-      const newStep = n > (S.stepSeen || 0);
-      if (newStep) S.stepSeen = n;
+      let maxStep = S.stepSeen || 0;
+      for (const c of fresh) {
+        const m = c.subject.match(/^step\s*(\d+)\s*:/i);
+        const n = m ? Number(m[1]) : 0;
+        if (n > maxStep) maxStep = n;
+      }
+      const newStep = maxStep > (S.stepSeen || 0);
+      if (newStep) S.stepSeen = maxStep;
       if (newStep || S.phase === 'fix') {
         const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
         S.lastCommitAt = ct ? Number(ct) * 1000 : now();
