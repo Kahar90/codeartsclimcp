@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -6,6 +7,7 @@ import path from 'node:path';
 import { authProblem } from './authsignal.mjs';
 import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarningsFor, dashUrl, die, dur, ensureDash, git, health, hhmmss, killTree, laneId, lanes, now, oneLine, readJSON, resultOf, sleep, splitModel, stepProgress, workerShell, writeAtomic, writeProbe } from './common.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
+import { runOrdered } from './gate.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { Server } from './server.mjs';
@@ -835,18 +837,90 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ch.on('close', (code) => { clearTimeout(timer); res({ code: code ?? 1, out, ms: now() - t0 }); });
     ch.on('error', (e) => { clearTimeout(timer); res({ code: 127, out: String(e), ms: now() - t0 }); });
   });
+  // Fingerprint the exact content under test: every tracked file plus every nonignored untracked file,
+  // by path and bytes. A commit that leaves the working tree byte-identical does not change it, so a
+  // check run before that commit stays valid; any content change (or a check that writes the tree)
+  // changes it and disables the reuse.
+  const contentFingerprint = () => {
+    const h = crypto.createHash('sha256');
+    // NUL-delimited output, so a path with a space or a non-ASCII name is the raw bytes git has, not
+    // the quoted escape form the newline output would give. Any git, stat or read error means the
+    // fingerprint cannot vouch for the tree: return null so nothing is reused (fail closed).
+    const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: repo, encoding: 'buffer', windowsHide: true });
+    const others = spawnSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: repo, encoding: 'buffer', windowsHide: true });
+    if (tracked.status !== 0 || others.status !== 0) return null;
+    const list = new Set();
+    for (const buf of [tracked.stdout, others.stdout]) for (const f of String(buf || '').split('\0')) if (f) list.add(f);
+    // A submodule is a directory in the working tree but a committed gitlink in the index: lstat alone
+    // would hash it as an opaque directory, so an in-submodule change (a moved HEAD the worker commits
+    // as a new gitlink) would leave the fingerprint unchanged and wrongly reuse a stale green check.
+    // Read the recorded gitlink commits from the index and hash the one this path points at.
+    let gitlinks = null;
+    const gitlinkSha = (f) => {
+      if (!gitlinks) {
+        gitlinks = new Map();
+        const r = spawnSync('git', ['ls-files', '-s', '-z'], { cwd: repo, encoding: 'buffer', windowsHide: true });
+        if (r.status === 0) for (const rec of String(r.stdout || '').split('\0')) {
+          const m = rec.match(/^(\d{6}) ([0-9a-f]+) \d+\t([\s\S]+)$/);
+          if (m && m[1] === '160000') gitlinks.set(m[3], m[2]);
+        }
+      }
+      return gitlinks.get(f) || null;
+    };
+    for (const f of [...list].sort()) {
+      h.update(f); h.update('\0');
+      const full = path.join(repo, f);
+      let st;
+      try { st = fs.lstatSync(full); } catch { return null; }
+      // File type and permission bits: an exec bit or a symlink swap changes the fingerprint.
+      h.update(String(st.mode & 0o777777)); h.update('\0');
+      if (st.isSymbolicLink()) {
+        let target; try { target = fs.readlinkSync(full); } catch { return null; }
+        h.update('link:'); h.update(target); h.update('\0');
+      } else if (st.isFile()) {
+        let data; try { data = fs.readFileSync(full); } catch { return null; }
+        h.update('file:'); h.update(data); h.update('\0');
+      } else {
+        const sha = gitlinkSha(f);
+        if (!sha) return null; // a directory the index does not track as a submodule: cannot vouch for it
+        h.update('gitlink:'); h.update(sha); h.update('\0');
+      }
+    }
+    return h.digest('hex');
+  };
   // Run one CHECK request from the worker's helper: same shell, env and timeout as the gates. Every
   // line run is recorded in S.workerChecks, and the result file is written atomically (tmp + rename).
   const writeCheckResult = (rid, obj) => writeAtomic(path.join(reqDir, `${rid}.result.json`), JSON.stringify(obj));
+  // Bounded in-memory cache of green check-service runs, keyed by line, command and content
+  // fingerprint: repeating the same helper for the same content answers from here instead of running
+  // the check again. Failures and mutated runs are never cached, and the cache holds only the output.
+  const checkCache = [];
   const handleCheckRequest = async (req) => {
     const head = git(repo, 'rev-parse', 'HEAD');
     const clean = dirty().length === 0;
     const arg = String(req.arg || '').trim();
     const runLine = async (n, cmd) => {
+      const fpBefore = contentFingerprint();
+      // Reuse the most recent green run of this exact line when the tested content and the command are
+      // unchanged: the worker can run the same helper twice (a permission prompt, a retry) and should
+      // not pay for the check twice. A missing fingerprint, changed content or a failed run is never
+      // reused.
+      let hit = null;
+      if (fpBefore) for (let i = checkCache.length - 1; i >= 0; i--) { const e = checkCache[i]; if (e.n === n && e.cmd === cmd && e.fp === fpBefore) { hit = e; break; } }
+      if (hit) {
+        L(`  = check service: reused green ${n} (identical content)`);
+        S.workerChecks.push({ n, cmd, code: hit.code, ms: hit.ms, at: now(), head, clean, fp: fpBefore, cached: true }); save(true);
+        return { n, cmd, code: hit.code, ms: hit.ms, out: hit.out };
+      }
       L(`  > check service: ${n} ${cmd}`);
       const t0 = now(); const r = await runCheck(cmd);
+      // A check that mutated the tree cannot vouch for the content the gate will see: record no
+      // fingerprint so the run is never reused.
+      const fp = contentFingerprint() === fpBefore ? fpBefore : null;
       L(`  < check service: exit ${r.code} (${dur(now() - t0)})`);
-      S.workerChecks.push({ n, cmd, code: r.code, ms: r.ms, at: now(), head, clean }); save(true);
+      S.workerChecks.push({ n, cmd, code: r.code, ms: r.ms, at: now(), head, clean, fp }); save(true);
+      // Cache only green runs with a valid fingerprint, bounded in memory: no secrets, no extra logs.
+      if (fp && r.code === 0) { checkCache.push({ n, cmd, fp, code: r.code, ms: r.ms, out: r.out }); while (checkCache.length > 64) checkCache.shift(); }
       return { n, cmd, code: r.code, ms: r.ms, out: r.out };
     };
     const lines = [];
@@ -916,18 +990,32 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   }
   // The final review starts right after the git clean gate and runs while these CHECK lines run.
   async function runChecks() {
-    // The worker may already have run every CHECK line green on this exact HEAD with a clean tree
-    // (through the check service, outside its sandbox). Reuse those results instead of running them
-    // again; a newer commit, a failed or a missing line, or a dirty tree disables the reuse.
-    const reuseEntries = checks.map((c, i) => { let e = null; for (const x of S.workerChecks) if (x.n === i + 1) e = x; return e; });
-    const curHead = git(repo, 'rev-parse', 'HEAD');
-    if (checks.length && reuseEntries.every((e) => e && e.code === 0 && e.head === curHead && e.clean === true)) {
-      L(`== gate check reused (worker ran it green on ${curHead.slice(0, 7)})`);
+    // Reuse the worker's own green runs when the exact tested content is unchanged. A commit that
+    // leaves the working tree byte-identical must not force the gate to run the same checks again;
+    // the old HEAD+clean cache missed the normal write-run-commit flow (the tree was dirty). The
+    // fingerprint covers tracked and nonignored untracked content and the check command, so a run
+    // that mutated the tree, failed, or a command that changed disables the reuse.
+    const curFp = contentFingerprint();
+    const reuseEntries = checks.map((c, i) => { let e = null; for (const x of S.workerChecks) if (x.n === i + 1 && x.cmd === c) e = x; return e; });
+    // Validate again on reuse: recompute the fingerprint and fall back to a real run if it moved.
+    if (checks.length && reuseEntries.every((e) => e && e.code === 0 && e.fp && e.fp === curFp) && contentFingerprint() === curFp) {
+      L(`== gate check reused (worker ran it green on identical content)`);
       checks.forEach((c, i) => S.gates.push({ at: now(), gate: c, ok: true, code: 0, kind: 'pass', ms: reuseEntries[i].ms, reused: true }));
       save(true);
       return { ok: true };
     }
-    for (const c of checks) {
+    // Bounded opt-in parallelism: one at a time by default (checks may depend on order), more with a
+    // `CHECK_PARALLEL: N` brief line or the CHECK_PARALLEL env var (the env wins, so a lead can force
+    // it). Capped at 8 so a typo cannot spawn a check storm; results come back in CHECK order either way.
+    const briefParallel = Number((brief.match(/^\s*CHECK_PARALLEL:\s*(\d+)/m) || [])[1]) || 0;
+    // The env var wins even when it is 0: a lead must be able to force the safe sequential path over a
+    // brief `CHECK_PARALLEL` value. Only an unset or non-numeric env falls back to the brief line.
+    const envRaw = process.env.CHECK_PARALLEL;
+    const envParallel = envRaw !== undefined && envRaw !== '' && Number.isFinite(Number(envRaw)) ? Number(envRaw) : null;
+    const want = envParallel !== null ? envParallel : (briefParallel || 1);
+    const width = Math.max(1, Math.min(want, 8, checks.length || 1));
+    if (width > 1) L(`== gate checks: ${checks.length} lines, up to ${width} in parallel`);
+    const results = await runOrdered(checks, async (c) => {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
       let r = await runCheck(c);
       let kind = classifyCheck({ code: r.code, out: r.out });
@@ -937,12 +1025,28 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         L(`== gate check could not run (exit ${r.code}); retrying once in 3 s`); await sleep(3000);
         r = await runCheck(c); kind = classifyCheck({ code: r.code, out: r.out });
       }
-      const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
-      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
-      if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
-      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }; }
-      L(`== gate check ok (${dur(r.ms)})`);
+      return { cmd: c, code: r.code, out: r.out, ms: r.ms, kind };
+    }, { concurrency: width, stopOn: (r) => !r.value || r.value.kind !== 'pass' });
+    // Report in CHECK order so the gates, the log and the fix message name the earliest failing line
+    // whether the lines ran one by one or side by side. In parallel every line already ran, so every
+    // result is recorded: the loop does not stop early, and the fix message returned afterwards names
+    // the earliest failing line. A stopped sequential run leaves the unstarted lines undefined and skips
+    // them, so it still records exactly the lines that ran.
+    const bad = [];
+    for (const res of results) {
+      if (!res) continue;
+      const c = res.value ? res.value.cmd : checks[res.index];
+      const code = res.value ? res.value.code : 1;
+      const out = res.value ? res.value.out : String(res.error || 'the check did not run');
+      const ms = res.value ? res.value.ms : 0;
+      const kind = res.value ? res.value.kind : 'infra';
+      const tail = out.trim().split(/\r?\n/).slice(-40).join('\n');
+      S.gates.push({ at: res.started, gate: c, ok: code === 0, code, kind, ms }); save(true);
+      if (kind === 'infra') { L(`== gate check could not run (exit ${code}, ${dur(ms)})`); block('| ', tail); bad.push({ infra: true, what: c, code, message: `Runner check could not run: \`${c}\` exited ${code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }); continue; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${code}, ${dur(ms)})`); block('| ', tail); bad.push({ what: c, code, message: `Runner check failed: \`${c}\` exited ${code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }); continue; }
+      L(`== gate check ok (${dur(ms)})`);
     }
+    if (bad.length) return { ok: false, ...bad[0] };
     return { ok: true };
   }
   // The final review runs while the CHECK lines run. It may use drive() because no builder turn runs
@@ -980,9 +1084,46 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     save(true);
     review = text; finalReviewed = true;
   };
+  // The runner collects the review context once so the reviewer does not spend tool round trips
+  // rediscovering it: the brief, the commits, the diff stat and, while the change is small, the diff
+  // itself. Every git read is bounded and fail-closed: a command that fails, overflows its buffer or a
+  // change too large to inline becomes an explicit "read it yourself" pointer, never a silent empty
+  // result that could read as "no changes". This is a starting point: the reviewer still reads the full
+  // spec and whatever source it needs.
+  const reviewContext = (from) => {
+    const MAX_BRIEF = 8000, MAX_LOG = 6000, MAX_STAT = 6000, MAX_DIFF = 16000;
+    // Bounded git read: a non-zero exit or an output over maxBuffer returns ok:false so the caller can
+    // fall back to a pointer instead of presenting an empty stdout as a successful, empty result.
+    const capture = (args, maxBuffer) => {
+      const r = spawnSync('git', args, { cwd: repo, encoding: 'buffer', maxBuffer, windowsHide: true });
+      if (r.error || r.status !== 0) return { ok: false, text: '' };
+      return { ok: true, text: String(r.stdout || '') };
+    };
+    // A truncated brief must say so and send the reviewer to the full spec: a partially pasted spec
+    // could hide requirements, so it is never presented as the whole thing.
+    const briefText = brief.length > MAX_BRIEF
+      ? brief.slice(0, MAX_BRIEF) + `\n[truncated at ${MAX_BRIEF} chars: this is only the start of the spec. Open tasks/${task}.md and judge every requirement against the full file.]`
+      : brief;
+    const box = (label, c, max, empty, hint) => {
+      if (!c.ok) return `${label}: could not be read here; read it yourself with \`${hint}\` and open the changed files.`;
+      const t = c.text.trim();
+      if (!t) return `${label}:\n\`\`\`\n${empty}\n\`\`\``;
+      return `${label}:\n\`\`\`\n${t.length > max ? t.slice(0, max) + `\n[truncated at ${max} chars: read the rest with ${hint}]` : t}\n\`\`\``;
+    };
+    const parts = [`Task brief (tasks/${task}.md):\n\`\`\`\n${briefText}\n\`\`\``];
+    parts.push(box(`Commits (${from}..HEAD)`, capture(['log', '--oneline', `${from}..HEAD`], MAX_LOG + 4096), MAX_LOG, '(none)', `git log --oneline ${from}..HEAD`));
+    parts.push(box(`Diff stat (${from}..HEAD)`, capture(['diff', '--stat', from, 'HEAD'], MAX_STAT + 4096), MAX_STAT, '(no changes)', `git diff --stat ${from} HEAD`));
+    // The raw diff inlines only while it fits the buffer and is small enough; a failure, an overflow or
+    // a huge change all become the same explicit pointer, so a large change is never a silent empty diff.
+    const diffC = capture(['diff', from, 'HEAD'], MAX_DIFF + 1);
+    if (diffC.ok && !diffC.text.trim()) parts.push(`Diff (${from}..HEAD): no changes.`);
+    else if (diffC.ok && diffC.text.length <= MAX_DIFF) parts.push(`Diff (${from}..HEAD):\n\`\`\`\n${diffC.text.trim()}\n\`\`\``);
+    else parts.push(`Diff (${from}..HEAD): not inlined here (unavailable or too large to paste). Read the full change with \`git diff ${from} HEAD\` and open the changed source.`);
+    return `\n\nPrepared context from the runner (a starting point; still open the source you need and judge every requirement yourself):\n\n${parts.join('\n\n')}`;
+  };
   // One builder for the final review prompt, so the normal and the speculative review send the exact
-  // same text: the template (or tasks/<task>.review.md), the step-review appendix and, for a fix round,
-  // the previous findings block that names the fix range.
+  // same text: the template (or tasks/<task>.review.md), the step-review appendix, the prepared
+  // context and, for a fix round, the previous findings block that names the fix range.
   const finalReviewPrompt = (prev) => {
     const rf = path.join(repo, 'tasks', `${task}.review.md`);
     let rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
@@ -994,6 +1135,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         + `Review only the fix: git log --oneline ${prev.to}..HEAD and git diff ${prev.to}..HEAD. `
         + `Say whether each finding is fixed and whether the fix broke anything; same output format and VERDICT line.`;
     }
+    rb += reviewContext(prev && prev.to ? prev.to : START);
     return rb;
   };
   const startFinalReview = async (prev) => {
@@ -1053,7 +1195,15 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         const deadline = at + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false, text = '';
         while (!done) {
           if (specReviewCancel) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'cancelled', text }; }
-          if (now() > deadline) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'timeout', text }; }
+          if (now() > deadline) {
+            // The polling budget is spent. If the session is alive and progressing, do NOT abort it: hand it
+            // to the normal final review, which drives the SAME session with the normal watchdog and the
+            // overall lane deadline, instead of discarding it and replaying the whole review. Only a session
+            // that never went busy is treated as missing and aborted here.
+            if (sawBusy) return { sid: rec.sid, ok: false, reason: 'busy-timeout', text };
+            try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {}
+            return { sid: rec.sid, ok: false, reason: 'timeout', text };
+          }
           await sleep(3000);
           let st; try { st = (await server.api('GET', '/session/status', null, 10000))[rec.sid]?.type; } catch { st = undefined; }
           if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
@@ -1134,7 +1284,14 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // "needs review" with an empty verdict.
   const finishFinalReview = async (fr) => {
     let rr = await fr.promise;
-    if (!rr.ok && fr.spec && rr.reason !== 'cancelled') {
+    if (!rr.ok && fr.spec && rr.reason === 'busy-timeout') {
+      // A healthy speculative session that only ran past its polling budget keeps its turn: drive the same
+      // session with the normal watchdog and the overall lane deadline. No new session and no replayed
+      // prompt, so one final review covers this HEAD and its findings are the ones already being produced.
+      L(`== speculative review still running after ${CFG.stepReviewTimeout}s; adopting the same session with the normal watchdog`);
+      const o = await drive(fr.sid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
+      rr = o.ok ? { sid: fr.sid, ok: true, reason: '', text: '' } : { sid: fr.sid, ok: false, reason: o.reason || 'error', text: '' };
+    } else if (!rr.ok && fr.spec && rr.reason !== 'cancelled') {
       L(`== speculative review did not finish (${rr.reason}); running the normal final review`);
       await discardSpecReview();
       if (S.specReview) { S.specReview.used = false; save(true); }
