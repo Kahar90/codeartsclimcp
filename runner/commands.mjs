@@ -43,7 +43,7 @@ export function closedPlanLanes() {
 export function laneStatusOf(l, s = l.s) {
   const r = bucketFor(l);
   const closed = !!s.result && closedPlanLanes().has(l.id);
-  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '', closed });
+  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '', closed, progress: stepProgress(s) });
 }
 // Lane kind for the Office characters; the brief is read once per change (mtime), not on every poll.
 export const kindCache = new Map();
