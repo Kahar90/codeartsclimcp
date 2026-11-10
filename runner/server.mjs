@@ -2,12 +2,45 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { EXE, caEnv, redactEnv, freePort, now, sleep, killTree } from './common.mjs';
+import { profileMode, parseToolIds, applyCoreProfile } from './toolprofile.mjs';
+
+// Opt-in per-lane tool profile: with CA_TOOL_PROFILE=core every prompt_async request denies the
+// tools a coding lane does not need (see runner/toolprofile.mjs). The tool ids come from the same
+// private server, fetched once and cached until the server restarts. No profile (unset/full) keeps
+// the exact previous request and fetches nothing.
+const TOOL_IDS_PATH = '/experimental/tool/ids';
+const TOOL_IDS_TIMEOUT = 5000;
+const isPromptAsync = (method, p) => method === 'POST' && /\/prompt_async$/.test(p);
 
 // ---------- one private codearts server ----------
 export class Server {
-  constructor(cwd, logFile) { this.cwd = cwd; this.logFile = logFile; this.ac = null; }
+  constructor(cwd, logFile) { this.cwd = cwd; this.logFile = logFile; this.ac = null; this.toolIdsP = null; }
   get auth() { return 'Basic ' + Buffer.from('codearts:' + this.pw).toString('base64'); }
+  // Clear cached tool metadata: called on every (re)start, so a restarted private server refetches.
+  resetToolProfile() { this.toolIdsP = null; }
+  // The tool ids endpoint, fetched once per private server (bounded by TOOL_IDS_TIMEOUT). A
+  // malformed or unavailable answer rejects, and the rejection is not cached, so the next request
+  // retries instead of silently bypassing an explicit profile.
+  toolIdsOnce() {
+    if (!this.toolIdsP) {
+      this.toolIdsP = (async () => {
+        try { return parseToolIds(await this.api('GET', TOOL_IDS_PATH, null, TOOL_IDS_TIMEOUT)); }
+        catch (err) { this.toolIdsP = null; throw err; }
+      })();
+    }
+    return this.toolIdsP;
+  }
+  // The outgoing body for a prompt_async request. No profile: returned untouched, nothing fetched.
+  // Unknown profile: fails visibly. Core: denies every non-core id (a new body; never mutates the
+  // caller's object, never inserts true and never touches an inherited core/plan permission).
+  async profileBody(body) {
+    const mode = profileMode(process.env.CA_TOOL_PROFILE);
+    if (mode === 'full') return body;
+    if (mode === 'unknown') throw new Error(`tool profile: unknown CA_TOOL_PROFILE "${process.env.CA_TOOL_PROFILE}" (expected "core", "full" or unset)`);
+    return applyCoreProfile(body, await this.toolIdsOnce());
+  }
   async start() {
+    this.resetToolProfile();
     this.port = await freePort();
     this.pw = this.pw || crypto.randomBytes(16).toString('hex');
     this.url = `http://127.0.0.1:${this.port}`;
@@ -26,6 +59,7 @@ export class Server {
     throw new Error('codearts serve did not become healthy in 90 s');
   }
   async api(method, p, body, timeout = 30000) {
+    if (isPromptAsync(method, p) && body && typeof body === 'object') body = await this.profileBody(body);
     const r = await fetch(this.url + p, {
       method, headers: { authorization: this.auth, ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeout),
