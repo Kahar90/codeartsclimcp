@@ -9,6 +9,7 @@ import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarnings
 import { builderContext } from './context.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
 import { runOrdered } from './gate.mjs';
+import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, uncommittedSteps, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { Server } from './server.mjs';
@@ -224,6 +225,18 @@ export async function runLane(repoArg, task, opts = {}) {
     L(`blocker cleared (${why})`); save(true);
     return true;
   };
+  // A worker decision or environment failure the lead must see now: record it as the lane blocker so
+  // ca wait (exit 11), ca status --json and the dashboard surface it in seconds. A repeated sighting of
+  // the same signal does not churn the state; a steer or an ack clears it, never an unrelated commit.
+  const raiseSignal = (sig) => {
+    if (!sig) return false;
+    if (S.blocker && S.blocker.kind === sig.kind && S.blocker.text === sig.text) return false;
+    S.blocker = { kind: sig.kind, text: sig.text, at: now() };
+    (S.signals ||= []).push({ at: now(), kind: sig.kind, text: sig.text });
+    L(`  ! blocked (${sig.kind}): ${sig.text}`);
+    save(true);
+    return true;
+  };
   const syncCommits = () => {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
@@ -245,11 +258,13 @@ export async function runLane(repoArg, task, opts = {}) {
         if (n > maxStep) maxStep = n;
       }
       const newStep = maxStep > (S.stepSeen || 0);
-      if (newStep) S.stepSeen = maxStep;
+      if (newStep) { S.stepSeen = maxStep; S.stepContinues = 0; }
       if (newStep || S.phase === 'fix') {
         const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
         S.lastCommitAt = ct ? Number(ct) * 1000 : now();
-        if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+        // Only the no-progress alarm is answered by progress. A recorded decision or environment
+        // failure waits for the lead: an unrelated commit must not silently clear it (steer/ack clears).
+        if (S.blocker && S.blocker.kind === 'no-progress' && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
       }
     }
   };
@@ -297,6 +312,10 @@ export async function runLane(repoArg, task, opts = {}) {
   // permission for it and queue at most one steer per lane telling the worker to run the check in
   // the foreground instead. Every sighting is recorded as an interruption.
   let sleepPollSteered = false;
+  // The direct-check guidance is queued at most once per lane, and per tool-command failure counts feed
+  // the repeated-failure signal. Both are supervisor-local; a resume starts them clean.
+  let directCheckAlerted = false;
+  const toolFails = new Map(); // toolKey -> { n, commits } (commits = lane commit count at first failure)
   const flagSleepPoll = (where) => {
     S.interruptions.push({ at: now(), phase: S.phase, kind: 'sleep-poll', what: where });
     save(true);
@@ -306,9 +325,20 @@ export async function runLane(repoArg, task, opts = {}) {
     try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-sleep.txt`), 'Do not sleep-poll: run the check in the foreground with a timeout and read its output once.'); } catch {}
     save(true);
   };
+  // Tell the worker, like a steer, to run the CHECK line through the helper instead of its sandbox.
+  const queueHelperGuidance = () => {
+    try {
+      fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'inbox', `${now()}-helper-direct.txt`),
+        `Do not run a CHECK line directly: your sandbox blocks the loopback network, so a check that starts a local server hangs. Run it with \`node tasks/${task}.lane/check.mjs <N>\` (no argument lists them); the runner runs it outside the sandbox and prints the output and the exit code.`);
+    } catch {}
+  };
   const flushPart = (pid) => {
     const p = parts.get(pid); if (!p || p.logged) return; p.logged = true;
     const t = (p.text || '').trim(); if (!t) return;
+    // A finished builder reply (or, when real SSE sends no time.end, the idle sweep over every part)
+    // may ask the lead to decide or grant permission: surface it once per part.
+    if (p.type === 'text' && roleOf(p.sid) === 'build') raiseSignal(classifySignal({ text: t, agentRole: 'build' }));
     if (p.type === 'reasoning') L(`  ~ think: ${oneLine(t, 300)}`); else { lastWorkerReply = t; L('  assistant:'); block('│ ', t); }
   };
   const toolInput = (tool, inp = {}) => oneLine(inp.command ?? inp.filePath ?? inp.path ?? inp.pattern ?? inp.url ?? inp.description ?? JSON.stringify(inp), 200);
@@ -357,7 +387,7 @@ export async function runLane(repoArg, task, opts = {}) {
         }
         if (part.type === 'text' || part.type === 'reasoning') {
           const p = parts.get(part.id) || { type: part.type, text: '' }; p.type = part.type; if (typeof part.text === 'string' && part.text.length >= (p.text || '').length) p.text = part.text;
-          parts.set(part.id, p); if (part.time?.end) flushPart(part.id);
+          p.sid = sid; parts.set(part.id, p); if (part.time?.end) flushPart(part.id);
           if (sid === S.activeSession && !sx(sid).tools.size) S.activity = part.type === 'reasoning' ? 'thinking' : 'writing reply';
           if (sid === S.activeSession && part.type === 'text') S.lastTextAt = now();
         } else if (part.type === 'tool') {
@@ -367,6 +397,18 @@ export async function runLane(repoArg, task, opts = {}) {
             s.tools.set(key, { tool: part.tool, since: now(), input: toolInput(part.tool, st.input) });
             L(`  > ${part.tool}  ${toolInput(part.tool, st.input)}`);
             { const n = sleepPoll(st.input?.command); if (n) { L(`  ! sleep-poll: ${part.tool} waits sleep ${n}`); flagSleepPoll(`${part.tool}: sleep ${n}`); queueSleepSteer(); } }
+            // The lane's CHECK lines must run through the helper (outside the sandbox). A bash command
+            // that runs one directly hangs the worker on the blocked loopback network: alert the lead
+            // once and queue the helper guidance; a command that uses the helper is left alone.
+            if (roleOf(sid) === 'build') {
+              const bad = directCheckInvocation(st.input?.command, { checks, helper: `tasks/${task}.lane/check.mjs` });
+              if (bad && !directCheckAlerted) {
+                directCheckAlerted = true;
+                L(`  ! check run directly in the sandbox: ${oneLine(bad, 160)}; steering to the helper`);
+                raiseSignal({ kind: SANDBOX_CHECK, text: `ran this lane's check directly in the sandbox: ${oneLine(bad, 140)}`, why: 'the sandbox blocks the check' });
+                queueHelperGuidance();
+              }
+            }
             // Global CodeArts permissions may allow external reads/writes; at least make them visible.
             const fp = st.input?.filePath ?? st.input?.path;
             if (typeof fp === 'string' && path.isAbsolute(fp) && !insideRepo(fp)) {
@@ -380,6 +422,21 @@ export async function runLane(repoArg, task, opts = {}) {
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
             if (sid === S.activeSession) S.lastToolAt = now();
+            // A failed builder tool is either status 'error' or a real CodeArts 'completed' with a nonzero
+            // exit code. A passing command (exit 0) is never classified, so output that merely quotes an
+            // error inside a green run does not raise a false blocker. Surface an environment failure at
+            // once; otherwise the same command failing repeatedly with no progress is its own signal.
+            const ft = roleOf(sid) === 'build' ? toolFailureText(st) : '';
+            if (ft) {
+              const esig = classifySignal({ text: ft, agentRole: 'build' });
+              if (esig) raiseSignal(esig);
+              else {
+                const key = toolKey(part.tool, st.input);
+                const { state: nf, repeat } = noteFailure(toolFails.get(key), { commits: S.commits });
+                toolFails.set(key, nf);
+                if (repeat) raiseSignal({ kind: REPEAT_FAIL, text: `the same tool keeps failing with no progress: ${part.tool} ${oneLine(st.input?.command ?? st.input?.filePath ?? '', 120)}`, why: 'the same tool keeps failing' });
+              }
+            }
           }
           if (sid === S.activeSession && s) { const t = [...s.tools.values()][0]; S.activity = t ? `tool ${t.tool}: ${oneLine(t.input, 80)}` : 'thinking'; S.tools = [...s.tools.values()].map((x) => ({ tool: x.tool, input: oneLine(x.input, 120), since: x.since })); }
         } else if (part.type === 'step-finish') {
@@ -1308,6 +1365,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
 
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
+  // A numbered brief step with no explicit "step N:" commit is not done. The builder gets a bounded number
+  // of focused continuations naming the missing steps before the lane ends as needs review.
+  const STEP_CONTINUES = Math.max(0, Number(process.env.STEP_CONTINUES || 2));
+  const stepContinuation = (missing) => `You stopped before committing every numbered step of the brief. Missing: ${missing.map((n) => `step ${n}`).join(', ')}. Do not ask questions. Do not redo steps already committed (see \`git log --oneline\`): finish each remaining numbered step and commit it with the subject \`step N: <summary>\`.` + CHECK_HELP;
 
   // Model slots: before a build session starts (and after a fallback model switch), wait until
   // fewer than the model's cap of the OTHER running lanes use it. A crowded model must not get
@@ -1406,6 +1467,25 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         if (await pumpInbox(sid)) {
           if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
           continue; // a steer arrived right at the end: let the builder handle it
+        }
+        // The builder is idle: a numbered brief step with no explicit "step N:" commit is not done. Refresh
+        // the commits and send a focused continuation naming the missing steps (bounded) instead of letting
+        // the gates pass an incomplete lane. An unrelated wip commit never counts and a commit is never faked.
+        syncCommits();
+        const missingSteps = uncommittedSteps(S.stepList, S.commitLog);
+        if (stepCount > 0 && missingSteps.length) {
+          if ((S.stepContinues || 0) < STEP_CONTINUES) {
+            S.stepContinues = (S.stepContinues || 0) + 1; save(true);
+            L(`== builder idle with step ${missingSteps.join(', ')} uncommitted; continuation ${S.stepContinues}/${STEP_CONTINUES}`);
+            say(`step ${missingSteps.join(', ')} not committed; asking the builder to finish (${S.stepContinues}/${STEP_CONTINUES})`);
+            phase('build', `continuation for step ${missingSteps.join(', ')}`);
+            await send(sid, stepContinuation(missingSteps), buildModel);
+            continue;
+          }
+          reason = `step ${missingSteps.join(', ')} not committed after ${STEP_CONTINUES} continuation${STEP_CONTINUES === 1 ? '' : 's'}`;
+          exitCode = 4; forcedResult = 'needs review';
+          say(`step ${missingSteps.join(', ')} still uncommitted after ${STEP_CONTINUES} continuation${STEP_CONTINUES === 1 ? '' : 's'}; needs review`);
+          break;
         }
         phase('gate', 'running gates');
         // The git clean part runs first: a wrong tree ends the loop before any model call, and once it

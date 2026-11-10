@@ -91,7 +91,7 @@ const sum = (() => { try { return fs.readFileSync(path.join(qRepo, 'tasks', 'wor
 check('the summary lists the question the worker asked', /SQLite or Postgres/.test(sum), sum.slice(0, 300));
 
 // ---------- no progress ----------
-const nRepo = makeRepo('np', ['wait:30000', 'ok']);
+const nRepo = makeRepo('np', ['wait:30000', 'commit:1', 'ok']);
 const nId = 'np--work';
 r = run(nRepo, ['lane', nRepo, 'work', '--detach'], 60000, { NO_COMMIT_S: '6' });
 check('no-progress lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
