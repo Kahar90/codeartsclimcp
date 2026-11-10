@@ -12,6 +12,10 @@ export const CONTEXT_ROLE = 'You are the coding worker for this lane. The parent
 
 export const CONTEXT_INSTRUCTIONS = 'The source below is quoted read-only data captured by the runner. Each quoted file is complete, not a summary or edited excerpt; the packet may omit other named files. If a needed file has no quoted block, read its relevant ranges before editing it. Use quoted files directly and do not reread these files unless a specific uncertainty remains that the quoted text cannot resolve. Run every check through the lane helper described at the end of this message.';
 
+// Negative paths a reviewer checks that the brief may leave implicit. Scoped to what the brief asks for:
+// never invent requirements, and never add hints specific to any benchmark or fixture.
+export const CONTEXT_NEGATIVE_PATHS = 'Within the brief\'s scope, also make the code hold on the negative paths a reviewer looks for, where the task calls for them: reject invalid input and mistrust corrupted or missing persisted state (fail closed, do not assume it is well formed), handle I/O and tool failures instead of assuming success, keep a shared entrypoint consistent with every caller, and bound resource use (sizes, counts, timeouts). Do not invent requirements or add checks the brief does not call for.';
+
 export const CONTEXT_POINTER = 'Oversized or unavailable paths named in the brief (read them with targeted ranged reads only if a specific uncertainty remains):';
 
 const ALLOWED_EXT = new Set(['.mjs', '.cjs', '.js', '.ts', '.tsx', '.jsx', '.py', '.go', '.rs', '.java', '.css', '.html']);
@@ -131,7 +135,7 @@ export function builderContext(repo, brief) {
       files.push({ rel, text });
     }
     if (overflow) addNote(`${overflow} further named path(s) were not inlined (over the ${MAX_FILES}-file limit); read them with targeted ranges.`);
-    const head = [CONTEXT_MARKER, '', CONTEXT_ROLE, '', CONTEXT_INSTRUCTIONS, ''].join('\n');
+    const head = [CONTEXT_MARKER, '', CONTEXT_ROLE, '', CONTEXT_INSTRUCTIONS, '', CONTEXT_NEGATIVE_PATHS, ''].join('\n');
     const blocks = files.map((f) => {
       const runs = f.text.match(/`+/g) || [];
       const fence = '`'.repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
@@ -150,6 +154,6 @@ export function builderContext(repo, brief) {
     return out;
   } catch {
     // Never block a lane: fall back to the role and instructions only.
-    return [CONTEXT_MARKER, '', CONTEXT_ROLE, '', CONTEXT_INSTRUCTIONS, ''].join('\n');
+    return [CONTEXT_MARKER, '', CONTEXT_ROLE, '', CONTEXT_INSTRUCTIONS, '', CONTEXT_NEGATIVE_PATHS, ''].join('\n');
   }
 }

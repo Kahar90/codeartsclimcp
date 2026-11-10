@@ -1243,15 +1243,20 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // context and, for a fix round, the previous findings block that names the fix range.
   const finalReviewPrompt = (prev) => {
     const rf = path.join(repo, 'tasks', `${task}.review.md`);
-    let rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
+    const custom = fs.existsSync(rf);
+    // A fix round gets its own dedicated fix-only prompt (every prior finding, the full fix range, a
+    // regression assessment, the read-only rule and the same VERDICT line) instead of the full-review
+    // template plus a replay of the whole review context, which only competes with the fix instructions.
+    // A custom tasks/<task>.review.md is still honored: its instructions are kept alongside the fix prompt.
+    if (prev && prev.to && prev.verdict === 'needs fixes') {
+      let rb = fs.readFileSync(path.join(SKILL, 'templates', 'review-fix.md'), 'utf8')
+        .replaceAll('{TASK}', task).replaceAll('{START}', START).replaceAll('{FROM}', prev.to).replaceAll('{FINDINGS}', prev.text || '(no findings recorded)');
+      if (custom) rb += `\n\nAdditional review instructions (tasks/${task}.review.md):\n${fs.readFileSync(rf, 'utf8')}`;
+      return rb;
+    }
+    let rb = custom ? fs.readFileSync(rf, 'utf8')
       : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
     rb += stepReviewAppendix();
-    // A fix round reviews only its own fix: name the previous review's head commit as the range start.
-    if (prev && prev.to && prev.verdict === 'needs fixes') {
-      rb += `\n\nPrevious review findings:\n${prev.text || ''}\n`
-        + `Review only the fix: git log --oneline ${prev.to}..HEAD and git diff ${prev.to}..HEAD. `
-        + `Say whether each finding is fixed and whether the fix broke anything; same output format and VERDICT line.`;
-    }
     rb += reviewContext(prev && prev.to ? prev.to : START);
     return rb;
   };

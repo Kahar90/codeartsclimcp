@@ -21,12 +21,13 @@ const base = { ...process.env, CA_REGISTRY: reg, CA_SETTINGS: settings, CA_DASH:
   CODEARTS_CLI_AK: 'fake-ak', CODEARTS_CLI_SK: 'fake-sk', STALL_S: '60', THINK_S: '0', LANE_TIMEOUT: '240', FAKE_REVIEW_MS: '800' };
 delete base.NO_REVIEW; delete base.REVIEW_FIXES;
 const FINDING = '1. DONE\nBugs:\n- page1.html:1 says thing 1, the spec wants thing one\nVERDICT: needs fixes';
-function lane(name, { script, review, env = {}, briefExtra = '' }) {
+function lane(name, { script, review, env = {}, briefExtra = '', reviewFile = '' }) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
   fs.writeFileSync(path.join(repo, 'fake-script.json'), JSON.stringify(script));
   fs.writeFileSync(path.join(repo, 'fake-review.json'), JSON.stringify(review));
   fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-*.log\n');
+  if (reviewFile) fs.writeFileSync(path.join(repo, 'tasks', 'work.review.md'), reviewFile);
   fs.writeFileSync(path.join(repo, 'tasks', 'work.md'), `${briefExtra}Goal: one page.\n1. Write page1.html. Commit.\nCHECK: node -e 0\n`);
   const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' });
   g('init', '-q'); g('add', '-A'); g('-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'init');
@@ -54,6 +55,20 @@ check('summary has "review rounds: 2 (needs fixes -> ready)"', /review rounds: 2
 check('review fix rounds are not counted as gate fix rounds', r.st?.fixes === 0, `${r.st?.fixes}`);
 
 check('healthy final reviewer session reused for fix round', reviews.length === 2 && reviews[0].sid === reviews[1].sid, reviews.map(p=>p.sid).join(','));
+
+// Step 2: the fix round must use a dedicated concise fix-only prompt, not the full-review text plus a
+// replay of the whole review context (which only competes with the fix instructions).
+const fixPrompt = reviews[1]?.text || '';
+check('fix round uses the dedicated fix-only review prompt', /focused re-review of a fix/i.test(fixPrompt), fixPrompt.slice(0, 160));
+check('fix prompt keeps every prior finding and names the fix range', /Previous review findings:/.test(fixPrompt) && /page1\.html:1/.test(fixPrompt) && /[0-9a-f]{7,}\.\.HEAD/.test(fixPrompt), fixPrompt.slice(0, 240));
+check('fix prompt asks for a regression assessment and keeps the read-only rule and VERDICT line', /regression/i.test(fixPrompt) && /read-only/i.test(fixPrompt) && /"VERDICT: ready" or "VERDICT: needs fixes"/.test(fixPrompt), fixPrompt.slice(0, 240));
+check('fix prompt drops the full-review context block (no conflicting instructions)', fixPrompt.length > 0 && !/Prepared context from the runner/.test(fixPrompt) && fixPrompt.length < (reviews[0]?.text || '').length, `${fixPrompt.length} vs ${reviews[0]?.text?.length}`);
+
+// G: a custom tasks/<task>.review.md is still honored on the fix round.
+const CUSTOM_REVIEW = 'CUSTOM-REVIEW-MARK: be extra strict about page titles.\nEnd with VERDICT: ready or VERDICT: needs fixes.\n';
+const gLane = lane('customreview', { script: ['steps:1', 'fix', 'ok'], review: REV, reviewFile: CUSTOM_REVIEW });
+const gRev = gLane.prompts.filter((p) => p.agent === 'plan');
+check('custom tasks/<task>.review.md is preserved on the fix round', gLane.code === 0 && gRev.length === 2 && /CUSTOM-REVIEW-MARK/.test(gRev[1]?.text || ''), gRev[1]?.text?.slice(0, 200));
 
 // B: a reused reviewer session that answers with its OLD cached verdict (the same message id as the
 // recorded round) must never be accepted. The runner has to fall back to a fresh session whose verdict
