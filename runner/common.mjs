@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { progressAge } from './watchdog.mjs';
 import { readCreds } from './auth.mjs';
 import { gitDirInsideRepo } from './controls.mjs';
+import { lintBrief } from './brieflint.mjs';
 export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SKILL = path.resolve(HERE, '..');
 export const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
@@ -323,3 +324,60 @@ export const laneId = (repo, task) => `${path.basename(path.resolve(repo))}--${t
 export function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(code); }
 
 export const CA_ENTRY = path.join(HERE, 'ca.mjs');
+
+export const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
+
+// Lint a brief the way `ca brief-check` and the start of `ca lane` do (tracked files from git ls-files).
+export function briefWarningsFor(repo, task) {
+  const file = path.join(repo, 'tasks', `${task}.md`);
+  let briefText = null; try { briefText = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const tracked = git(repo, 'ls-files').split(/\r?\n/).filter(Boolean);
+  return lintBrief({ repo, briefText, listFiles: () => tracked, readFile: (rel) => { try { return fs.readFileSync(path.join(repo, rel), 'utf8'); } catch { return ''; } } });
+}
+
+export function briefWarningText(w) {
+  if (w.kind === 'protected-dependent') return `${w.file} is protected by a rule ("${w.rule}") but the brief changes ${(w.references || []).join(', ')}, which that file names`;
+  if (w.kind === 'missing-check-file') return `a CHECK line runs ${w.file}, which is not a file in the repo`;
+  return `${w.kind}: ${w.file}`;
+}
+
+// Readable warning lines: more than 3 protected files under the same rule naming the same changed files
+// become one line (a check suite names the runner in every file), so the real warning is not buried.
+export function briefWarningLines(warnings) {
+  const groups = new Map(); const order = [];
+  for (const w of warnings || []) {
+    const key = w.kind === 'protected-dependent' ? `${w.rule}\u0000${(w.references || []).join(',')}` : `\u0001${order.length}`;
+    if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+    groups.get(key).push(w);
+  }
+  return order.map((k) => {
+    const g = groups.get(k);
+    if (g.length <= 3) return g.map(briefWarningText);
+    const w = g[0];
+    return [`${g.length} protected files are named by a rule ("${w.rule}") but the brief changes ${(w.references || []).join(', ')}, which they name (e.g. ${g.slice(0, 3).map((x) => x.file).join(', ')}): say in the brief how they may change`];
+  }).flat();
+}
+
+// Step state from commits: "step N" in a subject wins, otherwise commits map to steps in order.
+export function stepProgress(s, steps = s.stepList || []) {
+  const commits = s.commitLog || []; const done = new Map();
+  for (const c of commits) { const m = c.subject.match(/\bstep\s*(\d+)/i); if (m) done.set(Number(m[1]), c.hash); }
+  if (!done.size) commits.forEach((c, i) => { if (i < steps.length) done.set(steps[i].n, c.hash); });
+  const building = !s.result && ['build', 'fix', 'starting', 'backoff', 'restart', 'gate'].includes(s.phase);
+  const cur = building ? steps.find((st) => !done.has(st.n))?.n : null;
+  const list = steps.map((st) => ({ ...st, state: done.has(st.n) ? 'done' : st.n === cur ? 'current' : s.result ? 'open' : 'pending', commit: done.get(st.n) || '' }));
+  return { list, done: list.filter((x) => x.state === 'done').length, total: list.length, current: list.find((x) => x.state === 'current') || null };
+}
+
+// The project a lane belongs to: a worktree reports the main repo (its .git common dir's parent).
+export const projectCache = new Map();
+
+export function projectOf(repo) {
+  if (projectCache.has(repo)) return projectCache.get(repo);
+  let main = repo;
+  const out = git(repo, 'rev-parse', '--git-common-dir');
+  if (out && path.basename(path.resolve(repo, out)).toLowerCase() === '.git') main = path.dirname(path.resolve(repo, out));
+  const v = { key: main, name: path.basename(main) };
+  projectCache.set(repo, v);
+  return v;
+}
