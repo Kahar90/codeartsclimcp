@@ -21,6 +21,12 @@ const freePort = () => new Promise((r) => { const s = net.createServer(); s.list
 // Every process this check starts is tracked so the finally block can never leave one behind.
 const spawned = [];
 const spawnSleeper = () => { const p = spawn(process.execPath, ['-e', 'setTimeout(()=>{},600000)'], { detached: true, stdio: 'ignore' }); p.unref(); spawned.push(p); guard({ children: [p] }); return p; };
+// A child of this check that another process killed stays a zombie on Linux and macOS until this
+// process reaps it, and kill(pid, 0) still succeeds on a zombie: wait for its exit event instead.
+const exited = (p, ms = 5000) => new Promise((res) => {
+  if (p.exitCode !== null || p.signalCode !== null) return res(true);
+  const t = setTimeout(() => res(false), ms); p.once('exit', () => { clearTimeout(t); res(true); });
+});
 const isDead = (pid) => { if (!pid) return true; try { process.kill(pid, 0); return false; } catch (e) { return e.code !== 'EPERM'; } };
 
 const repo = path.join(tmp, 'sbx'); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
@@ -61,8 +67,8 @@ try {
   fs.writeFileSync(path.join(reg, 'sbx--run.json'), JSON.stringify({ id: 'sbx--run', dir: runDir, repo, task: 'run' }));
   r = ca(['rm', 'sbx--run']);
   check('ca rm reports the killed pids', r.code === 0 && r.out.includes(String(sup.pid)) && r.out.includes(String(srv.pid)), r.out.trim());
-  check('ca rm kills the supervisor process', isDead(sup.pid), `pid ${sup.pid}`);
-  check('ca rm kills the codearts server process', isDead(srv.pid), `pid ${srv.pid}`);
+  check('ca rm kills the supervisor process', await exited(sup), `pid ${sup.pid}`);
+  check('ca rm kills the codearts server process', await exited(srv), `pid ${srv.pid}`);
   check('ca rm removes the running lane', !fs.existsSync(path.join(reg, 'sbx--run.json')) && !fs.existsSync(runDir));
 
   // ---- 3. a plan listing two lanes: ca plan rm deletes the lanes and marks the plan removed ----

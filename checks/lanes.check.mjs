@@ -119,7 +119,7 @@ try {
   check('no horizontal overflow on the plan home', (await ev('document.documentElement.scrollWidth <= document.documentElement.clientWidth')) === true);
   await shot('lanes-home');
   const hash0 = await ev('location.hash');
-  const pt = JSON.parse(await ev('(function(){const b=document.querySelector("[data-steps]");if(!b)return "{}";const r=b.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()') || '{}');
+  const pt = JSON.parse(await ev('(function(){const b=document.querySelector("[data-steps]");if(!b)return "{}";b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()') || '{}');
   if (pt.x != null) { await click(pt.x, pt.y); await wait(400); }
   const opened = JSON.parse(await ev('(function(){const b=document.querySelector("[data-steps]");return JSON.stringify({hash:location.hash,open:b?b.getAttribute("aria-expanded"):"",items:document.querySelectorAll(".steplist li").length});})()') || '{}');
   check('step disclosure opens without route change', opened.hash === hash0 && opened.open === 'true' && opened.items === 7, JSON.stringify(opened));

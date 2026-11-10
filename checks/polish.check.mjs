@@ -205,8 +205,11 @@ try {
       const txt = await ev(`(document.querySelector('.ca-update-pop') || {}).textContent || ''`);
       check(`update ${v.name}: the popover names both versions, lists what is new and offers Update now`, /0\.2\.0/.test(txt) && /0\.3\.0/.test(txt) && /Update now/i.test(txt) && (await ev(`document.querySelectorAll('.ca-update-pop li').length`)) >= 2, txt.slice(0, 160));
       await shot(`update-${page.startsWith('/office') ? 'office' : 'lanes'}-${v.name}`);
-      await key('Escape'); await wait(300);
-      check(`update ${v.name}: Escape closes the popover`, !(await ev(RECT('.ca-update-pop'))));
+      // The popover animates out and is removed on animationend or after a 400 ms fallback; slow CI
+      // runners (macOS) can miss a fixed 300 ms wait, so poll for up to a second.
+      await key('Escape');
+      let popGone = false; for (let i = 0; i < 20 && !popGone; i++) { await wait(50); popGone = !(await ev(RECT('.ca-update-pop'))); }
+      check(`update ${v.name}: Escape closes the popover`, popGone);
     }
   }
 } catch (e) { check('no exception', false, e.stack || e.message); }

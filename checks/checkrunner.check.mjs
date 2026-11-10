@@ -19,7 +19,10 @@ try {
   fs.writeFileSync(path.join(checksDir, 'alpha.check.mjs'), "console.log('PASS alpha');\n");
   fs.writeFileSync(path.join(checksDir, 'beta.check.mjs'), "console.log('PASS beta');\n");
   fs.writeFileSync(path.join(checksDir, 'not-a-check.txt'), 'ignored\n');
-  const run = (args) => { const r = spawnSync(process.execPath, [path.join('tools', 'run-checks.mjs'), ...args], { cwd: tmp, encoding: 'utf8', timeout: 60000 }); return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }; };
+  // Inner runs never emit GitHub annotations: this check echoes their output, and on CI the inner
+  // "::error" lines for the deliberately failing zeta check would show up as real failures.
+  const innerEnv = { ...process.env }; delete innerEnv.GITHUB_ACTIONS;
+  const run = (args) => { const r = spawnSync(process.execPath, [path.join('tools', 'run-checks.mjs'), ...args], { cwd: tmp, env: innerEnv, encoding: 'utf8', timeout: 60000 }); return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }; };
 
   let r = run(['alpha']);
   check('matching filter runs the matching check and exits 0', r.code === 0 && /ok\s+alpha\.check\.mjs/.test(r.out) && !/beta\.check\.mjs/.test(r.out) && /checks: 1 passed, 0 failed/.test(r.out), `code ${r.code} ${r.out}`);

@@ -62,10 +62,11 @@ try {
   check('the plan home banner shows the plan glance, working', !!b && b.state === 'working' && b.word === 'Working', JSON.stringify(b && { state: b.state, word: b.word }));
   check('a working glance draws the thin lanes bar', !!b && b.track === true, JSON.stringify(b && { track: b.track }));
   check('the plans rail puts a glance dot before each plan name', (await ev('document.querySelectorAll("#railBody .glance-dot").length')) === 2, String(await ev('document.querySelectorAll("#railBody .glance-dot").length')));
-  // The banner must not push a required control (the lane step disclosure) off the fold: lanes.check
-  // clicks it with viewport coordinates, so keep it on screen.
-  const stepGeom = await ev('(function(){const b=document.querySelector("[data-steps]");const r=b.getBoundingClientRect();const h=document.querySelector("#glanceBanner");const hr=h&&h.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,top:Math.round(r.top),ih:innerHeight,bannerH:hr&&Math.round(hr.height)};})()');
-  check('the plan banner keeps the first step disclosure on screen', !!stepGeom && stepGeom.y > 0 && stepGeom.y < stepGeom.ih, JSON.stringify(stepGeom));
+  // The banner must never cover a required control (the lane step disclosure). Scroll it into view like a
+  // user would (font metrics differ per OS, so a fixed fold line is not a contract), then the point at its
+  // centre must be the disclosure itself, not the banner.
+  const stepGeom = await ev('(function(){const b=document.querySelector("[data-steps]");b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect();const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);const h=document.querySelector("#glanceBanner");const hr=h&&h.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2,top:Math.round(r.top),ih:innerHeight,bannerH:hr&&Math.round(hr.height),own:!!hit&&(hit===b||b.contains(hit))};})()');
+  check('the plan banner never covers the first step disclosure', !!stepGeom && stepGeom.y > 0 && stepGeom.y < stepGeom.ih && stepGeom.own, JSON.stringify(stepGeom));
   await click(stepGeom.x, stepGeom.y); await wait(400);
   check('a raw viewport click still opens the step disclosure under the banner', (await ev('document.querySelector("[data-steps]").getAttribute("aria-expanded")')) === 'true');
   await shot('glance-lanes-working');

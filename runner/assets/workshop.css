@@ -120,6 +120,14 @@ a { color: var(--sel-ink); }
   .ca-tab { padding: 0 10px; height: 34px; font-size: 14px; }
   .ca-counts { font-size: 12.5px; }
 }
+/* Phones: Linux and macOS fonts run wider than Segoe UI, and the Office bar (brand, two tabs, glance,
+   Needs you pill, counts) overflowed a 390 px screen by up to 25 px. Tighter spacing keeps every item. */
+@media (max-width: 420px) {
+  .ca-top { padding: 0 8px; gap: 6px; }
+  .ca-brand { font-size: 16px; }
+  .ca-tab { padding: 0 8px; }
+  .ca-tabs { gap: 4px; }
+}
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; animation-duration: 0s !important; } }
 .ca-update-status { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--sel-bg); color: var(--sel-ink); font-weight: 600; font-size: 13px; animation: ca-fade-in var(--dur-2) var(--ease-out); }
 .ca-spin { width: 14px; height: 14px; flex: none; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: ca-spin 0.7s linear infinite; }
