@@ -9,11 +9,15 @@ tell from each agent alone whether it is working, finished fine, or needs them.
      needs review, paused, supervisor died, stalled (the same lanes the Needs you bucket holds). False for running,
      planned, done, verified, handled/merged, stopped, killed, dropped, continued, and for every ended lane of a
      closed plan (the lead closed it, so nothing is left for the human).
-   - steps: "live" | "complete" | "hide".
+   - steps: "live" | "complete" | "partial" | "hide". Completion comes only from real step evidence
+     ("step N" subjects), never from the result alone.
      live: the lane is running or planned; show "step d/t" (or "d/t steps").
-     complete: done, verified or merged; show "t/t" with a check mark.
-     hide: everything else (handled, stopped, failed, dropped, continued...): never show a step
-     fraction on the label or badge; the lane details may still list the steps.
+     complete: every numbered step is done; show "t/t" with a check mark.
+     partial: the lane has a known step list and some steps are still open (done, verified, merged,
+     handled, stopped, failed, dropped, paused...); show the real "d/t" fraction and the open steps,
+     never a forced "t/t".
+     hide: no known step list (a legacy lane whose progress cannot be trusted, or an older payload):
+     never show a step fraction on the label or badge; the lane details may still list the steps.
    - glyph: one of the glance glyphs: working U+25CF, needs-you "!", failed U+2715, done U+2713,
      idle U+2013. Running lanes "working"; attention lanes "!" (failed and checks failing use the x);
      done, verified, merged and handled use the check; dropped, continued and stopped-but-handled

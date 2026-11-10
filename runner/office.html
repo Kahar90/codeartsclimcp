@@ -828,9 +828,9 @@ function demoModel() {
     const lanes = [
       lane("docs-site", "docs", { key: "verified", label: "Merged", tone: "done", reason: "merged by the lead", attention: false, steps: "complete", glyph: "\u2713" },
         { health: "done", result: "done", handled: true, commits: "8/8", progress: { done: 8, total: 8, current: null } }),
-      lane("cli-dx", "code", { key: "handled", label: "Handled by lead", tone: "idle", reason: "the lead acked it", attention: false, steps: "hide", glyph: "\u2013" },
+      lane("cli-dx", "code", { key: "handled", label: "Handled by lead", tone: "idle", reason: "the lead acked it", attention: false, steps: "partial", glyph: "\u2013" },
         { health: "done", result: "done", handled: true, commits: "4/8", progress: { done: 4, total: 8, current: null } }),
-      lane("mcp", "review", { key: "stopped", label: "Stopped by lead", tone: "warn", reason: "the lead stopped it", attention: false, steps: "hide", glyph: "\u2013" },
+      lane("mcp", "review", { key: "stopped", label: "Stopped by lead", tone: "warn", reason: "the lead stopped it", attention: false, steps: "partial", glyph: "\u2013" },
         { health: "stopped", result: "stopped", commits: "3/8", progress: { done: 3, total: 8, current: null } }),
     ];
     const pt = planTokenSums(lanes);
@@ -1673,6 +1673,7 @@ function stepsFraction(st, l) {
   if (mode === "live") return t ? "step " + d + "/" + t : "";
   if (mode === "complete") { const n = t || d; return n ? n + "/" + n + " \u2713" : "\u2713"; }
   if (mode === "hide") return "";
+  if (mode === "partial") return t ? d + "/" + t : ""; // some steps open: show the true fraction
   return t ? d + "/" + t : ""; // older server: keep today's behaviour
 }
 function isAttentionLane(l, st) {

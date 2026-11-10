@@ -83,7 +83,8 @@ try {
     await shot(`fit-${w}x${h}`);
   }
 
-  // Step 3: one truth - the header pill word equals the sign word, and hide lanes show no step fraction.
+  // Step 3: one truth - the header pill word equals the sign word, lanes with open steps show their real
+  // fraction (no forced full bar for merged/handled) and a fully done lane shows t/t with a check.
   await size(1280, 800);
   await nav(base + '/office?demo=closed&still=1');
   const gc = await glance();
@@ -91,13 +92,18 @@ try {
   check('demo=closed: sign word Done', !!gc && gc.word === 'Done', gc && String(gc.word));
   check('demo=closed: header pill word equals the sign word', pillWord === (gc && gc.word), `pill:${pillWord} sign:${gc && gc.word}`);
   const sc = await state();
-  const hideLanes = new Set((sc && sc.lanes || []).filter((l) => l.steps === 'hide').map((l) => l.id));
-  const hideSubs = [];
+  const partialLanes = new Set((sc && sc.lanes || []).filter((l) => l.steps === 'partial').map((l) => l.id));
+  const completeLanes = new Set((sc && sc.lanes || []).filter((l) => l.steps === 'complete').map((l) => l.id));
   // The plate text lives on layout().stations (state().stations has no sub): read it there so this can fail.
   const lc = await ev('window.__office.layout()');
-  for (const s of (lc && lc.stations) || []) if (hideLanes.has(s.laneId)) hideSubs.push({ id: s.laneId, sub: String(s.sub || ''), station: s.station });
-  const frac = hideSubs.filter((x) => /\d+\s*\/\s*\d+/.test(x.sub) || /step\s+\d/i.test(x.sub));
-  check('demo=closed: hide lanes seat and show no step fraction', hideSubs.length >= 1 && hideSubs.every((x) => x.sub.length > 0) && frac.length === 0, JSON.stringify({ hideSubs }));
+  const partialSubs = [], completeSubs = [];
+  for (const s of (lc && lc.stations) || []) {
+    if (partialLanes.has(s.laneId)) partialSubs.push({ id: s.laneId, sub: String(s.sub || ''), station: s.station });
+    if (completeLanes.has(s.laneId)) completeSubs.push({ id: s.laneId, sub: String(s.sub || ''), station: s.station });
+  }
+  const shown = partialSubs.filter((x) => /\d+\s*\/\s*\d+/.test(x.sub) || /step\s+\d/i.test(x.sub));
+  check('demo=closed: lanes with open steps show their true step fraction', partialSubs.length >= 1 && shown.length === partialSubs.length, JSON.stringify({ partialSubs }));
+  check('demo=closed: a fully done lane shows t/t with a check', completeSubs.length >= 1 && completeSubs.every((x) => /8\s*\/\s*8/.test(x.sub)), JSON.stringify({ completeSubs }));
   await shot('fit-closed');
 
   // Step 4: the glance toggle hides and shows the sign, glow and bubble, keeps title and favicon, survives a reload.

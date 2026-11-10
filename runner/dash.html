@@ -1096,14 +1096,16 @@ function laneBucket(l) {
 // ---------- lane truth (status-contract part 1) ----------
 // The server sends lane.status.attention, .steps and .glyph; an older payload omits them, so derive the
 // same values from the lane. attention marks the lanes a human must act on (the Needs you set);
-// steps is live (running/planned), complete (done/verified/merged) or hide (everything else).
+// steps is live (running/planned), complete (every step done), partial (some steps still open, so the
+// real fraction shows) or hide (no known step list).
 const LANE_GLYPH = { working: '\u25CF', needs: '!', failed: '\u2715', done: '\u2713', idle: '\u2013' };
 function laneAttention(l) { const s = l && l.status; return (s && typeof s.attention === 'boolean') ? s.attention : laneBucket(l) === 'attention'; }
 function laneStepsMode(l) {
   const s = l && l.status; if (s && s.steps) return s.steps;
   if (l && (l.running || l.health === 'planned')) return 'live';
-  if (['done', 'verified'].includes(String((l && l.result) || ''))) return 'complete';
-  if (s && s.label === 'Merged') return 'complete';
+  // An older payload: derive the truth from the real fraction, never from the result alone.
+  const p = (l && l.progress) || {};
+  if (p.total) return (p.done || 0) >= p.total ? 'complete' : 'partial';
   return 'hide';
 }
 function laneGlyphOf(l) {
@@ -1120,7 +1122,8 @@ function laneBadge(l) {
   return `<span class="ca-badge s-${esc(tone)}" title="${esc(st.label)}"><span class="gb" aria-hidden="true">${esc(laneGlyphOf(l))}</span>${esc(st.label)}</span>`;
 }
 // The step bar and fraction. A live lane shows "d/t steps", a complete lane a full bar with "t/t" and a
-// check, a settled (hide) lane shows neither on the card (its detail page still lists the steps).
+// check, a partial lane its real "d/t" fraction, and a hidden lane shows neither on the card (its
+// detail page still lists the steps).
 function laneStepsCard(l) {
   const mode = laneStepsMode(l), p = l.progress || {}, n = p.total || 0;
   if (mode === 'hide') return '';
