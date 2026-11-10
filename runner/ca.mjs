@@ -260,13 +260,24 @@ const MAAS_MODELS = {
   // The same flash model with thinking turned off: about half the latency per model call.
   'deepseek-v4.1-flash-fast': { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash, no thinking (MaaS)', reasoning: false, options: { thinking: { type: 'disabled' } }, limit: { context: 200000, output: 65536 } },
 };
+// A `maas/<id>` model named in BUILD_MODEL, REVIEW_MODEL, STEP_REVIEW_MODEL or THINK_FALLBACK_MODEL that
+// is not built in is declared on the fly, so MAAS_BASE_URL + MAAS_API_KEY can point a lane at any
+// OpenAI-compatible endpoint (another region, or another vendor's API) without a code change.
+function maasModels() {
+  const models = { ...MAAS_MODELS };
+  for (const v of ['BUILD_MODEL', 'REVIEW_MODEL', 'STEP_REVIEW_MODEL', 'THINK_FALLBACK_MODEL']) {
+    const m = String(process.env[v] || '').match(/^maas\/(.+)$/);
+    if (m && !models[m[1]]) models[m[1]] = { name: `${m[1]} (${v.toLowerCase()})`, reasoning: true, limit: { context: 128000, output: 32768 } };
+  }
+  return models;
+}
 let maasKey;
 const maasEnv = () => {
   maasKey ??= userEnv('MAAS_API_KEY');
   if (!maasKey) return {};
   return {
     CUSTOM_PROVIDER_KEYS: 'maas',
-    OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider: { maas: { npm: '@ai-sdk/openai-compatible', name: 'Huawei Cloud MaaS', options: { baseURL: MAAS_URL, apiKey: maasKey }, models: MAAS_MODELS } } }),
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider: { maas: { npm: '@ai-sdk/openai-compatible', name: 'Huawei Cloud MaaS', options: { baseURL: MAAS_URL, apiKey: maasKey }, models: maasModels() } } }),
   };
 };
 function caEnv(extra = {}) {
