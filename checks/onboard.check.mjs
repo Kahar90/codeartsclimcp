@@ -21,6 +21,10 @@ const env = {
   CODEX_HOME: path.join(home, '.codex'), CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CA_CLAUDE_CLI: 'none',
   CA_SMOKE_DIR: path.join(tmp, 'smoke'),
   CA_SETTINGS: settings, CA_REGISTRY: reg, CA_DASH: '0',
+  // The fake home has no CodeArts CLI: without a stand-in, onboard --yes downloaded the real installer
+  // (network-bound, ~60 s). node answers --version like an installed CLI; the install path has its own
+  // stubbed tests below (CA_INSTALL_CMD).
+  CODEARTS_EXE: process.execPath,
 };
 delete env.XDG_CONFIG_HOME;
 const ca = (args, opts = {}) => { const t0 = Date.now(); const r = spawnSync(process.execPath, [CA, ...args], { cwd: tmp, env, encoding: 'utf8', timeout: opts.timeout || 90000, input: '' }); return { code: r.status, out: r.stdout || '', err: r.stderr || '', ms: Date.now() - t0 }; };
