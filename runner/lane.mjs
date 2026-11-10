@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -6,6 +7,7 @@ import path from 'node:path';
 import { authProblem } from './authsignal.mjs';
 import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarningsFor, dashUrl, die, dur, ensureDash, git, health, hhmmss, killTree, laneId, lanes, now, oneLine, readJSON, resultOf, sleep, splitModel, stepProgress, workerShell, writeAtomic, writeProbe } from './common.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
+import { runOrdered } from './gate.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { Server } from './server.mjs';
@@ -835,6 +837,22 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ch.on('close', (code) => { clearTimeout(timer); res({ code: code ?? 1, out, ms: now() - t0 }); });
     ch.on('error', (e) => { clearTimeout(timer); res({ code: 127, out: String(e), ms: now() - t0 }); });
   });
+  // Fingerprint the exact content under test: every tracked file plus every nonignored untracked file,
+  // by path and bytes. A commit that leaves the working tree byte-identical does not change it, so a
+  // check run before that commit stays valid; any content change (or a check that writes the tree)
+  // changes it and disables the reuse.
+  const contentFingerprint = () => {
+    const h = crypto.createHash('sha256');
+    const list = new Set();
+    for (const f of git(repo, 'ls-files').split('\n')) if (f) list.add(f);
+    for (const f of git(repo, 'ls-files', '--others', '--exclude-standard').split('\n')) if (f) list.add(f);
+    for (const f of [...list].sort()) {
+      h.update(f); h.update('\0');
+      try { h.update(fs.readFileSync(path.join(repo, f))); } catch { h.update('\0'); }
+      h.update('\0');
+    }
+    return h.digest('hex');
+  };
   // Run one CHECK request from the worker's helper: same shell, env and timeout as the gates. Every
   // line run is recorded in S.workerChecks, and the result file is written atomically (tmp + rename).
   const writeCheckResult = (rid, obj) => writeAtomic(path.join(reqDir, `${rid}.result.json`), JSON.stringify(obj));
@@ -844,9 +862,13 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     const arg = String(req.arg || '').trim();
     const runLine = async (n, cmd) => {
       L(`  > check service: ${n} ${cmd}`);
+      const fpBefore = contentFingerprint();
       const t0 = now(); const r = await runCheck(cmd);
+      // A check that mutated the tree cannot vouch for the content the gate will see: record no
+      // fingerprint so the run is never reused.
+      const fp = contentFingerprint() === fpBefore ? fpBefore : null;
       L(`  < check service: exit ${r.code} (${dur(now() - t0)})`);
-      S.workerChecks.push({ n, cmd, code: r.code, ms: r.ms, at: now(), head, clean }); save(true);
+      S.workerChecks.push({ n, cmd, code: r.code, ms: r.ms, at: now(), head, clean, fp }); save(true);
       return { n, cmd, code: r.code, ms: r.ms, out: r.out };
     };
     const lines = [];
@@ -916,18 +938,25 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   }
   // The final review starts right after the git clean gate and runs while these CHECK lines run.
   async function runChecks() {
-    // The worker may already have run every CHECK line green on this exact HEAD with a clean tree
-    // (through the check service, outside its sandbox). Reuse those results instead of running them
-    // again; a newer commit, a failed or a missing line, or a dirty tree disables the reuse.
-    const reuseEntries = checks.map((c, i) => { let e = null; for (const x of S.workerChecks) if (x.n === i + 1) e = x; return e; });
-    const curHead = git(repo, 'rev-parse', 'HEAD');
-    if (checks.length && reuseEntries.every((e) => e && e.code === 0 && e.head === curHead && e.clean === true)) {
-      L(`== gate check reused (worker ran it green on ${curHead.slice(0, 7)})`);
+    // Reuse the worker's own green runs when the exact tested content is unchanged. A commit that
+    // leaves the working tree byte-identical must not force the gate to run the same checks again;
+    // the old HEAD+clean cache missed the normal write-run-commit flow (the tree was dirty). The
+    // fingerprint covers tracked and nonignored untracked content and the check command, so a run
+    // that mutated the tree, failed, or a command that changed disables the reuse.
+    const curFp = contentFingerprint();
+    const reuseEntries = checks.map((c, i) => { let e = null; for (const x of S.workerChecks) if (x.n === i + 1 && x.cmd === c) e = x; return e; });
+    // Validate again on reuse: recompute the fingerprint and fall back to a real run if it moved.
+    if (checks.length && reuseEntries.every((e) => e && e.code === 0 && e.fp && e.fp === curFp) && contentFingerprint() === curFp) {
+      L(`== gate check reused (worker ran it green on identical content)`);
       checks.forEach((c, i) => S.gates.push({ at: now(), gate: c, ok: true, code: 0, kind: 'pass', ms: reuseEntries[i].ms, reused: true }));
       save(true);
       return { ok: true };
     }
-    for (const c of checks) {
+    // Bounded opt-in parallelism: one at a time by default (checks may depend on order), more with
+    // CHECK_PARALLEL. Results come back in CHECK order either way.
+    const width = Math.max(1, Math.min(Number(process.env.CHECK_PARALLEL) || 1, checks.length || 1));
+    if (width > 1) L(`== gate checks: ${checks.length} lines, up to ${width} in parallel`);
+    const results = await runOrdered(checks, async (c) => {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
       let r = await runCheck(c);
       let kind = classifyCheck({ code: r.code, out: r.out });
@@ -937,11 +966,21 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         L(`== gate check could not run (exit ${r.code}); retrying once in 3 s`); await sleep(3000);
         r = await runCheck(c); kind = classifyCheck({ code: r.code, out: r.out });
       }
-      const tail = r.out.trim().split(/\r?\n/).slice(-40).join('\n');
-      S.gates.push({ at: now(), gate: c, ok: r.code === 0, code: r.code, kind, ms: r.ms }); save(true);
-      if (kind === 'infra') { L(`== gate check could not run (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code: r.code, message: `Runner check could not run: \`${c}\` exited ${r.code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
-      if (kind === 'fail') { L(`== gate check FAIL (exit ${r.code}, ${dur(r.ms)})`); block('| ', tail); return { ok: false, what: c, code: r.code, message: `Runner check failed: \`${c}\` exited ${r.code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }; }
-      L(`== gate check ok (${dur(r.ms)})`);
+      return { cmd: c, code: r.code, out: r.out, ms: r.ms, kind };
+    }, { concurrency: width });
+    // Report in CHECK order so the gates, the log and the fix message name the earliest failing line
+    // whether the lines ran one by one or side by side.
+    for (const res of results) {
+      const c = res.value ? res.value.cmd : checks[res.index];
+      const code = res.value ? res.value.code : 1;
+      const out = res.value ? res.value.out : String(res.error || 'the check did not run');
+      const ms = res.value ? res.value.ms : 0;
+      const kind = res.value ? res.value.kind : 'infra';
+      const tail = out.trim().split(/\r?\n/).slice(-40).join('\n');
+      S.gates.push({ at: res.started, gate: c, ok: code === 0, code, kind, ms }); save(true);
+      if (kind === 'infra') { L(`== gate check could not run (exit ${code}, ${dur(ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code, message: `Runner check could not run: \`${c}\` exited ${code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${code}, ${dur(ms)})`); block('| ', tail); return { ok: false, what: c, code, message: `Runner check failed: \`${c}\` exited ${code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }; }
+      L(`== gate check ok (${dur(ms)})`);
     }
     return { ok: true };
   }
