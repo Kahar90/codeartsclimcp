@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { authProblem } from './authsignal.mjs';
 import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarningsFor, dashUrl, die, dur, ensureDash, git, health, hhmmss, killTree, laneId, lanes, now, oneLine, readJSON, resultOf, sleep, splitModel, stepProgress, workerShell, writeAtomic, writeProbe } from './common.mjs';
+import { builderContext } from './context.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
 import { runOrdered } from './gate.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
@@ -1370,7 +1371,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       say(`resuming run ${S.resumes + 1} from ${START.slice(0, 7)} (${done ? done.split(/\r?\n/).length : 0} commits kept${notes ? ', lead notes' : ''})`);
       if (S.resumedBy) say(`resumed by ${S.resumedBy}`);
     }
-    await send(sid, first + CHECK_HELP, BUILD);
+    // The initial build prompt carries a small bounded packet of the source files the brief names, so the
+    // worker starts from complete quoted context instead of spending turns rediscovering it. Sent once,
+    // here only: every continuation (contBrief, resumeMsg, review fix rounds) keeps the plain brief.
+    await send(sid, first + builderContext(repo, brief) + CHECK_HELP, BUILD);
     // A final "needs fixes" verdict no longer ends the lane. The findings go back to the same builder
     // session (context kept), the gates run again and the review runs again, up to REVIEW_FIXES rounds.
     // Review fix rounds do not count in S.fixes and every existing exit path (stop, timeout, auth,

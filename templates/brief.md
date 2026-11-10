@@ -9,7 +9,7 @@ or restate the requirements. Read only relevant code and keep tool output focuse
 2. <step>. Commit.
 ...
 
-Keep the brief lean: aim for 1 to 3 steps and never more than 8. Each step is a piece of behaviour
+Name every source or contract file the worker should read as an exact relative path (for example `runner/lane.mjs`), because the runner quotes the small, code-only ones into the first prompt; skip naming secrets, config, data or log files. Keep the brief lean: aim for 1 to 3 steps and never more than 8. Each step is a piece of behaviour
 a check can prove, not a chore. Reuse a `CHECK:` command that already exists instead of adding a
 near-duplicate, and reuse an existing test hook or script to verify the result. Add one only if missing. Do not add a separate "re-read and fix"
 self-review step: the runner's reviewer gate and the lead's verification cover that.
