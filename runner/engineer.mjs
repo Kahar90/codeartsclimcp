@@ -137,7 +137,8 @@ export async function cmdWait(args) {
       for (const o of objs) process.stdout.write(`CA_RESULT ${JSON.stringify(o)}\n`);
       if (asJson) {
         const lanes = wantCompact ? finished.map(({ l, s }) => compactWaitRow(l, s)) : objs;
-        const run = wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : running.map(statusRow);
+        // Render every still-running row from the state just read, never from the lane object's memo.
+        const run = wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : runningStates.map(({ l, s }) => statusRow({ ...l, s }));
         process.stdout.write(JSON.stringify(any ? { lanes, any: true, running: run } : { lanes }) + '\n');
       } else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
@@ -149,7 +150,7 @@ export async function cmdWait(args) {
       const blocked = blockedStates.map(({ l, s }) => ({ lane: l.id, kind: s.blocker.kind, text: s.blocker.text, at: s.blocker.at }));
       for (const o of blocked) process.stdout.write(`CA_BLOCKED ${JSON.stringify(o)}\n`);
       if (asJson) {
-        const running = states.filter(({ s }) => !s.result && !s.blocker).map(({ l, s }) => (wantCompact ? compactWaitRow(l, s) : statusRow(l)));
+        const running = states.filter(({ s }) => !s.result && !s.blocker).map(({ l, s }) => (wantCompact ? compactWaitRow(l, s) : statusRow({ ...l, s })));
         process.stdout.write(JSON.stringify({ blocked, running }) + '\n');
       }
       process.exit(11);
@@ -169,9 +170,11 @@ export async function cmdWait(args) {
     }
     if (now() >= deadline) {
       const runningStates = states.filter(({ s }) => !s.result);
-      const running = runningStates.map(({ l }) => l);
-      if (asJson) console.log(JSON.stringify({ timeout: true, waitedS: timeoutS, lanes: wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : running.map(statusRow) }));
-      else { console.log(`wait: timeout after ${timeoutS}s; still running:`); printRows(running.map(laneRow)); }
+      // The timeout rows render the state read this tick (phase, activity, tools), not the lane
+      // object's snapshot from when ca wait started: a lane that moved from starting to build is shown
+      // as it is now, so a lead reading the timeout text sees the latest phase and tool.
+      if (asJson) console.log(JSON.stringify({ timeout: true, waitedS: timeoutS, lanes: wantCompact ? runningStates.map(({ l, s }) => compactWaitRow(l, s)) : runningStates.map(({ l, s }) => statusRow({ ...l, s })) }));
+      else { console.log(`wait: timeout after ${timeoutS}s; still running:`); printRows(runningStates.map(({ l, s }) => laneRow({ ...l, s }))); }
       process.exit(124);
     }
     if (!lastBeat) lastBeat = now();

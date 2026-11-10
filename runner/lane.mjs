@@ -231,7 +231,7 @@ export async function runLane(repoArg, task, opts = {}) {
   const raiseSignal = (sig) => {
     if (!sig) return false;
     if (S.blocker && S.blocker.kind === sig.kind && S.blocker.text === sig.text) return false;
-    S.blocker = { kind: sig.kind, text: sig.text, at: now() };
+    S.blocker = { kind: sig.kind, text: sig.text, at: now(), ...(sig.key ? { key: sig.key } : {}) };
     (S.signals ||= []).push({ at: now(), kind: sig.kind, text: sig.text });
     L(`  ! blocked (${sig.kind}): ${sig.text}`);
     save(true);
@@ -531,7 +531,11 @@ export async function runLane(repoArg, task, opts = {}) {
       const by = /stepreview/i.test(f) ? 'step review' : /question|sleep|helper/i.test(f) ? 'runner notice' : 'ca steer';
       if (by === 'step review') lastPumpHadStepReview = true;
       // A lead steer queued after the blocker clears it: the person answered the worker's question.
-      if (S.blocker && by === 'ca steer') { const at = Number((f.match(/^(\d+)/) || [])[1]) || 0; if (at > S.blocker.at) clearBlocker('steer delivered'); }
+      if (S.blocker && by === 'ca steer') {
+        const at = Number((f.match(/^(\d+)/) || [])[1]) || 0;
+        // A steer answers the blocker; a steered wrapper stall stays muted for that same request.
+        if (at > S.blocker.at) { if (S.blocker.kind === 'check-wrapper' && S.blocker.key) S.wrapperMuteKey = S.blocker.key; clearBlocker('steer delivered'); }
+      }
       L('>> steer:'); block('» ', text); S.steers.push({ at: now(), by, phase: S.phase, text: oneLine(text, 500) });
       process.stdout.write(`[${task} ${hhmmss()}] steer received: ${oneLine(text, 100)}\n`);
       await send(sid, `Message from the lead (steering, applies on top of the brief): ${text}`, curModel, curAgent);
@@ -614,6 +618,31 @@ export async function runLane(repoArg, task, opts = {}) {
   // below picks up at most one request per lane and runs it in the background so polling continues.
   const reqDir = path.join(dir, 'checkreq');
   let checkJobRunning = false;
+  // Wrapper-stall detection. The worker's bash tool that calls this lane's helper (`node
+  // tasks/<task>.lane/check.mjs ...`) is the wrapper. Normally it exits when the helper returns; a
+  // finished helper whose wrapper stays active (e.g. the command was piped through `tail`, so the
+  // pipeline never closes) leaves the lead seeing "Running" forever. Surface that one contradiction as
+  // the blocker kind 'check-wrapper' (ca wait exit 11 / status / bucket); never abort automatically.
+  const WRAPPER_STALL_S = 15;             // the helper must be done this long with the wrapper still live
+  const WRAPPER_STALE_MS = 5 * 60 * 1000; // only correlate a wrapper that plausibly belongs to the finished request
+  const WRAPPER_KIND = 'check-wrapper';
+  const helperPathRe = new RegExp(`tasks[\\\\/]${task.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.lane[\\\\/]check\\.mjs`);
+  const helperInCommand = (cmd) => typeof cmd === 'string' && helperPathRe.test(cmd.replace(/\s+/g, ' '));
+  const pendingCheckReqs = () => { try { return fs.readdirSync(reqDir).filter((f) => f.endsWith('.json') && !f.endsWith('.result.json')).length; } catch { return 0; } };
+  let lastHelperReqDone = null;             // { id, at, doneAt } of the most recently completed helper request
+  S.wrapperMuteKey ||= '';                  // the request id whose wrapper stall the lead acked/steered: stay quiet for it
+  // A wrapper stall is a signal only when the helper is genuinely done and nothing else is running: a
+  // live (long) CHECK holds it, a pending/later request holds it, an unrelated or completed tool never
+  // matches, and an acked/steered incident (same request id) stays quiet until new activity.
+  const wrapperStallSignal = (activeTools) => {
+    if (checkJobRunning || pendingCheckReqs() || !lastHelperReqDone) return null;
+    if (lastHelperReqDone.id && lastHelperReqDone.id === S.wrapperMuteKey) return null;
+    const waited = now() - lastHelperReqDone.doneAt;
+    if (waited < WRAPPER_STALL_S * 1000) return null;
+    const hit = activeTools.find((t) => helperInCommand(t.input) && t.since <= lastHelperReqDone.doneAt && lastHelperReqDone.doneAt - t.since <= WRAPPER_STALE_MS);
+    if (!hit) return null;
+    return { kind: WRAPPER_KIND, key: lastHelperReqDone.id, text: `the CHECK helper finished but its wrapper ${hit.tool} is still running ${dur(waited)}: rerun the check with \`node tasks/${task}.lane/check.mjs <N>\` (no pipe or tail), or kick the turn to inspect the wrapper` };
+  };
 
   // Wait for one turn: idle, error, stall (watchdog), server death, stop or timeout.
   async function waitTurn(sid) {
@@ -638,8 +667,11 @@ export async function runLane(repoArg, task, opts = {}) {
         // Only an ack that dismissed a no-progress blocker mutes the no-progress alarm until the next
         // commit. Dismissing a question must not hide a later silent gap, so the clock simply restarts.
         const wasNoProgress = !!(S.blocker && S.blocker.kind === 'no-progress');
+        // An acked wrapper stall stays muted for that same finished request until new helper activity.
+        const ackWrapperKey = S.blocker && S.blocker.kind === WRAPPER_KIND ? (S.blocker.key || '') : '';
         clearBlocker('ack');
         if (wasNoProgress) S.noCommitAckAt = now();
+        if (ackWrapperKey) S.wrapperMuteKey = ackWrapperKey;
       }
       const k = takeKick();
       if (k) {
@@ -665,7 +697,14 @@ export async function runLane(repoArg, task, opts = {}) {
         if (reqs.length) {
           const rf = path.join(reqDir, reqs[0]); const req = readJSON(rf);
           try { fs.rmSync(rf, { force: true }); } catch {}
-          if (req && req.id) { checkJobRunning = true; handleCheckRequest(req).catch((err) => L(`  ! check service error: ${oneLine(String((err && err.message) || err), 200)}`)).finally(() => { checkJobRunning = false; }); }
+          if (req && req.id) {
+            checkJobRunning = true;
+            const seen = { id: req.id, at: Number(req.at) || now() };
+            handleCheckRequest(req).catch((err) => L(`  ! check service error: ${oneLine(String((err && err.message) || err), 200)}`)).finally(() => {
+              checkJobRunning = false;
+              lastHelperReqDone = { id: seen.id, at: seen.at, doneAt: now() };
+            });
+          }
         }
       }
       // A check the worker asked for may run for minutes: its bash tool is waiting on the helper, which
@@ -699,6 +738,11 @@ export async function runLane(repoArg, task, opts = {}) {
         return s.error ? { kind: 'error', error: s.error } : { kind: 'idle' };
       }
       const tools = [...s.tools.values()];
+      // A check-wrapper alert whose wrapper has since exited is resolved: drop it instead of showing a
+      // stall the lead can no longer act on. Then re-check the contradiction and raise one blocker.
+      if (S.blocker && S.blocker.kind === WRAPPER_KIND && !tools.some((t) => helperInCommand(t.input))) clearBlocker('the wrapper exited');
+      const wstall = wrapperStallSignal(tools);
+      if (wstall && (!S.blocker || S.blocker.kind === WRAPPER_KIND) && !(S.blocker && S.blocker.key === wstall.key)) raiseSignal(wstall);
       const oldest = tools.reduce((m, t) => Math.min(m, t.since), Infinity);
       if (tools.length && now() - oldest > CFG.toolStall * 1000) {
         const t = tools.find((x) => x.since === oldest);
