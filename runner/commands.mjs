@@ -3,9 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { CA_ENTRY, EXE, HERE, PLANS, REG, ackNote, alive, caEnv, compact, dashUrl, die, dur, findLane, health, killTree, laneAlive, laneId, laneIndex, laneMemoFor, laneSeen, lanes, now, oneLine, plans, plansSnapshot, readAcks, readJSON, readJSONCached, resultOf, setAck, sleep, stepProgress, writeAcks } from './common.mjs';
+import { CA_ENTRY, EXE, HERE, PLANS, REG, ackNote, alive, caEnv, compact, dashUrl, die, dur, findLane, health, killTree, laneAlive, laneId, laneIndex, laneMemoFor, laneSeen, lanes, now, oneLine, planClosed, plans, plansSnapshot, readAcks, readJSON, readJSONCached, resultOf, setAck, sleep, stepProgress, writeAcks } from './common.mjs';
 import { laneActions, laneBucket, laneKind, laneOutcome } from './controls.mjs';
-import { planClosed } from './plan.mjs';
 import { tokenTotal, withTotal } from './tokens.mjs';
 
 // ---------- control commands ----------

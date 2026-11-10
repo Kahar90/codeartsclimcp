@@ -1,4 +1,4 @@
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -224,6 +224,8 @@ export const freePort = () => new Promise((res, rej) => { const s = net.createSe
 export const splitModel = (m) => { const i = m.indexOf('/'); return { providerID: m.slice(0, i), modelID: m.slice(i + 1) }; };
 
 export const PLANS = path.join(REG, 'plans');
+// A plan with status done or closed is closed (never appended to, only archived and replaced).
+export const planClosed = (p) => !!(p && /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || ''));
 // The dashboard answers /api/plans, /api/lanes and /api/overview every 2 s and maps a view over every plan and
 // lane, so lanes() and plans() must run once per poll, not once per plan or per lane. The request handler sets
 // reqSnap at the start of a request and the snapshot goes stale on the next one; outside the dashboard it stays
@@ -380,4 +382,12 @@ export function projectOf(repo) {
   const v = { key: main, name: path.basename(main) };
   projectCache.set(repo, v);
   return v;
+}
+
+// Lanes start the dashboard on demand (detached, survives the lane). CA_DASH=0 turns it off.
+export async function ensureDash() {
+  if (process.env.CA_DASH === '0') return null;
+  const port = Number(process.env.CA_DASH_PORT || 4777); const url = `http://127.0.0.1:${port}`;
+  try { if ((await fetch(url + '/api/lanes', { signal: AbortSignal.timeout(1500) })).ok) return url; } catch {}
+  try { spawn(process.execPath, [CA_ENTRY, 'dash', String(port)], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); return url; } catch { return null; }
 }

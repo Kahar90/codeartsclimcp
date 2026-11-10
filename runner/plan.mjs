@@ -1,9 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PLANS, REG, die, fmtDur, laneAlive, laneId, laneIndex, laneSeen, lanes, now, oneLine, pickOne, plans, projectOf, readJSON, readJSONCached, resultOf, stepProgress, writeAtomic } from './common.mjs';
+import { PLANS, REG, die, ensureDash, fmtDur, laneAlive, laneId, laneIndex, laneSeen, lanes, now, oneLine, pickOne, planClosed, plans, projectOf, readJSON, readJSONCached, resultOf, stepProgress, writeAtomic } from './common.mjs';
 import { GLYPHS, laneActions } from './controls.mjs';
-import { ensureDash } from './dash-server.mjs';
 import { bucketFor, kindOf, laneHealthOf, laneRow, laneStatusOf, modelRow, removePlan, sumTok, tokTotal, tokensByModelView, tokensByView } from './commands.mjs';
 import { sumTokens, withTotal } from './tokens.mjs';
 
@@ -12,9 +11,6 @@ import { sumTokens, withTotal } from './tokens.mjs';
 //   lanes:[{task, repo?, model?, why?, files?}], next:[text | {text, done}], decisions:[{at, text}], risks:[text] }
 // Lane repo paths are relative to the plan's repo (the folder that holds tasks/).
 export const planId = (file) => path.basename(path.dirname(path.dirname(path.resolve(file)))).replace(/[^\w.-]+/g, '_');
-
-// A plan with status done or closed is closed (never appended to, only archived and replaced).
-export const planClosed = (p) => !!(p && /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || ''));
 
 // A lane is in a plan when a lane entry has the same task and its repo resolves to the lane's repo.
 export const planListsLane = (plan, main, repo, task) => !!(plan && (plan.lanes || []).some((l) => l && l.task === task && path.resolve(main, l.repo || '.') === path.resolve(repo)));

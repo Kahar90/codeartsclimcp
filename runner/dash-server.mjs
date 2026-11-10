@@ -4,19 +4,11 @@ import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { kickLane, removeLane, removePlan, resumeLane, steer } from './commands.mjs';
-import { CA_ENTRY, EXE, HERE, caEnv, laneSeen, lanes, lanesSnapshot, now, oneLine, pickOne, plansSnapshot, setAck, setReqSnap } from './common.mjs';
+import { CA_ENTRY, EXE, HERE, caEnv, laneSeen, lanesSnapshot, now, oneLine, pickOne, plansSnapshot, setAck, setReqSnap } from './common.mjs';
 import { doctorData } from './engineer.mjs';
 import { laneDetail, laneView, planView } from './plan.mjs';
 
 // ---------- dashboard ----------
-// Lanes start the dashboard on demand (detached, survives the lane). CA_DASH=0 turns it off.
-export async function ensureDash() {
-  if (process.env.CA_DASH === '0') return null;
-  const port = Number(process.env.CA_DASH_PORT || 4777); const url = `http://127.0.0.1:${port}`;
-  try { if ((await fetch(url + '/api/lanes', { signal: AbortSignal.timeout(1500) })).ok) return url; } catch {}
-  try { spawn(process.execPath, [CA_ENTRY, 'dash', String(port)], { detached: true, stdio: 'ignore', windowsHide: true }).unref(); return url; } catch { return null; }
-}
-
 export function cmdDash(args) {
   const port = Number(args[0] || process.env.CA_DASH_PORT || 4777);
   const page = fs.readFileSync(path.join(HERE, 'dash.html'), 'utf8');
