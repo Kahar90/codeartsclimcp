@@ -483,6 +483,7 @@ const glanceDur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m`
 function glanceOf(view) {
   const lanes = (view.waves || []).flatMap((w) => w.lanes || []).filter((x) => x.result !== 'dropped');
   const lead = view.lead || {};
+  const who = view.leadName || 'Claude';
   const phase = lead.phase || null;
   const age = typeof lead.age === 'number' ? lead.age : null;
   const act = Array.isArray(lead.activity) && lead.activity.length ? lead.activity[lead.activity.length - 1] : null;
@@ -502,9 +503,9 @@ function glanceOf(view) {
     return out('done', reason || `All ${(view.counts && view.counts.total) || lanes.length} lanes finished`, atIso(Math.max(leadMs, laneMs)));
   }
   // b. the lead ended its turn on a question for the human.
-  if (phase === 'asking') return out('needs-you', `Claude is asking: ${lastText || view.now || ''}`, lead.nowAt || lead.updatedAt || null);
+  if (phase === 'asking') return out('needs-you', `${who} is asking: ${lastText || view.now || ''}`, lead.nowAt || lead.updatedAt || null);
   // c. the lead reports done.
-  if (phase === 'done') return out('done', lastText || 'Claude is done', atIso(Math.max(leadMs, laneMs)));
+  if (phase === 'done') return out('done', lastText || `${who} is done`, atIso(Math.max(leadMs, laneMs)));
   // d0. a running lane is blocked on the lead (a worker question or no progress): that needs a human now.
   const blk = lanes.find((x) => x.running && x.blocked);
   if (blk) return out('needs-you', `${blk.task}: ${blk.blocked.kind === 'question' ? 'asked the lead' : 'no progress'}: ${blk.blocked.text || ''}`, atIso(ms(blk.blocked.at)));
@@ -516,7 +517,7 @@ function glanceOf(view) {
     return out('working', detail);
   }
   // e. a fresh lead phase means the lead is still working.
-  if (age !== null && age < QUIET_MS && ['planning', 'building', 'waiting', 'verifying'].includes(phase)) return out('working', `Claude is ${phase}`);
+  if (age !== null && age < QUIET_MS && ['planning', 'building', 'waiting', 'verifying'].includes(phase)) return out('working', `${who} is ${phase}`);
   // f. a lane needs a human: a bad one is failed, any other attention lane is needs-you.
   const attn = lanes.filter((x) => attnKey(statusKey(x)));
   if (attn.length) {
@@ -527,7 +528,7 @@ function glanceOf(view) {
   }
   // g. lanes or a lead phase exist but nothing is fresh or needs a human.
   if (lanes.length || phase) {
-    return out('quiet', age === null ? 'No lead update yet; Claude may be waiting on you' : `No lead update for ${glanceDur(age)}; Claude may be waiting on you`);
+    return out('quiet', age === null ? `No lead update yet; ${who} may be waiting on you` : `No lead update for ${glanceDur(age)}; ${who} may be waiting on you`);
   }
   // h. nothing to look at.
   return out('idle', '');
@@ -585,7 +586,7 @@ export function planView(r) {
   const allSettled = live.length > 0 && live.every((x) => settledKey(statusKey(x)));
   const state = counts.running ? 'running' : closed ? (counts.done === counts.total ? 'done' : 'closed')
     : live.some((x) => attnKey(statusKey(x))) ? 'attention' : live.some((x) => statusKey(x) === 'paused') ? 'paused'
-    : allSettled ? (/^verifying$/i.test(p.status || '') ? 'verifying' : 'done') : 'waiting';
+    : allSettled ? (/^verifying$/i.test(p.status || '') || p.phase === 'verifying' ? 'verifying' : LEAD_PHASES.includes(p.phase) && p.phase !== 'done' ? 'waiting' : 'done') : 'waiting';
   const idle = Date.now() - lastActivity; const dur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
   const bits = [`${counts.done}/${counts.total} lanes done`];
   if (counts.running) bits.push(`${counts.running} running`);

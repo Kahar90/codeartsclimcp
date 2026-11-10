@@ -29,6 +29,16 @@ check('ca plan registers', ca(['plan', planFile]).code === 0);
 let o = ca(['plan', 'list']).out;
 check('stale "running" with no running lane reads as waiting', /sbx\s+waiting\s/.test(o), o.trim());
 check('summary counts done, not started and idle time', /1\/2 lanes done · 1 not started · idle 3h/.test(o), o.trim());
+const beforeLead = fs.readFileSync(planFile, 'utf8');
+for (const phase of ['planning', 'building', 'waiting', 'verifying', 'asking']) {
+  fs.writeFileSync(planFile, JSON.stringify({ ...JSON.parse(beforeLead), lead: 'Codex', phase, now: 'Checking the result', nowAt: new Date().toISOString(),
+    waves: [{ name: 'W1', lanes: ['lib'] }], lanes: [{ task: 'lib' }] }));
+  const view = JSON.parse(ca(['plan', 'list', '--json']).out)[0];
+  check(`finished workers do not close a plan while the lead is ${phase}`, !view.closed && view.glance.state === (phase === 'asking' ? 'needs-you' : 'working'), JSON.stringify({ state: view.state, closed: view.closed, glance: view.glance }));
+  check(`the ${phase} detail uses the actual lead name`, view.glance.detail.includes('Codex'), view.glance.detail);
+}
+fs.writeFileSync(planFile, beforeLead); fs.utimesSync(planFile, old, old);
+
 o = ca(['plan', 'close', 'sbx', '--reason', 'demo placeholder']); check('ca plan close exits 0', o.code === 0, o.out + o.err);
 const p = JSON.parse(fs.readFileSync(planFile, 'utf8'));
 check('close sets status done and drops the unstarted lane', p.status === 'done' && p.lanes.find((l) => l.task === 'cli').dropped === true && !p.lanes.find((l) => l.task === 'lib').dropped, JSON.stringify(p.lanes));

@@ -32,7 +32,7 @@ const brief = (repo, task, goal) => { fs.mkdirSync(path.join(repo, 'tasks'), { r
 function mkrepo(name) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
-  fs.writeFileSync(path.join(repo, 'fake-script.json'), '["ok"]'); fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-turns.log\n');
+  fs.writeFileSync(path.join(repo, 'fake-script.json'), '["commit:1"]'); fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-*.log\ntasks/plan*.json\n');
   g(repo, 'init', '-q'); g(repo, 'add', '-A'); g(repo, '-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'init');
   return repo;
 }
