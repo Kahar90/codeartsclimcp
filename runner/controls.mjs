@@ -157,6 +157,11 @@ export function laneActions({ s, alive, health, canResume, handled }) {
       suggest = 'skip-wait';
       why = 'the lane waits out a backoff after an interruption; skip it and resume now';
     }
+    // A blocked lane is waiting on the lead: a steer answers the question or unsticks the silent run.
+    if (s.blocker && s.blocker.text) {
+      suggest = 'steer';
+      why = s.blocker.kind === 'question' ? `the worker asked the lead a question: ${s.blocker.text}; answer it with a steer` : `${s.blocker.text}; the lead has not seen this yet: steer the lane or ack the blocker`;
+    }
   } else if (!s.result && !alive) {
     acts.push('stop');
     if (canResume) { acts.push('resume'); suggest = 'resume'; why = 'the supervisor died; resume restarts the lane in place'; }
@@ -192,6 +197,8 @@ export function laneBucket({ s, alive, health }) {
     return { bucket: 'attention', reason: `failed: ${s.reason || 'see the summary'}` };
   }
   if (!alive) return { bucket: 'attention', reason: 'supervisor died' };
+  // A worker that raised a question or went silent without a commit needs the lead now, not when it ends.
+  if (s.blocker && s.blocker.text) return { bucket: 'attention', reason: s.blocker.kind === 'question' ? `asked the lead: ${s.blocker.text}` : String(s.blocker.text) };
   if (/stalled/i.test(health)) return { bucket: 'attention', reason: `stalled: no model activity ${idleMin()}m` };
   if (/no tool call/i.test(health)) return { bucket: 'attention', reason: String(health) };
   if (/^quiet/i.test(health)) return { bucket: 'running', reason: `quiet ${idleMin()}m` };

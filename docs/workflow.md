@@ -96,6 +96,9 @@ committing; the runner runs final CHECK gates at idle and the lead verifies the 
 - `ca_wait {lanes, timeout_s}` blocks until every lane has a result or the timeout passes (at
   most 55 s per call, so your MCP client never times out; exit 124: still running, call it again
   right away). A lane takes minutes: expect several calls. Do not poll `ca_status` in a loop.
+  A running lane that is blocked (a worker question, or no new commit for `NO_COMMIT_S`) returns at
+  once (exit 11, one `CA_BLOCKED` line per blocked lane): read its question or no-progress note,
+  answer with `ca_steer` (that clears it) or dismiss it with `ca_ack`, then call `ca_wait` again.
 - Look at the work while it is built, not after: `ca_wait {lanes, steps: true, after}` (CLI
   `ca wait <lane> --steps --after N`) also returns (exit 10) when a lane commits a new step, with the
   new commits, the changed files and `ui: true` when they include page or style files. For UI steps,
@@ -134,7 +137,8 @@ committing; the runner runs final CHECK gates at idle and the lead verifies the 
 - Exit codes / results: 0 done (review ready), 4 needs review, 1 failed or stopped,
   2 usage or unknown lane, 3 keys missing or rejected (ask the human to run `ca auth`; never ask
   for keys in chat), 5 paused at the time limit (`ca_resume` continues it), 10 a step was committed
-  (only with `steps: true`), 124 still running.
+  (only with `steps: true`), 11 a lane is blocked (a worker question or no progress: read the
+  `CA_BLOCKED` line, answer with `ca_steer` or dismiss with `ca_ack`), 124 still running.
   `ca_wait` returns a `next` hint for each.
 - A finished lane whose CHECK lines could not run (missing tool, sandbox) is `unverified` (exit
   4); one whose CHECK ran and still failed after the fix rounds is `checks failing` (exit 1).

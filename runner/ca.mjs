@@ -66,14 +66,18 @@
 //        Env knobs: THINK_FALLBACK_MODEL (builder model after 2 thinking stalls; brief line FALLBACK_MODEL:, none disables)
 //        STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
 //        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
-//        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
+//        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 NO_COMMIT_S=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
+//        (NO_COMMIT_S: a running builder with no new commit this long raises a blocker the lead
+//        sees at once; 0 disables)
 //        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
 //        CA_MAX_LANES_PER_MODEL=maas/glm-5.3=2,default=4 (cap lanes per build model; glm 3,
 //        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed or checks failing,
 //        2 usage or unknown lane, 3 missing credentials, 4 needs review or unverified (a check
 //        could not run), 5 paused at LANE_TIMEOUT (resume with --resume), 10 a step was committed
-//        (ca wait --steps; look at it and call again with --after), 124 wait timeout.
+//        (ca wait --steps; look at it and call again with --after), 11 a lane is blocked (a worker
+//        question or no progress: ca wait prints CA_BLOCKED, answer with ca steer which clears it,
+//        or ca ack to dismiss it), 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -120,6 +124,7 @@ const CFG = {
   rateWait: num('RATE_WAIT_S', 1800),  // total time a phase may wait out model rate limits (not counted as retries)
   rateBackoff: num('RATE_BACKOFF_S', 45), // first rate-limit wait, doubles per hit, capped at 300 s
   fixes: num('MAX_FIXES', 3),          // gate failures fed back to the builder
+  noCommitS: num('NO_COMMIT_S', 900),  // a running builder with no new commit this long raises a blocker (0 disables)
   laneTimeout: num('LANE_TIMEOUT', 5400),
   checkTimeout: num('CHECK_TIMEOUT', 900),
   netWait: num('NET_WAIT_S', 1800),    // a network error waits up to this long for the network (no retry spent)
@@ -480,11 +485,11 @@ async function runLane(repoArg, task, opts = {}) {
     v: 1, id, task, repo, dir, pid: process.pid, startedAt: T0, updatedAt: T0, phase: 'starting', attempt: 0, fixes: 0,
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
     lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
-    config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes },
+    config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes, noCommit: CFG.noCommitS },
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [],
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, noCommitAckAt: 0,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -494,7 +499,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [] });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [], blocker: resumed.blocker || null });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -510,10 +515,25 @@ async function runLane(repoArg, task, opts = {}) {
     catch (e) { process.stderr.write(`[${task}] plan warning: ${oneLine(String((e && e.message) || e), 200)}\n`); }
   }
   const phase = (p, activity) => { if (S.phase !== p) S.phases.push({ phase: p, at: now() }); S.phase = p; if (activity) S.activity = activity; save(true); };
+  // Clear an open blocker and restart the no-progress clock: a steer, a new commit or an ack answered the lead.
+  const clearBlocker = (why) => {
+    if (!S.blocker) return false;
+    S.blocker = null; S.blockerClearedAt = now();
+    L(`blocker cleared (${why})`); save(true);
+    return true;
+  };
   const syncCommits = () => {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
     S.commits = S.commitLog.length;
+    // The no-progress clock runs on real commit times: a new commit resets it (or the first sync after a
+    // resume). A commit that landed after the blocker clears it; an older one observed late must not.
+    if (S.commits > (S.commitsSeen || 0)) {
+      S.commitsSeen = S.commits;
+      const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
+      S.lastCommitAt = ct ? Number(ct) * 1000 : now();
+      if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+    }
   };
 
   // The codearts server writes sign-in failures to server.log right at start. Read only its tail:
@@ -658,7 +678,15 @@ async function runLane(repoArg, task, opts = {}) {
       }
       case 'permission.asked': case 'permission.updated': handlePermission(pr); break;
       case 'question.asked': {
-        L(`  ? question asked: ${oneLine(pr.questions?.[0]?.question || JSON.stringify(pr), 200)} -> rejected (headless, no questions)`);
+        const q = oneLine(pr.questions?.[0]?.question || JSON.stringify(pr), 300);
+        L(`  ? question asked: ${q} -> rejected (headless, no questions)`);
+        // The lead watches ca wait / status / the bucket, so record the question as a blocker and tell the
+        // worker to carry on with its best option instead of waiting (the question is still rejected).
+        S.blocker = { kind: 'question', text: q, at: now() };
+        (S.questions ||= []).push({ text: q, at: now() });
+        L(`  ! blocked: asked the lead: ${q}`);
+        try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-question.txt`), `Message from the runner: your question was sent to the lead: ${q}. Do not wait for an answer. Pick the option that best fits the brief, say which in one line, and continue. The lead will steer you if it disagrees.`); } catch {}
+        save(true);
         server.api('POST', `/question/${pr.id}/reject`, {}).catch((err) => L(`  ! question reject failed: ${err.message}`)); break;
       }
       case 'todo.updated': if (Array.isArray(pr.todos) && (!sid || sid === S.buildSession || sid === S.activeSession)) S.todos = pr.todos.map((t) => ({ text: oneLine(t.content, 200), status: t.status })); break;
@@ -704,6 +732,8 @@ async function runLane(repoArg, task, opts = {}) {
     s.tools.clear(); s.busy = false; s.aborting = false;
   };
   const stopFile = path.join(dir, 'STOP');
+  // ca ack writes this on a running blocked lane: the supervisor clears the blocker and deletes the file.
+  const blockerAckFile = path.join(dir, 'BLOCKER_ACK');
   // A kick is a human decision delivered by file: {at, mode: turn|fresh|server|now, text, by}.
   // The supervisor consumes it at the next poll (2 s) or during a backoff wait.
   const kickFile = path.join(dir, 'KICK');
@@ -723,8 +753,10 @@ async function runLane(repoArg, task, opts = {}) {
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      const by = /stepreview/i.test(f) ? 'step review' : 'ca steer';
+      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep/i.test(f) ? 'runner notice' : 'ca steer';
       if (by === 'step review') lastPumpHadStepReview = true;
+      // A lead steer queued after the blocker clears it: the person answered the worker's question.
+      if (S.blocker && by === 'ca steer') { const at = Number((f.match(/^(\d+)/) || [])[1]) || 0; if (at > S.blocker.at) clearBlocker('steer delivered'); }
       L('>> steer:'); block('» ', text); S.steers.push({ at: now(), by, phase: S.phase, text: oneLine(text, 500) });
       process.stdout.write(`[${task} ${hhmmss()}] steer received: ${oneLine(text, 100)}\n`);
       await send(sid, `Message from the lead (steering, applies on top of the brief): ${text}`, curModel, curAgent);
@@ -826,6 +858,14 @@ async function runLane(repoArg, task, opts = {}) {
       }
       prevTick = tickMs;
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
+      if (fs.existsSync(blockerAckFile)) {
+        try { fs.rmSync(blockerAckFile, { force: true }); } catch {}
+        // Only an ack that dismissed a no-progress blocker mutes the no-progress alarm until the next
+        // commit. Dismissing a question must not hide a later silent gap, so the clock simply restarts.
+        const wasNoProgress = !!(S.blocker && S.blocker.kind === 'no-progress');
+        clearBlocker('ack');
+        if (wasNoProgress) S.noCommitAckAt = now();
+      }
       const k = takeKick();
       if (k) {
         L(`== kick (${k.mode}) from ${k.by}${k.text ? ': ' + oneLine(k.text, 160) : ''}`);
@@ -855,6 +895,19 @@ async function runLane(repoArg, task, opts = {}) {
       // is normal, so keep the tool watchdog from aborting that wait.
       if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
       if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview().catch((err) => L(`! speculative review start failed: ${oneLine(String((err && err.message) || err), 200)}`)); maybeStepReview(); } }
+      // No-progress alarm: a running builder that lands no commit for NO_COMMIT_S seconds is stuck. Raise
+      // one blocker for the lead (ca wait / status / the bucket) instead of showing "running" forever. An
+      // ack mutes it until a new commit lands, so the lead is not nagged about a gap it already saw.
+      const ackMuted = S.noCommitAckAt && !(S.lastCommitAt > S.noCommitAckAt);
+      if (CFG.noCommitS > 0 && !ackMuted && !S.blocker && (S.phase === 'build' || S.phase === 'fix')) {
+        const base = Math.max(S.runStartedAt || S.startedAt || T0, S.lastCommitAt || 0, S.blockerClearedAt || 0);
+        if (now() - base > CFG.noCommitS * 1000) {
+          const cur = stepProgress(S).current;
+          const text = `no commit in ${dur(now() - base)}${cur ? ` (step ${cur.n})` : ''}`;
+          S.blocker = { kind: 'no-progress', text, at: now() };
+          L(`  ! blocked: ${text}`); save(true);
+        }
+      }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
         try {
@@ -1565,6 +1618,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
     ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
     `steering: ${S.steers.length ? S.steers.map((x) => `[${x.by}] ${oneLine(x.text, 160)}`).join(' / ') : 'none'}`,
+    `questions: ${S.questions?.length ? S.questions.map((x) => oneLine(x.text, 200)).join(' / ') : 'none'}`,
     `outside-repo file access: ${S.outside.length ? S.outside.slice(0, 5).map((x) => `${x.tool} ${x.path}`).join(', ') : 'none'}`,
     `permissions: ${S.permissions.length ? S.permissions.map((x) => `${x.kind}->${x.reply}`).join(', ') : 'none asked'}`,
     ...(S.errors.length ? [`errors: ${S.errors.slice(-3).map((x) => x.msg).join(' / ')}`] : []),
@@ -1751,7 +1805,7 @@ function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', status: laneStatusOf(l),
     progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
-    summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
+    blocked: s.blocker || null, summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
 // cacheWrite bills into the totals but is not modeled by tokens.mjs (kept read-only): carry it here.
 const tokTotal = (t) => (!t ? 0 : (t.input || 0) + (t.output || 0) + (t.reasoning || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0));
@@ -1824,7 +1878,7 @@ function cmdSummary(args) {
     const pg = stepProgress(s);
     console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', status: laneStatusOf(l), reason: s.reason || '', verdict: s.verdict || '',
       elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), commits: s.commitLog || [], steps: pg.list,
-      gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
+      gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir, blocked: s.blocker || null }, null, 2));
     return;
   }
   if (text) { process.stdout.write(text.endsWith('\n') ? text : text + '\n'); return; }
@@ -1902,7 +1956,11 @@ function cmdAck(args) {
   const q = args.slice(0, ni >= 0 ? ni : undefined).find((a) => !a.startsWith('--'));
   if (!q) die('usage: ca ack <lane> [--note "text"] [--undo]', 2);
   const l = findLane(q);
-  if (!l.s.result) die(`lane ${l.id} is not finished (${health(l.s)}): resume or stop it instead`, 2);
+  if (!l.s.result) {
+    // A running lane with an open blocker: acknowledge it by file, the supervisor clears it on the next tick.
+    if (l.s.blocker && alive(l.s.pid)) { fs.writeFileSync(path.join(l.dir, 'BLOCKER_ACK'), String(now())); console.log(`${l.id}: blocker acknowledged (${l.s.blocker.kind})`); return; }
+    die(`lane ${l.id} is not finished (${health(l.s)}): resume or stop it instead`, 2);
+  }
   const undo = args.includes('--undo'); setAck(l.id, !undo, l.s.finishedAt || null, oneLine(note, 200));
   const b = bucketFor(l);
   console.log(`${l.id}: ${undo ? 'unseen again' : 'acknowledged'}; bucket ${b.bucket} (${b.reason})`);
@@ -2202,6 +2260,18 @@ async function cmdWait(args) {
         process.stdout.write(JSON.stringify(any ? { lanes, any: true, running: run } : { lanes }) + '\n');
       } else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
+    }
+    // Blocked rule: a running lane with an open blocker reaches the lead at once (exit 11), so a worker's
+    // question or a silent run is answered long before the lane ends. The finished-lane rule above wins.
+    const blockedStates = states.filter(({ l, s }) => !s.result && s.blocker);
+    if (blockedStates.length) {
+      const blocked = blockedStates.map(({ l, s }) => ({ lane: l.id, kind: s.blocker.kind, text: s.blocker.text, at: s.blocker.at }));
+      for (const o of blocked) process.stdout.write(`CA_BLOCKED ${JSON.stringify(o)}\n`);
+      if (asJson) {
+        const running = states.filter(({ s }) => !s.result && !s.blocker).map(({ l, s }) => (wantCompact ? compactWaitRow(l, s) : statusRow(l)));
+        process.stdout.write(JSON.stringify({ blocked, running }) + '\n');
+      }
+      process.exit(11);
     }
     // --steps: a lane that passed its baseline has a new step. Wake the lead with one CA_STEP line per
     // such lane and exit 10; the finished-lane rule above wins, so an ended lane still reports its result.
@@ -2795,7 +2865,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0, time: laneTime(s, isAlive),
-    actions, suggest, why, bucket, bucketWhy, status: laneStatusOf(l), project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
+    actions, suggest, why, bucket, bucketWhy, status: laneStatusOf(l), project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, blocked: s.blocker || null, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.

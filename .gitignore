@@ -16,3 +16,6 @@ Thumbs.db
 .vscode/
 .idea/
 bench/results.jsonl
+tasks/*.lane/
+tasks/*.lane.log
+tasks/*.out

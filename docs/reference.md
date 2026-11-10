@@ -41,8 +41,10 @@ auto-approve them; `ca_wait` returns every result (including 3 keys and 5 paused
 
 `0` done (review ready or skipped), `1` failed / stopped / killed, `2` usage or unknown lane,
 `3` keys missing or rejected (the summary names which: run `ca auth --force`), `4` needs review, `5` paused at LANE_TIMEOUT (`ca lane <repo> <task>
---resume`), `124` wait timeout. Lanes and `ca wait` also print a machine-readable line:
-`CA_RESULT {"lane":..,"result":..,"verdict":..,"exit":..,"summaryPath":..}`.
+--resume`), `11` a lane is blocked: a worker question or no new commit for `NO_COMMIT_S`; `ca wait`
+prints one line `CA_BLOCKED {"lane":..,"kind":..,"text":..,"at":..}` per blocked lane, answer with
+`ca steer` (that clears it) or dismiss with `ca ack`, `124` wait timeout. Lanes and `ca wait` also
+print a machine-readable line: `CA_RESULT {"lane":..,"result":..,"verdict":..,"exit":..,"summaryPath":..}`.
 
 ## Lane health
 
@@ -82,6 +84,7 @@ Run `ca doctor`; every failing row has a fix line. Common ones:
   `interruptions` in the summary.
 
 Env knobs: `BUILD_MODEL`, `REVIEW_MODEL`, `STALL_S`, `TOOL_STALL_S`, `THINK_S`, `MAX_RETRIES`,
-`MAX_FIXES`, `CHECK_TIMEOUT`, `LANE_TIMEOUT`, `NO_REVIEW=1`, `CA_DASH=0`, `CA_DASH_PORT`,
+`MAX_FIXES`, `CHECK_TIMEOUT`, `LANE_TIMEOUT`, `NO_COMMIT_S` (900; `0` disables: a running builder
+with no new commit this long raises a blocker the lead sees at once), `NO_REVIEW=1`, `CA_DASH=0`, `CA_DASH_PORT`,
 `CA_REGISTRY`, `CA_CREDENTIALS`, `RATE_WAIT_S` (1800), `RATE_BACKOFF_S` (45), `NET_WAIT_S` (1800),
 `CA_MAX_LANES_PER_MODEL` (e.g. `maas/glm-5.3=2,default=4`, `off`), `CA_DASH_HOSTS` (extra dashboard hosts for a proxy).
