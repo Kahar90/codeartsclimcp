@@ -20,7 +20,7 @@ export const REVIEW_ROLE_MUTATION_TOOLS = Object.freeze(['edit', 'write', 'apply
 export const REVIEW_ROLE_PROMPT = [
   'You are the independent read-only reviewer working under the lead.',
   'Follow the full review, fix-round or step prompt you were given and satisfy every requirement it states, including the requested output format.',
-  'Serve the task only: read the source you need. If a relevant file was not supplied in the prompt, read its relevant ranges; source already prepared and supplied in the prompt counts as read, so do not reread it.',
+  'Serve the task only: read the source you need. Complete source supplied in the prompt counts as read. Diffs, excerpts and truncated context do not replace missing surrounding source; read every relevant omitted range.',
   'Do not run the parent preflight, planning or replanning, do not read live lane logs, and do not rerun the CHECK gate commands.',
   'You are read-only: never edit or create files, never commit, and never run a mutating shell command. Use read-only inspection (read, glob, grep and similar) only.',
   'Report concrete bugs with the file and line evidence, then finish with the requested output format (the numbered item list and the final VERDICT line).',
@@ -42,8 +42,8 @@ export function reviewRoleMode(value) {
 // catch-all that it was, so the specific denies below only override the mutation tools. An object is
 // copied as-is (its own '*' and its other keys stay). Anything else is a corrupted permission: fail.
 function permissionFor(perm) {
-  if (perm === undefined || perm === null) return {};
-  if (typeof perm === 'string') return { '*': perm };
+  if (perm === undefined) return {};
+  if (typeof perm === 'string' && ['allow', 'ask', 'deny'].includes(perm)) return { '*': perm };
   if (isObject(perm)) return { ...perm };
   throw new Error('review role: agent.plan.permission must be an allow/ask/deny string or a JSON object');
 }
@@ -72,7 +72,8 @@ export function reviewRoleConfig(config) {
 // and neither the raw value nor the config body is ever printed (it may carry the provider key).
 export function reviewRoleEnv(env) {
   const src = isObject(env) ? env : {};
-  const mode = reviewRoleMode(src.CA_REVIEW_ROLE);
+  const role = src.CA_REVIEW_ROLE ?? (process.platform === 'win32' ? Object.entries(src).find(([k]) => k.toUpperCase() === 'CA_REVIEW_ROLE')?.[1] : undefined);
+  const mode = reviewRoleMode(role);
   if (mode === 'native') return env; // prior environment exactly: nothing added, same object back
   if (mode === 'unknown') throw new Error('review role: unknown CA_REVIEW_ROLE (expected "default" or "native")');
   const raw = src.OPENCODE_CONFIG_CONTENT;

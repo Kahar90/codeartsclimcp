@@ -45,15 +45,17 @@ export class Server {
     this.port = await freePort();
     this.pw = this.pw || crypto.randomBytes(16).toString('hex');
     this.url = `http://127.0.0.1:${this.port}`;
-    const out = fs.openSync(this.logFile, 'a');
     // One child env for this private server, scoped by the reviewer role (agent.plan only), used for
     // both the actual spawn and the redacted CA_DUMP_ENV, so what is debugged is what is spawned and
     // no secret is written. The role is wired here and only here: global caEnv and user config stay
     // untouched.
     const childEnv = reviewRoleEnv(caEnv({ CODEARTS_SERVER_PASSWORD: this.pw }));
     if (process.env.CA_DUMP_ENV) fs.writeFileSync(process.env.CA_DUMP_ENV, JSON.stringify({ env: redactEnv(childEnv), cwd: this.cwd }, null, 1));
-    this.child = spawn(EXE, ['serve', '--port', String(this.port), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'WARN'],
-      { cwd: this.cwd, env: childEnv, stdio: ['ignore', out, out], windowsHide: true });
+    const out = fs.openSync(this.logFile, 'a');
+    try {
+      this.child = spawn(EXE, ['serve', '--port', String(this.port), '--hostname', '127.0.0.1', '--print-logs', '--log-level', 'WARN'],
+        { cwd: this.cwd, env: childEnv, stdio: ['ignore', out, out], windowsHide: true });
+    } finally { fs.closeSync(out); }
     this.alive = true;
     this.child.on('exit', (code) => { this.alive = false; this.exitCode = code; });
     const t0 = now();

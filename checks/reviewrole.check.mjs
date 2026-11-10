@@ -61,6 +61,7 @@ try {
     check('no mutation allow survives any permission form', noMutationAllow(obj.agent.plan.permission));
     const corrupt = throws(() => reviewRoleConfig({ agent: { plan: { permission: 42 } } }));
     check('a corrupted permission value fails visibly', corrupt.threw, corrupt.msg);
+    for (const permission of ['bogus', '', null]) check('invalid coarse permission is rejected', throws(() => reviewRoleConfig({ agent: { plan: { permission } } })).threw);
   }
 
   // ---- 3. environment wrapper: default path, preservation, immutability ----
@@ -86,6 +87,10 @@ try {
     const env = { CA_REVIEW_ROLE: 'native', OPENCODE_CONFIG_CONTENT: 'RAW-CONFIG', KEEP: '1' };
     const w = reviewRoleEnv(env);
     check('native keeps the prior environment exactly (same object, nothing injected)', w === env && w.OPENCODE_CONFIG_CONTENT === 'RAW-CONFIG');
+    if (process.platform === 'win32') {
+      const lower = { ca_review_role: 'native', OPENCODE_CONFIG_CONTENT: 'RAW' };
+      check('Windows case-insensitive native escape hatch is preserved', reviewRoleEnv(lower) === lower);
+    }
     for (const v of ['  NATIVE  ', 'Native']) check(`native is case/space tolerant ("${v}")`, reviewRoleEnv({ CA_REVIEW_ROLE: v, OPENCODE_CONFIG_CONTENT: 'RAW' }).OPENCODE_CONFIG_CONTENT === 'RAW');
 
     check('reviewRoleMode: unset/blank/default mean scoped role, native the escape hatch, else unknown',
@@ -141,6 +146,17 @@ try {
       server = new Server(repo, path.join(tmp, 'server.log'));
       server.pw = 'pw';
       await server.start();
+      const invalidLog = path.join(tmp, 'invalid-role.log');
+      const originalOpen = fs.openSync; const logFds = []; let rejected = false;
+      const invalidServer = new Server(repo, invalidLog);
+      fs.openSync = (file, ...args) => { const fd = originalOpen(file, ...args); if (file === invalidLog) logFds.push(fd); return fd; };
+      process.env.CA_REVIEW_ROLE = 'invalid';
+      try { await invalidServer.start(); } catch (e) { rejected = /unknown CA_REVIEW_ROLE/.test(e.message); }
+      finally {
+        fs.openSync = originalOpen; delete process.env.CA_REVIEW_ROLE; invalidServer.stop();
+        for (const fd of logFds) { try { fs.closeSync(fd); } catch {} }
+      }
+      check('invalid role is rejected before opening a log descriptor', rejected && logFds.length === 0);
     } catch (e) { startErr = String((e && e.message) || e); }
     finally {
       try { server?.stop(); } catch {}
