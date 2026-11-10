@@ -107,6 +107,58 @@ const TRANSIENT_RX = [
   /\btimed? ?out\b/i,
 ];
 
+// Builder *assistant narration* is a report, not a failure: it only needs the lead when the worker says
+// it is stuck and cannot proceed alone. A status summary that merely names an error it already handled
+// ("fixed persistence: ENOENT is now distinguished from a read error") is not an incident.
+const ACTIVE_RX = [
+  /\b(can'?t|cannot|unable to) (proceed|continue|complete)\b/i,
+  /\bnot able to (proceed|continue)\b/i,
+  /\bI('?m| am) (stuck|blocked)\b/i,
+  /\bblocked (by|on|because)\b/i,
+  /\bunable to (create|write|commit|push|install|access|clone|fetch|proceed)\b/i,
+];
+
+// A *failed tool diagnostic* is real output, but a test run prints many lines that are not machine
+// failures: an expected application assertion ("the generated file is absent: ENOENT") or a passing
+// assertion description ("PASS handles Permission denied") are ordinary functional results. Keep the
+// genuine, actionable environment failures: a missing executable or module, a git permission,
+// authentication or certificate failure, a refused commit.
+const TOOL_ENV_RX = [
+  /Error: spawn\b.*\bENOENT\b/i,
+  /\bspawn\b[^\n]*\bENOENT\b/i,
+  /\bENOENT\b[^\n]*\buv_spawn\b/i,
+  /Cannot find (module|package)/i,
+  /\bMODULE_NOT_FOUND\b/,
+  /command not found/i,
+  /is not recognized as an internal or external command/i,
+  /\bEACCES\b|\bEPERM\b/,
+  /permission denied by (the )?(system|policy|sandbox)/i,
+  /\bPermission denied\b/i,
+  /Unable to create/i,
+  /index\.lock/i,
+  /\bfatal:\s/i,
+  /would be overwritten by (checkout|merge|pull)/i,
+  /Please commit your changes or stash/i,
+  /tool permission/i,
+  /Authentication failed|invalid username or password/i,
+  /SSL certificate problem|certificate verify failed/i,
+  /The requested URL returned error: 40[13]/i,
+];
+
+// The lines of a test run that report a *passing* assertion: their description may quote an error
+// word, but nothing failed, so they are not diagnostics. ("ok 1 - name", "PASS name", "✓ name".)
+const PASS_ASSERTION_RX = /^(?:ok|pass|passed)\b|^[✓√✔]/i;
+
+// The builder's own reply must reach the lead both when the worker says it is stuck (ACTIVE_RX) and when
+// it carries a genuine raw environment or commit failure (TOOL_ENV_RX). The failed tool event may never
+// reach the runner, but the refusal the reply names still must. A bare application-data ENOENT is not in
+// TOOL_ENV_RX, so a resolved-error summary stays quiet.
+const ASSISTANT_ENV_RX = [...ACTIVE_RX, ...TOOL_ENV_RX];
+
+// The env vocabulary depends on where the text came from: a tool's failed output, the builder's own
+// narration, or (untyped) the legacy classifier used directly on reply text.
+const envRxFor = (source) => (source === 'tool' ? TOOL_ENV_RX : source === 'assistant' ? ASSISTANT_ENV_RX : ENV_RX);
+
 const clip = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, 160);
 // A question that answers itself or quotes the brief is not a request for the lead.
 const isRhetorical = (line) => /^(why|how come|isn'?t|aren'?t|doesn'?t|don'?t|surely|obviously)\b/i.test(line);
@@ -116,15 +168,16 @@ const isQuoted = (line) => /^[>»|]/.test(line);
 // ("I hit `Permission denied` and fixed it") must not raise an ENV blocker that survives the fix.
 const stripInlineCode = (line) => line.replace(/`[^`]*`/g, ' ');
 
-function envLine(s) {
+function envLine(s, source) {
   let fenced = false;
   for (const raw of s.split('\n')) {
     const line = raw.trim();
     if (/^```/.test(line)) { fenced = !fenced; continue; }
     if (fenced || !line || isQuoted(line)) continue;
+    if (source === 'tool' && PASS_ASSERTION_RX.test(line)) continue; // a passing assertion is not a diagnostic
     const body = stripInlineCode(line);
     if (TRANSIENT_RX.some((rx) => rx.test(body))) continue;
-    if (ENV_RX.some((rx) => rx.test(body))) return line;
+    if (envRxFor(source).some((rx) => rx.test(body))) return line;
   }
   return '';
 }
@@ -142,14 +195,17 @@ function decisionLine(s) {
   return '';
 }
 
-// classifySignal(text) or classifySignal({ text, agentRole }) -> { kind, text, why } | null.
-// A review session (agentRole 'review') never blocks the lead: its text is report, not a request.
+// classifySignal(text) or classifySignal({ text, agentRole, source }) -> { kind, text, why } | null.
+// `source` names where the text came from: 'assistant' (the builder's own reply, narration) or 'tool'
+// (a failed tool's output, diagnostics). It picks the env vocabulary and lets a passing assertion or a
+// resolved-error summary pass as an ordinary functional result. Without it the classifier is untyped
+// and keeps its legacy behaviour. A review session (agentRole 'review') never blocks the lead.
 export function classifySignal(input) {
   const o = typeof input === 'string' ? { text: input } : (input || {});
   if (o.agentRole === 'review' || o.review) return null;
   const s = String(o.text == null ? '' : o.text).replace(/\r/g, '');
   if (!s.trim()) return null;
-  const el = envLine(s);
+  const el = envLine(s, o.source);
   if (el) return { kind: ENV, text: clip(el), why: 'an environment failure the worker cannot fix alone' };
   const dl = decisionLine(s);
   if (dl) return { kind: DECISION, text: clip(dl), why: 'the worker asks the lead to decide or grant permission' };

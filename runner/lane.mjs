@@ -338,7 +338,7 @@ export async function runLane(repoArg, task, opts = {}) {
     const t = (p.text || '').trim(); if (!t) return;
     // A finished builder reply (or, when real SSE sends no time.end, the idle sweep over every part)
     // may ask the lead to decide or grant permission: surface it once per part.
-    if (p.type === 'text' && roleOf(p.sid) === 'build') raiseSignal(classifySignal({ text: t, agentRole: 'build' }));
+    if (p.type === 'text' && roleOf(p.sid) === 'build') raiseSignal(classifySignal({ text: t, agentRole: 'build', source: 'assistant' }));
     if (p.type === 'reasoning') L(`  ~ think: ${oneLine(t, 300)}`); else { lastWorkerReply = t; L('  assistant:'); block('│ ', t); }
   };
   const toolInput = (tool, inp = {}) => oneLine(inp.command ?? inp.filePath ?? inp.path ?? inp.pattern ?? inp.url ?? inp.description ?? JSON.stringify(inp), 200);
@@ -428,7 +428,7 @@ export async function runLane(repoArg, task, opts = {}) {
             // once; otherwise the same command failing repeatedly with no progress is its own signal.
             const ft = roleOf(sid) === 'build' ? toolFailureText(st) : '';
             if (ft) {
-              const esig = classifySignal({ text: ft, agentRole: 'build' });
+              const esig = classifySignal({ text: ft, agentRole: 'build', source: 'tool' });
               if (esig) raiseSignal(esig);
               else {
                 const key = toolKey(part.tool, st.input);
