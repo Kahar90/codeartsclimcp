@@ -206,6 +206,8 @@ check('a builder question in a text part with no time.end is detected by the idl
 check('pure steps: an explicit step commit marks that step done', JSON.stringify(S.uncommittedSteps([{ n: 1 }, { n: 2 }], [{ subject: 'step 1: thing 1' }])) === '[2]');
 check('pure steps: an unrelated wip commit does not complete a step', JSON.stringify(S.uncommittedSteps([{ n: 1 }, { n: 2 }], [{ subject: 'wip: scratch work' }])) === '[1,2]');
 check('pure steps: every explicit step commit leaves nothing missing', S.uncommittedSteps([{ n: 1 }, { n: 2 }], [{ subject: 'step 1: a' }, { subject: 'step 2: b' }]).length === 0);
+check('pure steps: a wip subject that mentions "step N" does not complete the step', JSON.stringify(S.uncommittedSteps([{ n: 1 }, { n: 2 }, { n: 3 }], [{ subject: 'wip: step 2 draft' }])) === '[1,2,3]');
+check('pure steps: a revert subject that mentions "step N" does not complete the step', JSON.stringify(S.uncommittedSteps([{ n: 1 }, { n: 2 }, { n: 3 }], [{ subject: 'revert step 3' }])) === '[1,2,3]');
 
 // ---------- early idle then completion end to end ----------
 const sRepo = makeRepo('stepsdone', ['commit:1', 'commit:2'], 2);
@@ -217,6 +219,15 @@ const sSubjects = subjects(sRepo);
 check('an early idle after step 1 is continued and the lane finishes only after step 2', r.status === 0 && /CA_RESULT/.test(r.stdout) && sSubjects.some((x) => /^step 1\b/.test(x)) && sSubjects.some((x) => /^step 2\b/.test(x)), `${r.status} ${JSON.stringify(sSubjects)}`);
 check('the continuation named the missing step 2', prompts(sRepo).some((p) => /Missing: step 2/.test(p.text)), JSON.stringify(prompts(sRepo).map((p) => p.text.slice(0, 90))));
 
+// ---------- one step per idle turn, more steps than the continuation cap ----------
+const fourRepo = makeRepo('steps4', ['commit:1', 'commit:2', 'commit:3', 'commit:4'], 4);
+const fourId = 'steps4--work';
+r = run(fourRepo, ['lane', fourRepo, 'work', '--detach']);
+check('four-step lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+r = run(fourRepo, ['wait', fourId, '--timeout', '120', '--quiet']);
+const fourSubjects = subjects(fourRepo);
+check('a lane committing one step per idle turn finishes done, not needs review', r.status === 0 && /"result":"done"/.test(r.stdout) && [1, 2, 3, 4].every((n) => fourSubjects.some((x) => new RegExp(`^step ${n}\\b`).test(x))), `${r.status} ${r.stdout.slice(0, 300)} ${JSON.stringify(fourSubjects)}`);
+
 // ---------- exhausted continuation end to end ----------
 const tRepo = makeRepo('stepsstuck', ['commit:1', 'ok', 'ok'], 2);
 const tId = 'stepsstuck--work';
@@ -224,7 +235,9 @@ r = run(tRepo, ['lane', tRepo, 'work', '--detach'], 120000, { STEP_CONTINUES: '1
 check('stuck two-step lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
 r = run(tRepo, ['wait', tId, '--timeout', '120', '--quiet'], 120000, { STEP_CONTINUES: '1' });
 const tSubjects = subjects(tRepo);
-check('an incomplete lane with an exhausted continuation reports steps incomplete', r.status === 1 && /"result":"steps incomplete"/.test(r.stdout) && tSubjects.some((x) => /^step 1\b/.test(x)) && !tSubjects.some((x) => /^step 2\b/.test(x)), `${r.status} ${r.stdout.slice(0, 300)} ${JSON.stringify(tSubjects)}`);
+check('an exhausted continuation ends as needs review (exit 4), not done', r.status === 4 && /"result":"needs review"/.test(r.stdout) && tSubjects.some((x) => /^step 1\b/.test(x)) && !tSubjects.some((x) => /^step 2\b/.test(x)), `${r.status} ${r.stdout.slice(0, 300)} ${JSON.stringify(tSubjects)}`);
+const trow = row(tRepo, tId);
+check('the incomplete lane lands in the attention bucket with the missing-step reason', !!trow && trow.status?.attention === true && trow.bucket === 'attention' && /step 2/.test(trow.reason || ''), JSON.stringify(trow && { attention: trow.status && trow.status.attention, bucket: trow.bucket, reason: trow.reason }));
 check('the runner did not manufacture a step 2 commit', !tSubjects.some((x) => /^step 2\b/.test(x)), JSON.stringify(tSubjects));
 
 for (const l of results) console.log(l);

@@ -255,7 +255,7 @@ export async function runLane(repoArg, task, opts = {}) {
         if (n > maxStep) maxStep = n;
       }
       const newStep = maxStep > (S.stepSeen || 0);
-      if (newStep) S.stepSeen = maxStep;
+      if (newStep) { S.stepSeen = maxStep; S.stepContinues = 0; }
       if (newStep || S.phase === 'fix') {
         const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
         S.lastCommitAt = ct ? Number(ct) * 1000 : now();
@@ -1319,9 +1319,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
             await send(sid, stepContinuation(missingSteps), buildModel);
             continue;
           }
-          reason = `step ${missingSteps.join(', ')} not committed after ${STEP_CONTINUES} continuations`;
-          exitCode = 4; forcedResult = 'steps incomplete';
-          say(`step ${missingSteps.join(', ')} still uncommitted after ${STEP_CONTINUES} continuations; needs review`);
+          reason = `step ${missingSteps.join(', ')} not committed after ${STEP_CONTINUES} continuation${STEP_CONTINUES === 1 ? '' : 's'}`;
+          exitCode = 4; forcedResult = 'needs review';
+          say(`step ${missingSteps.join(', ')} still uncommitted after ${STEP_CONTINUES} continuation${STEP_CONTINUES === 1 ? '' : 's'}; needs review`);
           break;
         }
         phase('gate', 'running gates');
