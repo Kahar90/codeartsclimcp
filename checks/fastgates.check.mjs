@@ -15,6 +15,11 @@
 //   K. Content changes between the two helper runs: the second is not reused.
 //   L. A `CHECK_PARALLEL: N` brief line opts in without env (a lead using only the MCP brief workflow).
 //   M. The CHECK_PARALLEL env var overrides the brief line.
+// Step 2: the final review must be handed prepared context, must fall back for a large diff, and must
+// still run and keep its gate.
+//   H. A small change: the prompt carries the brief, the commits, the diff stat and the diff.
+//   I. A large change: the prompt carries the diff stat and a fallback note, not the whole diff.
+//   N. A healthy speculative review past its polling budget is adopted on the same session (no replay).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -58,7 +63,7 @@ function lane(name, brief, script, env = {}, extra = {}) {
   const gates = (st?.gates || []).filter((x) => x.gate !== 'git clean');
   return { repo, code: r.status, out: (r.stdout || '') + (r.stderr || ''), st, gates,
     count1: read('tasks/work.lane/count1.txt').length, count2: read('tasks/work.lane/count2.txt').length,
-    prompts: jsonl(path.join(repo, 'fake-prompts.log')), status: g('status', '--porcelain').stdout };
+    prompts: jsonl(path.join(repo, 'fake-prompts.log')), aborts: read('fake-aborts.log'), status: g('status', '--porcelain').stdout };
 }
 const span = (gates) => Math.max(...gates.map((g) => g.at + (g.ms || 0))) - Math.min(...gates.map((g) => g.at));
 const orderOf = (gates) => JSON.stringify(gates.map((g) => g.gate));
@@ -132,6 +137,38 @@ const m = lane('envwins', slowBriefParallel(1), ['commit:1'], { CHECK_PARALLEL: 
 check('M the CHECK_PARALLEL env var overrides the brief line',
   m.code === 0 && m.gates.length === 4 && span(m.gates) * 2 < seqSpan,
   `span ${span(m.gates)} vs sequential ${seqSpan}`);
+
+// H: the small-change review gets prepared context and the review gate is unchanged.
+const REV = { NO_REVIEW: '', STEP_REVIEW: '0', FAKE_REVIEW_MS: '600' };
+const h = lane('revsmall', reviewBrief('review small'), ['commit:1'], REV);
+const htext = (h.prompts || []).filter((p) => p.agent === 'plan').map((p) => p.text).join('\n\n');
+check('H the final review still runs once and keeps its gate',
+  h.code === 0 && h.st?.result === 'done' && h.st?.verdict === 'ready' && (h.st?.reviewRounds || []).length === 1,
+  `${h.code} ${h.st?.result} ${h.st?.verdict} rounds ${(h.st?.reviewRounds || []).length}`);
+check('H the review prompt carries the brief, the commits, the diff stat and the small diff',
+  htext.includes('Task brief (tasks/work.md):') && htext.includes('Goal: review small') && htext.includes('Commits (') &&
+  htext.includes('step 1: thing 1') && htext.includes('Diff stat (') && htext.includes('Diff (') && htext.includes('page1.html'),
+  htext.slice(0, 300));
+
+// I: a large change falls back to the diff stat and a pointer, and the review still runs.
+const i = lane('revlarge', reviewBrief('review large'), [`write:big.txt=${BIG}+commit:1`], REV);
+const itext = (i.prompts || []).filter((p) => p.agent === 'plan').map((p) => p.text).join('\n\n');
+check('I the large diff falls back to the diff stat, not the whole diff',
+  i.code === 0 && itext.includes('Diff stat (') && itext.includes('big.txt') && itext.includes('omitted') && !itext.includes('LARGE_LINE_'),
+  itext.slice(0, 300));
+check('I the review still runs and keeps its gate',
+  i.st?.result === 'done' && i.st?.verdict === 'ready' && (i.st?.reviewRounds || []).length === 1,
+  `${i.st?.result} ${i.st?.verdict} rounds ${(i.st?.reviewRounds || []).length}`);
+
+// N: a healthy speculative review that outruns its polling budget is adopted, not aborted and replayed.
+const n = lane('specadopt', reviewBrief('review adopt'), ['commit:1'], { NO_REVIEW: '', STEP_REVIEW: '0', FAKE_REVIEW_MS: '8000', STEP_REVIEW_TIMEOUT: '1' });
+const np = (n.prompts || []).filter((p) => p.agent === 'plan');
+check('N a speculative review past its polling budget is adopted on the same session',
+  n.code === 0 && n.st?.result === 'done' && n.st?.verdict === 'ready' && (n.st?.reviewRounds || []).length === 1,
+  `${n.code} ${n.st?.result} ${n.st?.verdict} rounds ${(n.st?.reviewRounds || []).length}`);
+check('N exactly one final-review prompt for the HEAD (no replay)',
+  np.length === 1 && np[0].text.includes('Prepared context from the runner'),
+  `prompts ${np.length} aborts ${JSON.stringify(n.aborts.slice(0, 120))}`);
 
 for (const l of results) console.log(l);
 const fails = results.filter((l) => l.startsWith('FAIL')).length;

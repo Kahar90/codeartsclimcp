@@ -1058,9 +1058,28 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     save(true);
     review = text; finalReviewed = true;
   };
+  // The runner collects the review context once so the reviewer does not spend tool round trips
+  // rediscovering it: the brief, the commits, the diff stat and, while the change is small, the diff
+  // itself. It is bounded, so a large change falls back to the diff stat and a pointer instead of
+  // pasting a huge diff. This is a starting point: the reviewer still reads whatever source it needs.
+  const reviewContext = (from) => {
+    const MAX_BRIEF = 8000, MAX_DIFF = 16000;
+    const briefText = brief.length > MAX_BRIEF ? brief.slice(0, MAX_BRIEF) + `\n[truncated at ${MAX_BRIEF} chars]` : brief;
+    const log = git(repo, 'log', '--oneline', `${from}..HEAD`).trim();
+    const stat = git(repo, 'diff', '--stat', from, 'HEAD').trim();
+    const diff = git(repo, 'diff', from, 'HEAD');
+    const parts = [
+      `Task brief (tasks/${task}.md):\n\`\`\`\n${briefText}\n\`\`\``,
+      `Commits (${from}..HEAD):\n\`\`\`\n${log || '(none)'}\n\`\`\``,
+      `Diff stat (${from}..HEAD):\n\`\`\`\n${stat || '(no changes)'}\n\`\`\``,
+    ];
+    if (diff.length <= MAX_DIFF) parts.push(`Diff (${from}..HEAD):\n\`\`\`\n${diff.trim()}\n\`\`\``);
+    else parts.push(`Diff (${from}..HEAD): omitted, ${diff.split('\n').length} lines are too large to inline. Run \`git diff ${from} HEAD\` or open the changed files for the full change.`);
+    return `\n\nPrepared context from the runner (a starting point; still open the source you need and judge every requirement yourself):\n\n${parts.join('\n\n')}`;
+  };
   // One builder for the final review prompt, so the normal and the speculative review send the exact
-  // same text: the template (or tasks/<task>.review.md), the step-review appendix and, for a fix round,
-  // the previous findings block that names the fix range.
+  // same text: the template (or tasks/<task>.review.md), the step-review appendix, the prepared
+  // context and, for a fix round, the previous findings block that names the fix range.
   const finalReviewPrompt = (prev) => {
     const rf = path.join(repo, 'tasks', `${task}.review.md`);
     let rb = fs.existsSync(rf) ? fs.readFileSync(rf, 'utf8')
@@ -1072,6 +1091,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         + `Review only the fix: git log --oneline ${prev.to}..HEAD and git diff ${prev.to}..HEAD. `
         + `Say whether each finding is fixed and whether the fix broke anything; same output format and VERDICT line.`;
     }
+    rb += reviewContext(prev && prev.to ? prev.to : START);
     return rb;
   };
   const startFinalReview = async (prev) => {
@@ -1131,7 +1151,15 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         const deadline = at + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false, text = '';
         while (!done) {
           if (specReviewCancel) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'cancelled', text }; }
-          if (now() > deadline) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'timeout', text }; }
+          if (now() > deadline) {
+            // The polling budget is spent. If the session is alive and progressing, do NOT abort it: hand it
+            // to the normal final review, which drives the SAME session with the normal watchdog and the
+            // overall lane deadline, instead of discarding it and replaying the whole review. Only a session
+            // that never went busy is treated as missing and aborted here.
+            if (sawBusy) return { sid: rec.sid, ok: false, reason: 'busy-timeout', text };
+            try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {}
+            return { sid: rec.sid, ok: false, reason: 'timeout', text };
+          }
           await sleep(3000);
           let st; try { st = (await server.api('GET', '/session/status', null, 10000))[rec.sid]?.type; } catch { st = undefined; }
           if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
@@ -1212,7 +1240,14 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // "needs review" with an empty verdict.
   const finishFinalReview = async (fr) => {
     let rr = await fr.promise;
-    if (!rr.ok && fr.spec && rr.reason !== 'cancelled') {
+    if (!rr.ok && fr.spec && rr.reason === 'busy-timeout') {
+      // A healthy speculative session that only ran past its polling budget keeps its turn: drive the same
+      // session with the normal watchdog and the overall lane deadline. No new session and no replayed
+      // prompt, so one final review covers this HEAD and its findings are the ones already being produced.
+      L(`== speculative review still running after ${CFG.stepReviewTimeout}s; adopting the same session with the normal watchdog`);
+      const o = await drive(fr.sid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
+      rr = o.ok ? { sid: fr.sid, ok: true, reason: '', text: '' } : { sid: fr.sid, ok: false, reason: o.reason || 'error', text: '' };
+    } else if (!rr.ok && fr.spec && rr.reason !== 'cancelled') {
       L(`== speculative review did not finish (${rr.reason}); running the normal final review`);
       await discardSpecReview();
       if (S.specReview) { S.specReview.used = false; save(true); }
