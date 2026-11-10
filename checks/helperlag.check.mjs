@@ -24,7 +24,7 @@ const env = { ...process.env, CA_REGISTRY: path.join(tmp, 'registry'), CA_SETTIN
 // The shared fake is injected, never edited: a wrapper tool is emitted when the `run` verb invokes the
 // lane helper. `stuck` keeps it active forever (the observed stall); `exits` completes it after 5 s.
 const BASE = fs.readFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), 'utf8');
-const WRAP_CMD = 'node tasks/work.lane/check.mjs 1 | tail -30';
+const WRAP_CMD = 'x'.repeat(260) + ' node tasks/work.lane/check.mjs 1 | tail -30';
 const inject = (after) => BASE.replace("else if (verb === 'run') {", `else if (verb === 'run') { ${after}`);
 const fakeStuck = () => inject(`emit('message.part.updated',{part:{id:'helperpart',sessionID:sid,messageID:'helpermsg',type:'tool',callID:'helperstuck',tool:'bash',state:{status:'running',input:{command:'${WRAP_CMD}'}}}});`);
 const fakeExits = () => inject(`const wc='node tasks/work.lane/check.mjs 1'; emit('message.part.updated',{part:{id:'wrapok',sessionID:sid,messageID:'wrapm',type:'tool',callID:'wrap-ok',tool:'bash',state:{status:'running',input:{command:wc}}}}); later(sid,5000,()=>emit('message.part.updated',{part:{id:'wrapok',sessionID:sid,messageID:'wrapm',type:'tool',callID:'wrap-ok',tool:'bash',state:{status:'completed',input:{command:wc},output:'ok'}}}));`);
@@ -54,12 +54,13 @@ try {
   const id1 = 'stuck--work';
   let r = ca(repo1, ['lane', repo1, 'work', '--detach']);
   check('lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+  check('helper finishes before measuring alert latency', !!await until(() => stateOf(repo1)?.workerChecks?.some(c => c.code === 0), 30000));
   const t0 = Date.now();
   r = ca(repo1, ['wait', id1, '--timeout', '25', '--quiet'], 40000);
   const waited = (Date.now() - t0) / 1000;
   const s1 = stateOf(repo1);
   check('fixture really completed its helper check green', !!(s1 && (s1.workerChecks || []).some((c) => c.code === 0)), JSON.stringify(s1 && s1.workerChecks));
-  check('fixture wrapper stayed active after the check finished', !!(s1 && ((s1.tools || []).some((t) => String(t.input || '').includes('check.mjs')) || String(s1.activity || '').includes('check.mjs'))), JSON.stringify(s1 && s1.tools));
+  check('long-command wrapper stayed active after the check finished', !!s1?.tools?.some(t => String(t.input).startsWith('xxx')), JSON.stringify(s1?.tools));
   check('finished CHECK with a live wrapper surfaces exit 11 with kind check-wrapper within 25 s', r.status === 11 && /"kind":"check-wrapper"/.test(r.stdout) && waited < 25, `exit ${r.status} after ${waited.toFixed(1)}s: ${r.stdout.slice(0, 300)} ${r.stderr.slice(0, 200)}`);
   check('ca wait prints a CA_BLOCKED line naming check-wrapper', /CA_BLOCKED/.test(r.stdout) && /check-wrapper/.test(r.stdout), r.stdout.slice(0, 200));
   check('status --json shows the check-wrapper blocker on the still-running lane', (() => { const q = row(repo1, id1); return q && !q.result && q.blocked && q.blocked.kind === 'check-wrapper' && /still running/.test(q.blocked.text || ''); })(), JSON.stringify(row(repo1, id1) && row(repo1, id1).blocked));
@@ -98,7 +99,7 @@ try {
   check('latest-state lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
   r = ca(repo4, ['wait', id4, '--timeout', '12'], 35000);
   const out = String(r.stdout || '');
-  check('a wait timeout renders the latest build/tool state (build phase + helper tool), not "starting"', r.status === 124 && /build/i.test(out) && /check\.mjs/.test(out), `exit ${r.status} out=${out.slice(0, 400)}`);
+  check('a wait timeout renders the latest build/tool state, not "starting"', r.status === 124 && /build/i.test(out) && /running tool/.test(out), `exit ${r.status} out=${out.slice(0, 400)}`);
   await stop(repo4, id4);
 } finally {
   await sleep(1500);

@@ -394,7 +394,7 @@ export async function runLane(repoArg, task, opts = {}) {
           const s = sid ? sx(sid) : null; const st = part.state || {}; const key = part.callID || part.id;
           if (st.status === 'running' && s && !s.tools.has(key)) {
             for (const k of parts.keys()) flushPart(k);
-            s.tools.set(key, { tool: part.tool, since: now(), input: toolInput(part.tool, st.input) });
+            s.tools.set(key, { tool: part.tool, since: now(), input: toolInput(part.tool, st.input), helperWrapper: helperInCommand(st.input?.command) });
             L(`  > ${part.tool}  ${toolInput(part.tool, st.input)}`);
             { const n = sleepPoll(st.input?.command); if (n) { L(`  ! sleep-poll: ${part.tool} waits sleep ${n}`); flagSleepPoll(`${part.tool}: sleep ${n}`); queueSleepSteer(); } }
             // The lane's CHECK lines must run through the helper (outside the sandbox). A bash command
@@ -654,7 +654,7 @@ export async function runLane(repoArg, task, opts = {}) {
     if (lastHelperReqDone.id && lastHelperReqDone.id === S.wrapperMuteKey) return null;
     const waited = now() - lastHelperReqDone.doneAt;
     if (waited < WRAPPER_STALL_S * 1000) return null;
-    const hit = activeTools.find((t) => helperInCommand(t.input) && t.since <= lastHelperReqDone.doneAt && lastHelperReqDone.doneAt - t.since <= WRAPPER_STALE_MS);
+    const hit = activeTools.find((t) => (t.helperWrapper || helperInCommand(t.input)) && t.since <= lastHelperReqDone.doneAt && lastHelperReqDone.doneAt - t.since <= WRAPPER_STALE_MS);
     if (!hit) return null;
     return { kind: WRAPPER_KIND, key: lastHelperReqDone.id, text: `the CHECK helper finished but its wrapper ${hit.tool} is still running ${dur(waited)}: rerun the check with \`node tasks/${task}.lane/check.mjs <N>\` (no pipe or tail), or kick the turn to inspect the wrapper` };
   };
@@ -755,7 +755,7 @@ export async function runLane(repoArg, task, opts = {}) {
       const tools = [...s.tools.values()];
       // A check-wrapper alert whose wrapper has since exited is resolved: drop it instead of showing a
       // stall the lead can no longer act on. Then re-check the contradiction and raise one blocker.
-      if (S.blocker && S.blocker.kind === WRAPPER_KIND && !tools.some((t) => helperInCommand(t.input))) clearBlocker('the wrapper exited');
+      if (S.blocker && S.blocker.kind === WRAPPER_KIND && !tools.some((t) => t.helperWrapper || helperInCommand(t.input))) clearBlocker('the wrapper exited');
       const wstall = wrapperStallSignal(tools);
       if (wstall && (!S.blocker || S.blocker.kind === WRAPPER_KIND) && !(S.blocker && S.blocker.key === wstall.key)) raiseSignal(wstall);
       const oldest = tools.reduce((m, t) => Math.min(m, t.since), Infinity);
