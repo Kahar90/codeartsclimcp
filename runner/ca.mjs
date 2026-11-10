@@ -753,7 +753,7 @@ async function runLane(repoArg, task, opts = {}) {
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      const by = /stepreview/i.test(f) ? 'step review' : /question/i.test(f) ? 'runner notice' : 'ca steer';
+      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep/i.test(f) ? 'runner notice' : 'ca steer';
       if (by === 'step review') lastPumpHadStepReview = true;
       // A lead steer queued after the blocker clears it: the person answered the worker's question.
       if (S.blocker && by === 'ca steer') { const at = Number((f.match(/^(\d+)/) || [])[1]) || 0; if (at > S.blocker.at) clearBlocker('steer delivered'); }
@@ -858,7 +858,14 @@ async function runLane(repoArg, task, opts = {}) {
       }
       prevTick = tickMs;
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
-      if (fs.existsSync(blockerAckFile)) { try { fs.rmSync(blockerAckFile, { force: true }); } catch {} S.noCommitAckAt = now(); clearBlocker('ack'); }
+      if (fs.existsSync(blockerAckFile)) {
+        try { fs.rmSync(blockerAckFile, { force: true }); } catch {}
+        // Only an ack that dismissed a no-progress blocker mutes the no-progress alarm until the next
+        // commit. Dismissing a question must not hide a later silent gap, so the clock simply restarts.
+        const wasNoProgress = !!(S.blocker && S.blocker.kind === 'no-progress');
+        clearBlocker('ack');
+        if (wasNoProgress) S.noCommitAckAt = now();
+      }
       const k = takeKick();
       if (k) {
         L(`== kick (${k.mode}) from ${k.by}${k.text ? ': ' + oneLine(k.text, 160) : ''}`);
