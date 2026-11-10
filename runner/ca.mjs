@@ -66,14 +66,18 @@
 //        Env knobs: THINK_FALLBACK_MODEL (builder model after 2 thinking stalls; brief line FALLBACK_MODEL:, none disables)
 //        STALL_S=240 TOOL_STALL_S=900 THINK_S=480 (watchdogs: silent model, one tool
 //        call, thinking with no tool call; THINK_S 0 disables) MAX_RETRIES=3 MAX_FIXES=3
-//        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
+//        LANE_TIMEOUT=5400 CHECK_TIMEOUT=900 NO_COMMIT_S=900 BUILD_MODEL REVIEW_MODEL NO_REVIEW=1
+//        (NO_COMMIT_S: a running builder with no new commit this long raises a blocker the lead
+//        sees at once; 0 disables)
 //        NET_WAIT_S=1800 (a network error waits this long for the network instead of using a retry)
 //        CA_MAX_LANES_PER_MODEL=maas/glm-5.3=2,default=4 (cap lanes per build model; glm 3,
 //        others 4, "off" or 0 disables; a lane waits for a free slot before its build session)
 //        Exit codes: 0 done (review ready or skipped), 1 failed/stopped/killed or checks failing,
 //        2 usage or unknown lane, 3 missing credentials, 4 needs review or unverified (a check
 //        could not run), 5 paused at LANE_TIMEOUT (resume with --resume), 10 a step was committed
-//        (ca wait --steps; look at it and call again with --after), 124 wait timeout.
+//        (ca wait --steps; look at it and call again with --after), 11 a lane is blocked (a worker
+//        question or no progress: ca wait prints CA_BLOCKED, answer with ca steer which clears it,
+//        or ca ack to dismiss it), 124 wait timeout.
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

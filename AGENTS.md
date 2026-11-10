@@ -109,7 +109,9 @@ Parallel lanes: one git worktree each (`git worktree add ../<repo>-wt-<task> -b 
 about 3 at once.
 
 Exit codes: 0 done, 1 failed or stopped, 2 usage or unknown lane, 3 missing credentials,
-4 needs review, 5 paused at LANE_TIMEOUT (`ca lane <repo> <task> --resume`), 124 wait timeout.
+4 needs review, 5 paused at LANE_TIMEOUT (`ca lane <repo> <task> --resume`), 11 a lane is blocked
+(a worker question or no progress: read its `CA_BLOCKED` line, answer with `ca steer` or dismiss
+with `ca ack`), 124 wait timeout.
 Lanes and `ca wait` also print `CA_RESULT {"lane":..,"result":..,"verdict":..,"exit":..}`.
 
 The human can watch at http://127.0.0.1:4777 (Lanes) and http://127.0.0.1:4777/office

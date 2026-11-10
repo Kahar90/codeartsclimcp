@@ -34,6 +34,9 @@ Run: in `ca_wait`, wait with `any: true` when lanes run in parallel, so an early
 once (the finished lanes come back, the rest as still running). Add `steps: true` (and `after`, the
 `commits` value from the previous answer) to also wake on each step commit: look at UI steps right
 away (screenshot the changed files) and steer early instead of fixing everything after the lane.
+A running lane that is blocked (a worker question, or no new commit for `NO_COMMIT_S`) wakes
+`ca_wait` at once with exit 11 and a `CA_BLOCKED` line: read its question or no-progress note,
+answer with `ca_steer` (that clears it) or dismiss it with `ca_ack`, then call `ca_wait` again.
 
 Speed without losing quality: two or three small parallel lanes beat one long lane; write the
 contract check first and run the brief's existing CHECK lines on main before starting; do your own
