@@ -2341,14 +2341,13 @@ function briefWarningText(w) {
   return `${w.kind}: ${w.file}`;
 }
 // `ca brief-check <repo> <task> [--json]`: print the brief warnings a lead should fix before a lane
-// starts. Warnings never block a lane; the command always exits 0 (a missing brief is a usage error).
+// starts. Warnings never block a lane; the command always exits 0, so a missing brief just has none.
 function cmdBriefCheck(args) {
   const asJson = args.includes('--json');
   const [repoArg, task] = args.filter((a) => !a.startsWith('--'));
   if (!repoArg || !task) die('usage: ca brief-check <repo> <task> [--json]', 2);
   const repo = path.resolve(repoArg);
-  const warnings = briefWarningsFor(repo, task);
-  if (warnings === null) die(`no brief at tasks/${task}.md in ${repo}`, 2);
+  const warnings = briefWarningsFor(repo, task) || [];
   if (asJson) { console.log(JSON.stringify({ warnings }, null, 2)); return; }
   if (!warnings.length) console.log('brief: no warnings');
   else for (const w of warnings) console.log(`brief warning: ${briefWarningText(w)}`);
