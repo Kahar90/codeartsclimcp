@@ -488,9 +488,16 @@ async function runLane(repoArg, task, opts = {}) {
   // supervisor running against a folder that is gone, so it stops itself and its own server.
   let repoGoneTicks = 0;
   const orphanGuard = () => {
-    // A live git repo always has `.git/HEAD`. Check that marker, not just `.git`, because a restarted
-    // codearts server can recreate `.git/info/` and make a deleted repo look present again.
-    if (fs.existsSync(path.join(repo, '.git', 'HEAD'))) { repoGoneTicks = 0; return false; }
+    // The repo is gone when its git metadata is gone. A normal repo has `.git` as a directory with a
+    // HEAD file; a linked worktree or submodule has `.git` as a file (a gitfile). Test the HEAD marker
+    // for real repos too, because a restarted codearts server can recreate `.git/info/` (but not HEAD)
+    // and otherwise make a deleted repo look present again.
+    let gitAlive = false;
+    try {
+      const gitPath = path.join(repo, '.git');
+      gitAlive = fs.lstatSync(gitPath).isDirectory() ? fs.existsSync(path.join(gitPath, 'HEAD')) : true;
+    } catch { gitAlive = false; }
+    if (gitAlive) { repoGoneTicks = 0; return false; }
     if (++repoGoneTicks < 2) return false;
     L('repo deleted: stopping');
     try { killTree(server?.child?.pid || S.server?.pid); } catch {}
