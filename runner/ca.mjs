@@ -488,14 +488,17 @@ async function runLane(repoArg, task, opts = {}) {
   // supervisor running against a folder that is gone, so it stops itself and its own server.
   let repoGoneTicks = 0;
   const orphanGuard = () => {
-    if (fs.existsSync(path.join(repo, '.git'))) { repoGoneTicks = 0; return false; }
+    // A live git repo always has `.git/HEAD`. Check that marker, not just `.git`, because a restarted
+    // codearts server can recreate `.git/info/` and make a deleted repo look present again.
+    if (fs.existsSync(path.join(repo, '.git', 'HEAD'))) { repoGoneTicks = 0; return false; }
     if (++repoGoneTicks < 2) return false;
     L('repo deleted: stopping');
     try { killTree(server?.child?.pid || S.server?.pid); } catch {}
-    S.phase = 'finished'; S.activity = 'repo deleted: stopping'; S.finishedAt = now();
+    S.result = 'stopped'; S.exitCode = 1;
+    S.phase = 'finished'; S.activity = 'repo deleted: stopping'; S.busy = false; S.finishedAt = now();
     try { save(true); } catch {}
     try { fs.rmSync(path.join(REG, `${id}.json`), { force: true }); } catch {}
-    process.exit(0);
+    process.exit(1);
   };
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
