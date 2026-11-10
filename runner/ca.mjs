@@ -24,6 +24,9 @@
 //                                  --steps also returns (exit 10, CA_STEP) when a lane commits a new step; pass the printed commits as --after next time
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
+//        ca brief-check <repo> <task> [--json]  lint the brief for problems a lead used to find by hand
+//                                  (a protected file the brief changes, a CHECK that runs a missing file);
+//                                  warnings never block a lane; --json prints {warnings: [...]}
 //        ca workspace <repo> <task> [--from <branch>]   prepare a parallel lane workspace as a local
 //                                  clone (../<repo-name>-wt-<task>) on branch lane/<task>; --land merges
 //                                  that branch back into <repo> and deletes the clone
@@ -87,6 +90,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
+import { lintBrief } from './brieflint.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
 import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck, GLYPHS, gitDirInsideRepo, commitRefused, commitFallbackDecision, sleepPoll } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
@@ -2318,6 +2322,31 @@ function cmdInit(args) {
   console.log(`next: ca lane ${repoArg} ${task} --detach`);
   console.log(`      ca wait ${laneId(repo, task)}`);
 }
+// Lint a brief the way `ca brief-check` and the start of `ca lane` do (tracked files from git ls-files).
+function briefWarningsFor(repo, task) {
+  const file = path.join(repo, 'tasks', `${task}.md`);
+  let briefText = null; try { briefText = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const tracked = git(repo, 'ls-files').split(/\r?\n/).filter(Boolean);
+  return lintBrief({ repo, briefText, listFiles: () => tracked, readFile: (rel) => { try { return fs.readFileSync(path.join(repo, rel), 'utf8'); } catch { return ''; } } });
+}
+function briefWarningText(w) {
+  if (w.kind === 'protected-dependent') return `${w.file} is protected by a rule ("${w.rule}") but the brief changes ${(w.references || []).join(', ')}, which that file names`;
+  if (w.kind === 'missing-check-file') return `a CHECK line runs ${w.file}, which is not a file in the repo`;
+  return `${w.kind}: ${w.file}`;
+}
+// `ca brief-check <repo> <task> [--json]`: print the brief warnings a lead should fix before a lane
+// starts. Warnings never block a lane; the command always exits 0 (a missing brief is a usage error).
+function cmdBriefCheck(args) {
+  const asJson = args.includes('--json');
+  const [repoArg, task] = args.filter((a) => !a.startsWith('--'));
+  if (!repoArg || !task) die('usage: ca brief-check <repo> <task> [--json]', 2);
+  const repo = path.resolve(repoArg);
+  const warnings = briefWarningsFor(repo, task);
+  if (warnings === null) die(`no brief at tasks/${task}.md in ${repo}`, 2);
+  if (asJson) { console.log(JSON.stringify({ warnings }, null, 2)); return; }
+  if (!warnings.length) console.log('brief: no warnings');
+  else for (const w of warnings) console.log(`brief warning: ${briefWarningText(w)}`);
+}
 // `ca workspace <repo> <task>`: prepare a parallel lane workspace as a LOCAL CLONE
 // (../<repo-name>-wt-<task>) on a new branch lane/<task>, from --from (default: the repo's current
 // branch). A clone keeps .git inside the lane folder, so the CodeArts sandbox can commit there; a
@@ -3324,7 +3353,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), workspace: () => cmdWorkspace(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), 'brief-check': () => cmdBriefCheck(args), workspace: () => cmdWorkspace(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); await updateNotice(args); process.exit(0); }
 if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
   let v = '0.0.0'; try { v = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version || v; } catch {}
