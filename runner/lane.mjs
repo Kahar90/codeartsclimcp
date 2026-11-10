@@ -1347,14 +1347,15 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // State: S.specReview = { head, at, used }. When the builder goes idle and the git clean gate passes, a
   // review whose HEAD is still the one it saw is used as the final review; otherwise it is aborted and the
   // normal review runs. An in-flight step review is cancelled when the speculative one starts (it covers it).
-  let specReview = null; // { sid, sidP, head, from, at, promise, used } for the current round, or null
+  let specReview = null; // { sid, sidP, head, from, at, promise, used, handoff } for the current round, or null
   let specReviewStarting = false; // reserved while maybeSpecReview settles a step review before it starts
   let specReviewCancel = false;   // set when the speculative review is discarded, so its poller stops at once
+  let reviewHalt = null;          // set when the lead stopped/ended the lane while its adopted speculative review was driven
   const startSpecReview = (prev) => {
     const head = git(repo, 'rev-parse', 'HEAD');
     const at = now();
     const rb = finalReviewPrompt(prev);
-    const rec = { sid: null, sidP: null, head, from: prev && prev.to ? prev.to : START, at, used: false, promise: null, prev, baseline: null, reused: false };
+    const rec = { sid: null, sidP: null, head, from: prev && prev.to ? prev.to : START, at, used: false, promise: null, prev, baseline: null, reused: false, handoff: false };
     S.specReview = { head, at, used: false };
     S.reviewStartedAt = at;
     save(true);
@@ -1376,7 +1377,12 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         await server.api('POST', `/session/${rec.sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: rb }] });
         L(`== speculative review (${REVIEW}, plan agent) session ${rec.sid}${rec.reused ? ' (reused healthy reviewer context)' : ''} on ${head.slice(0, 8)}: starts while the builder wraps up`);
         const deadline = at + CFG.stepReviewTimeout * 1000; let sawBusy = false, text = '';
+        // A handoff (the final review is awaited and the normal driver takes this session over) must settle
+        // the poller promptly without aborting its live model turn. Poll in short slices so the handoff is
+        // seen within a fraction of a second instead of waiting out the full status interval.
+        const sleepUnless = async (ms) => { const end = now() + ms; while (now() < end) { if (rec.handoff || specReviewCancel) return; await sleep(200); } };
         for (;;) {
+          if (rec.handoff) return { sid: rec.sid, ok: false, reason: 'handoff', text, reused: rec.reused };
           if (specReviewCancel) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'cancelled', text, reused: rec.reused }; }
           if (now() > deadline) {
             // The polling budget is spent. If the session is alive and progressing, do NOT abort it: hand it
@@ -1387,7 +1393,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
             try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {}
             return { sid: rec.sid, ok: false, reason: 'timeout', text, reused: rec.reused };
           }
-          await sleep(3000);
+          await sleepUnless(3000);
+          if (rec.handoff) return { sid: rec.sid, ok: false, reason: 'handoff', text, reused: rec.reused };
           let st; try { st = (await server.api('GET', '/session/status', null, 10000))[rec.sid]?.type; } catch { st = undefined; }
           if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
           // Read only through the freshness proof: a reused session's cached reply (same id as before)
@@ -1466,7 +1473,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       save(true);
       L(`== final review: using the speculative review on ${head.slice(0, 8)}`);
       const sid = specReview.sid || (specReview.sidP ? await specReview.sidP.catch(() => null) : null);
-      return { sid, head, from: specReview.from, at: specReview.at, promise: specReview.promise, spec: true, baseline: specReview.baseline, reused: specReview.reused, prev: specReview.prev };
+      return { sid, head, from: specReview.from, at: specReview.at, promise: specReview.promise, spec: true, baseline: specReview.baseline, reused: specReview.reused, prev: specReview.prev, rec: specReview };
     }
     // A discarded speculative review may have REUSED the previous reviewer session and already sent it
     // this round's prompt. Re-selecting that same idle session would send the prompt a second time and
@@ -1477,19 +1484,51 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1], forceFresh);
     return asNormalFr(fr);
   };
-  // Await the overlapped final review and record it. A speculative review that did not finish (a transient
-  // error, a review past the timeout, or a credentials error its poller cannot report) falls back to the
-  // normal review, which drive()s the session with retries and detects auth, instead of turning the lane into
-  // "needs review" with an empty verdict.
+  // The speculative review's turn was started with a direct prompt_async, not send(). When the normal
+  // driver adopts that live session, record that a turn is known to have begun (so a turn that completed
+  // before adoption is never misread as 'no-start') and bill its model as the reviewer. Preserve any
+  // recorded error and the last-activity timestamp: the driver's own watchdogs rely on them.
+  const reviewDriverReady = (sid) => {
+    if (!sid) return;
+    sessionModel.set(sid, REVIEW);
+    reviewSessions.add(sid);
+    const s = sx(sid);
+    s.sawBusy = true;
+    if (!s.sentAt) s.sentAt = now();
+    if (!s.lastAct) s.lastAct = now();
+  };
+  // Await the final review and record it. A healthy speculative review is handed to the normal review
+  // driver in place; one that did not finish (a transient error, a stale/missing reused reply or a message
+  // its poller cannot accept) falls back to the normal review, which drive()s the session with retries and
+  // detects auth, instead of turning the lane into "needs review" with an empty verdict.
   const finishFinalReview = async (fr) => {
-    let rr = await fr.promise;
-    if (!rr.ok && fr.spec && rr.reason === 'busy-timeout') {
-      // A healthy speculative session that only ran past its polling budget keeps its turn: drive the same
-      // session with the normal watchdog and the overall lane deadline. No new session and no replayed
-      // prompt, so one final review covers this HEAD and its findings are the ones already being produced.
-      L(`== speculative review still running after ${CFG.stepReviewTimeout}s; adopting the same session with the normal watchdog`);
+    let rr;
+    if (fr.spec) {
+      // Hand the healthy speculative review to the normal review driver AS SOON AS the final review is
+      // awaited (the builder and the CHECKs are done). Tell the dedicated poller to stop WITHOUT aborting
+      // its live model turn, and record the session so the driver never reads a completed turn as
+      // 'no-start'. The poller returns at once: an already-completed reply (ok), 'handoff', or a failure.
+      if (fr.rec) fr.rec.handoff = true;
+      reviewDriverReady(fr.sid);
+      rr = await fr.promise;
+    } else {
+      rr = await fr.promise;
+    }
+    if (!rr.ok && fr.spec && (rr.reason === 'handoff' || rr.reason === 'busy-timeout')) {
+      // A healthy session that is still running (or only just finished) keeps its turn: drive the SAME
+      // session with the normal watchdog, lead steering (pumpInbox), stop/kick handling, auth and retry
+      // detection and the overall lane deadline. No new session and no replayed prompt, so one final
+      // review still covers this HEAD and lead notes reach the reviewer.
+      L(`== final review: adopting the live speculative session ${fr.sid} into the normal review driver (no new session, no replayed prompt)`);
       const o = await drive(fr.sid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
-      rr = o.ok ? { sid: fr.sid, ok: true, reason: '', text: '' } : { sid: fr.sid, ok: false, reason: o.reason || 'error', text: '' };
+      if (o.ok) {
+        rr = { sid: fr.sid, ok: true, reason: '', text: '' };
+      } else {
+        rr = { sid: fr.sid, ok: false, reason: o.reason || 'error', text: '' };
+        // A stop, the lane deadline or a dead server ends the lane as the builder path would: never start a
+        // fresh review (and never auto-accept a verdict) after the lead ended it.
+        if (o.reason === 'stopped' || o.reason === 'timeout' || o.reason === 'server-died') { reviewHalt = { reason: o.reason, exit: 1, forced: '' }; return; }
+      }
     } else if (!rr.ok && fr.spec && rr.reason !== 'cancelled') {
       L(`== speculative review did not finish (${rr.reason}); running the normal final review`);
       await discardSpecReview();
@@ -1704,6 +1743,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           phase('review', 'reviewing');
           await finishFinalReview(fr);
           if (exitCode === 3) break;
+          // The lead stopped (or the lane deadline hit) while the adopted review was driven: end the lane
+          // as stopped/paused instead of falling through to a false success.
+          if (reviewHalt) { reason = reviewHalt.reason; exitCode = reviewHalt.exit; forcedResult = reviewHalt.forced || ''; cleanEnd = false; say(`final review ended: ${reason}`); break; }
         }
         // Acceptance revalidation: the reviewed commit must still be HEAD and the tree clean after the
         // review. The reviewer is read-only, so a moved HEAD or a dirty tree means its verdict no longer
@@ -1720,6 +1762,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         const fr = await beginFinalReview();
         phase('review', 'reviewing');
         await finishFinalReview(fr);
+        if (reviewHalt) { reason = reviewHalt.reason; exitCode = reviewHalt.exit; forcedResult = reviewHalt.forced || ''; cleanEnd = false; }
         if (reviewInvalidated) { reason = reviewInvalidated; exitCode = 4; forcedResult = 'needs review'; cleanEnd = false; }
       }
 
