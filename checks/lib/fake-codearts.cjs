@@ -11,8 +11,16 @@
 //   fix        writes and commits `fixed` as "fix: make the check pass", then answers
 // Prompts sent with agent "plan" (reviews) never consume the script: they are answered after
 // FAKE_REVIEW_MS (default 2000) with the reply of the first [regex, reply] pair in fake-review.json
-// whose regex matches the prompt text (default "1. DONE\nVERDICT: ready"); /session/:id/message
-// returns it. A prompt sent to a busy session is queued and played when the turn ends (steering).
+// whose regex matches the prompt text (default "1. DONE\nVERDICT: ready"). A third element opts
+// object adds hooks, so the reply carries a STABLE message id the runner can prove is new:
+//   { noId: true }            the reply has no message id (missing-id fallback)
+//   { stale: true }           answer with the session's EXISTING message id (an old cached verdict)
+//   { commit: ['rel=text'] }  write and commit the files while reviewing (reviewer-time mutation)
+//   { write: ['rel=text'] }   write the files, no commit (a dirty tree during review)
+//   { busyAfter: MS }         after the turn goes idle, flip the session busy (busy-reuse fallback)
+//   { errorAfter: MS }        after the turn goes idle, emit a session error (error-reuse fallback)
+// /session/:id/message returns every assistant message for the session (with its stable id).
+// A prompt sent to a busy session is queued and played when the turn ends (steering).
 // Logs in the cwd: fake-turns.log (one scenario per line), fake-prompts.log (JSON per prompt:
 // t, sid, agent, text) and fake-aborts.log (JSON per abort: t, sid, agent).
 const http = require('node:http');
@@ -27,13 +35,19 @@ const stepGap = Number(process.env.FAKE_STEP_GAP_MS || 6000);
 const reviewMs = Number(process.env.FAKE_REVIEW_MS || 2000);
 let turn = 0; const status = {}; const clients = new Set(); let n = 0;
 const agentOf = {}; const queue = {}; const answers = {}; const timers = {};
+// Per-session assistant messages, each with a STABLE message id: the runner uses the id to prove a
+// reused reviewer session produced a NEW reply instead of replaying a cached verdict.
+const msgs = {};
 const emit = (type, properties) => { const d = `data: ${JSON.stringify({ type, properties })}\n\n`; for (const c of clients) c.write(d); };
 const later = (sid, ms, f) => { const t = setTimeout(() => { (timers[sid] || []).splice((timers[sid] || []).indexOf(t), 1); f(); }, ms); (timers[sid] ||= []).push(t); };
 const setStatus = (sid, type, extra = {}) => { status[sid] = { type, ...extra }; emit('session.status', { sessionID: sid, status: status[sid] }); if (type === 'idle') emit('session.idle', { sessionID: sid }); };
 const git = (...a) => execFileSync('git', ['-c', 'user.email=fake@x', '-c', 'user.name=fake', ...a], { stdio: 'ignore' });
-const answer = (sid, text) => {
-  const id = ++n; answers[sid] = text;
-  emit('message.part.updated', { part: { id: `p${id}`, sessionID: sid, messageID: `m${id}`, type: 'text', text, time: { end: Date.now() } } });
+const answer = (sid, text, opts = {}) => {
+  const mid = opts.noId ? null : (opts.msgId || `m${++n}`);
+  answers[sid] = text;
+  const part = { id: `p${++n}`, sessionID: sid, ...(mid ? { messageID: mid } : {}), type: 'text', text, time: { end: Date.now() } };
+  (msgs[sid] ||= []).push({ info: { ...(mid ? { id: mid } : {}), role: 'assistant' }, parts: [part] });
+  emit('message.part.updated', { part });
 };
 const finish = (sid) => {
   setStatus(sid, 'idle');
@@ -42,8 +56,29 @@ const finish = (sid) => {
 };
 function playReview(sid, text) {
   const hit = reviews.find(([re]) => new RegExp(re, 'i').test(text));
+  const opts = (hit && hit.length > 2 && hit[2]) || {};
   const ms = /STEP VERDICT/.test(text) && process.env.FAKE_STEP_REVIEW_MS ? Number(process.env.FAKE_STEP_REVIEW_MS) : reviewMs;
-  later(sid, ms, () => { answer(sid, hit ? hit[1] : '1. DONE\nVERDICT: ready'); later(sid, 100, () => finish(sid)); });
+  later(sid, ms, () => {
+    // A reviewer-time mutation: write (and optionally commit) files while the review turn runs. Used to
+    // prove the runner revalidates HEAD and the work tree after the review.
+    if (opts.write || opts.commit) {
+      const p = require('node:path');
+      for (const spec of [].concat(opts.write || [], opts.commit || [])) {
+        const [rel, ...rest] = String(spec).split('=');
+        if (!rel) continue;
+        fs.mkdirSync(p.dirname(rel), { recursive: true });
+        fs.writeFileSync(rel, rest.join('=') || `stray ${rel}\n`);
+      }
+      if (opts.commit) { try { git('add', '-A'); git('commit', '-qm', opts.msg || 'reviewer: stray change'); } catch {} }
+    }
+    if (opts.busyAfter) later(sid, Number(opts.busyAfter), () => setStatus(sid, 'busy'));
+    // An error on a completed review session must block its reuse (the runner reads sess[sid].error).
+    if (opts.errorAfter) later(sid, Number(opts.errorAfter), () => emit('session.error', { sessionID: sid, error: { name: 'UnknownError', data: { message: 'injected review-session error' } } }));
+    // A stale reply reuses the session's existing message id, so the runner must reject it as no new turn.
+    const cached = opts.stale && msgs[sid] && msgs[sid].length ? msgs[sid][msgs[sid].length - 1].info.id : null;
+    answer(sid, hit ? hit[1] : '1. DONE\nVERDICT: ready', cached ? { msgId: cached } : { noId: !!opts.noId });
+    later(sid, 100, () => finish(sid));
+  });
 }
 // Chained turn: "commit:1+run:all+ok" runs its parts in order inside one turn, then answers.
 //   commit:K   writes page<K>.html and commits it as "step K: thing K"
@@ -150,7 +185,7 @@ http.createServer((req, res) => {
     m = u.pathname.match(/^\/question\/([^/]+)\/reject$/);
     if (m) { fs.appendFileSync('fake-questions.log', JSON.stringify({ t: Date.now(), id: m[1], reply: 'reject' }) + '\n'); return json(true); }
     m = u.pathname.match(/^\/session\/([^/]+)\/message$/);
-    if (m) return json(answers[m[1]] ? [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: answers[m[1]] }] }] : []);
+    if (m) return json(msgs[m[1]] || []);
     return json({});
   });
 }).listen(port, '127.0.0.1');

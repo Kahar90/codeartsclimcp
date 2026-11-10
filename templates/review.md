@@ -10,6 +10,11 @@ Your shell runs in a sandbox with no local network: servers you start and fetch 
 node starts slowly. Do not probe or debug the environment; judge by reading the code.
 A quick `node --check` or grep is fine. Never print whole files or the whole
 diff. Files under `tasks/` belong to the runner (briefs, logs): ignore them, they are never a scope violation.
+Supplied context that is already complete counts as read: a file quoted in full in the prepared context is
+already read, so do not reread it unless a specific uncertainty remains that the quoted text cannot resolve.
+Batch the independent reads you still need (the changed files, any named-but-not-inlined file) into as few
+turns as you can. Finish as soon as every spec item and every material risk is assessed: never skip context
+you need, and never stop early because of a tool-call or step budget.
 
 1. Mark each numbered spec item DONE, PARTIAL or MISSING with one short reason.
 2. List real bugs with file:line, most severe first. Skip style nits.
