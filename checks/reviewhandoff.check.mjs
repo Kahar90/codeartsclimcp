@@ -23,11 +23,21 @@ const base = { ...process.env, CA_REGISTRY: reg, CA_SETTINGS: settings, CA_DASH:
   CODEARTS_CLI_AK: 'fake-ak', CODEARTS_CLI_SK: 'fake-sk', STALL_S: '60', THINK_S: '0', LANE_TIMEOUT: '300' };
 delete base.REVIEW_FIXES;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const FAKE_SRC = fs.readFileSync(FAKE, 'utf8');
+// A per-fixture fake source that delays ONLY review (plan) prompts before the turn starts, so a handoff
+// can adopt a session whose turn has not begun yet. Injected into this one fixture; the shared
+// checks/lib/fake-codearts.cjs is never modified.
+function patchedFake() {
+  const token = 'else setTimeout(() => start(sid, p), 400);';
+  const patched = FAKE_SRC.replace(token, "else setTimeout(() => start(sid, p), p.agent === 'plan' && process.env.FAKE_PROMPT_START_MS ? Number(process.env.FAKE_PROMPT_START_MS) : 400);");
+  if (patched === FAKE_SRC) throw new Error('per-fixture fake patch no longer matches checks/lib/fake-codearts.cjs; update the prompt-start hook');
+  return patched;
+}
 // A lane fixture: a git repo with one numbered brief step and a CHECK, a copy of the fake server and a
 // per-fixture build script/review table (never the shared fake). Injected per fixture, by design.
-function mkRepo(name, { script, review, env = {} }) {
+function mkRepo(name, { script, review, env = {}, fakeSrc }) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
-  fs.copyFileSync(FAKE, path.join(repo, 'serve'));
+  fs.writeFileSync(path.join(repo, 'serve'), fakeSrc || FAKE_SRC);
   fs.writeFileSync(path.join(repo, 'fake-script.json'), JSON.stringify(script));
   if (review) fs.writeFileSync(path.join(repo, 'fake-review.json'), JSON.stringify(review));
   fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-*.log\n');
@@ -104,6 +114,14 @@ try {
   const G = blocking('delayed', { script: ['commit:1+wait:7000+ok'], env: { FAKE_REVIEW_MS: '9000' } });
   check('delayed: lane ends DONE ready while the review is still running at adoption', G.code === 0 && G.st?.result === 'done' && G.st?.verdict === 'ready' && G.st?.specReview?.used === true, `${G.code} ${G.st?.result} ${G.st?.verdict}`);
   check('delayed: one prompt, no restart, no no-start failure', G.prompts.length === 1 && G.aborts.length === 0 && G.rounds.length === 1, `plans ${G.prompts.length} aborts ${G.aborts.length} rounds ${G.rounds.length}`);
+
+  // H: the review turn has NOT started when the handoff adopts it (the fake delays only the review turn's
+  // start). A turn that never began must keep waitTurn's no-start grace: it must not be read as an empty
+  // verdict (which would end the lane "needs review" with no fallback). The lane still ends ready on one
+  // prompt, once the turn starts and answers.
+  const H = blocking('delayedstart', { script: ['commit:1+wait:8000+ok'], env: { FAKE_REVIEW_MS: '2000', FAKE_PROMPT_START_MS: '6000' }, fakeSrc: patchedFake() });
+  check('delayed-start: lane ends DONE ready even though the review turn started after adoption', H.code === 0 && H.st?.result === 'done' && H.st?.verdict === 'ready', `${H.code} ${H.st?.result} ${H.st?.verdict}`);
+  check('delayed-start: one prompt, no restart, no empty-verdict needs-review', H.prompts.length === 1 && H.aborts.length === 0 && H.rounds.length === 1, `plans ${H.prompts.length} aborts ${H.aborts.length} rounds ${H.rounds.length}`);
 
   // C: a stop while the final review is pending must end the lane as stopped promptly (not wait out the
   // 30 s review) and must never record a false "ready".

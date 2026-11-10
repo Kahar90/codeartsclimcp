@@ -1382,19 +1382,19 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         // seen within a fraction of a second instead of waiting out the full status interval.
         const sleepUnless = async (ms) => { const end = now() + ms; while (now() < end) { if (rec.handoff || specReviewCancel) return; await sleep(200); } };
         for (;;) {
-          if (rec.handoff) return { sid: rec.sid, ok: false, reason: 'handoff', text, reused: rec.reused };
+          if (rec.handoff) return { sid: rec.sid, ok: false, reason: 'handoff', text, reused: rec.reused, sawBusy };
           if (specReviewCancel) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'cancelled', text, reused: rec.reused }; }
           if (now() > deadline) {
             // The polling budget is spent. If the session is alive and progressing, do NOT abort it: hand it
             // to the normal final review, which drives the SAME session with the normal watchdog and the
             // overall lane deadline, instead of discarding it and replaying the whole review. Only a session
             // that never went busy is treated as missing and aborted here.
-            if (sawBusy) return { sid: rec.sid, ok: false, reason: 'busy-timeout', text, reused: rec.reused };
+            if (sawBusy) return { sid: rec.sid, ok: false, reason: 'busy-timeout', text, reused: rec.reused, sawBusy: true };
             try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {}
             return { sid: rec.sid, ok: false, reason: 'timeout', text, reused: rec.reused };
           }
           await sleepUnless(3000);
-          if (rec.handoff) return { sid: rec.sid, ok: false, reason: 'handoff', text, reused: rec.reused };
+          if (rec.handoff) return { sid: rec.sid, ok: false, reason: 'handoff', text, reused: rec.reused, sawBusy };
           let st; try { st = (await server.api('GET', '/session/status', null, 10000))[rec.sid]?.type; } catch { st = undefined; }
           if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
           // Read only through the freshness proof: a reused session's cached reply (same id as before)
@@ -1493,9 +1493,16 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     sessionModel.set(sid, REVIEW);
     reviewSessions.add(sid);
     const s = sx(sid);
-    s.sawBusy = true;
     if (!s.sentAt) s.sentAt = now();
     if (!s.lastAct) s.lastAct = now();
+    // The adopted review now drives through waitTurn, whose think/watchdog clocks (S.turnStartAt,
+    // S.lastToolAt, S.lastTextAt) are only refreshed by events on S.activeSession. Hand them to this
+    // session so a healthy reviewer is never measured against the builder's stale clocks (a think-stall
+    // abort) and ca status shows the review's own activity. Do NOT pre-set sawBusy: a turn that never
+    // started must keep waitTurn's no-start grace (the poller, the event stream or an existing reply
+    // proves a real turn; see the adoption branch in finishFinalReview).
+    S.activeSession = sid;
+    S.turnStartAt = now(); S.lastToolAt = now(); S.lastTextAt = now();
   };
   // Await the final review and record it. A healthy speculative review is handed to the normal review
   // driver in place; one that did not finish (a transient error, a stale/missing reused reply or a message
@@ -1519,12 +1526,24 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // session with the normal watchdog, lead steering (pumpInbox), stop/kick handling, auth and retry
       // detection and the overall lane deadline. No new session and no replayed prompt, so one final
       // review still covers this HEAD and lead notes reach the reviewer.
+      // A turn is known to have begun only if the poller or the event stream saw it busy, or a fresh reply
+      // already exists (it completed before adoption). Then waitTurn may skip its no-start grace. Otherwise
+      // leave the grace standing, so a slow start is never misread as an empty verdict (which would end the
+      // lane "needs review" with no fallback). Never pre-set sawBusy.
+      const s0 = sx(fr.sid);
+      if (rr.sawBusy) s0.sawBusy = true;
+      else if (!s0.sawBusy) {
+        let st; try { st = (await server.api('GET', '/session/status', null, 10000))[fr.sid]?.type; } catch {}
+        if (st === 'busy' || st === 'retry' || (await freshReviewReply(fr.sid, fr.baseline)).ok) s0.sawBusy = true;
+      }
       L(`== final review: adopting the live speculative session ${fr.sid} into the normal review driver (no new session, no replayed prompt)`);
       const o = await drive(fr.sid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
       if (o.ok) {
         rr = { sid: fr.sid, ok: true, reason: '', text: '' };
       } else {
-        rr = { sid: fr.sid, ok: false, reason: o.reason || 'error', text: '' };
+        // Keep the actionable auth detail (o.keys) so the auth branch below sets S.keysMessage exactly like
+        // the builder and normal-review paths; drop nothing the driver reported.
+        rr = { sid: fr.sid, ok: false, reason: o.reason || 'error', text: '', ...(o.keys ? { keys: o.keys } : {}), ...(o.what ? { what: o.what } : {}) };
         // A stop, the lane deadline or a dead server ends the lane as the builder path would: never start a
         // fresh review (and never auto-accept a verdict) after the lead ended it.
         if (o.reason === 'stopped' || o.reason === 'timeout' || o.reason === 'server-died') { reviewHalt = { reason: o.reason, exit: 1, forced: '' }; return; }
