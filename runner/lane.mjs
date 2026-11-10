@@ -12,6 +12,7 @@ import { runOrdered } from './gate.mjs';
 import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, uncommittedSteps, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
+import { shouldDeferStepReview, stepReviewBlockers } from './reviewbudget.mjs';
 import { Server } from './server.mjs';
 import { addStepTokens, emptyTokens, tokenTotal } from './tokens.mjs';
 import { thinkStall } from './watchdog.mjs';
@@ -614,6 +615,25 @@ export async function runLane(repoArg, task, opts = {}) {
     if (verdict === 'fix') writeStepReviewInbox(steps, hash, rec.text);
     return rec;
   };
+  // Reserve the shared model quota for foreground builders. While another alive, unfinished,
+  // non-queued builder/fix phase uses the step-review model, this OPTIONAL early review waits.
+  // Return true (and publish a bounded reason) when the caller must postpone. Fresh lane state and
+  // liveness come from the registry here, so the pure decision in reviewbudget.mjs sees reality.
+  const deferStepReview = (steps) => {
+    const peers = lanes().map((l) => ({ id: l.id, alive: alive(l.s && l.s.pid), s: l.s }));
+    if (!shouldDeferStepReview({ model: STEP_REVIEWER, selfId: id, lanes: peers })) return false;
+    const holders = stepReviewBlockers({ model: STEP_REVIEWER, selfId: id, lanes: peers });
+    S.stepReviewDeferred = {
+      at: now(), model: STEP_REVIEWER, steps: steps.slice(0, 20),
+      peers: holders.map((h) => h.id).slice(0, 5),
+      reason: oneLine(`deferred: ${holders.length} foreground ${STEP_REVIEWER} builder(s) hold the model quota`, 200),
+    };
+    L(`== step review deferred: ${S.stepReviewDeferred.reason}`);
+    save();
+    return true;
+  };
+  // Clear the deferred marker once the review runs (resume) or the final review covers the range.
+  const clearStepReviewDeferred = () => { if (S.stepReviewDeferred) { S.stepReviewDeferred = null; save(true); } };
   const maybeStepReview = () => {
     if (!STEP_REVIEW || stepReviewRunning) return;
     const idx = S.commitLog.findIndex((c) => c.hash === lastReviewedHash);
@@ -623,6 +643,11 @@ export async function runLane(repoArg, task, opts = {}) {
     const to = S.commitLog.length ? S.commitLog[S.commitLog.length - 1].hash : lastReviewedHash;
     if (!to || to === lastReviewedHash) return;
     const steps = [...new Set(stepFresh.map((c) => Number((c.subject.match(/^step\s+(\d+):/i) || [])[1])))].filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+    // Deferred: do NOT advance lastReviewedHash and do NOT drop the pending step evidence, so once
+    // the peers stop building the next eligible review coalesces every unreviewed step. The
+    // mandatory final review still covers the entire required range regardless.
+    if (deferStepReview(steps)) return;
+    clearStepReviewDeferred();
     const subjects = stepFresh.map((c) => c.subject);
     const n = S.stepReviews.length + 1;
     stepReviewTo = to;
@@ -1244,6 +1269,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     fs.writeFileSync(path.join(dir, 'review.md'), earlier.length ? `${body}\n\n## Earlier review\n\n${earlier.join('\n\n---\n\n')}` : body);
     const t = Number.isFinite(at) ? at : now();
     S.reviewRounds.push({ round: S.reviewRounds.length + 1, verdict: S.verdict, at: t, ms: now() - t, from, to: head0, sid: rsid, model: REVIEW, msgId: rres.msgId || null, text: body });
+    clearStepReviewDeferred(); // the final review covers the whole range: a deferred marker is moot
     save(true);
     review = text; finalReviewed = true;
   };
@@ -1437,6 +1463,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           try { await sr; } catch {}
           stepReviewCancel = false;
           if (covered) lastReviewedHash = covered;
+          clearStepReviewDeferred();
         }
       }
     } finally { specReviewStarting = false; }

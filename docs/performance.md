@@ -43,3 +43,22 @@ review receives prepared brief and diff context. Files omitted from either packe
 read when relevant. The independent reviewer remains responsible for every requirement. A review
 that outlives the speculative polling budget can continue in its existing session instead of
 restarting on the same commit.
+
+## Reserving the shared model for foreground builders
+
+The optional early (step) reviews usually run on the same fast model as the builders, so several
+parallel lanes plus their step reviews compete for one token-per-minute budget and queue behind each
+other. `runner/reviewbudget.mjs` makes step reviews yield to foreground work: a lane postpones its
+step review while another lane is alive, unfinished, not queued and in a build or fix phase on the
+same model. Dead, finished, review-only and queued peers reserve nothing; a different model and the
+lane's own builder never block. A single lane therefore keeps its immediate step review, and the
+mandatory final review is never gated by this budget.
+
+While a review is postponed the lane publishes a bounded `stepReviewDeferred` state (`model`,
+`peers`, `steps`, a one-line `reason`) so the lead can see why, and it neither advances its reviewed
+hash nor drops pending step evidence. When the competing builders stop, the next eligible early
+review coalesces every unreviewed step; the final review still covers the whole required range.
+The tradeoff is latency of the early warning, not of the gate: a step review postponed during
+contention arrives later (or is superseded by the final review), so a bug it would have caught is
+surfaced later in the same lane. The early warning is a convenience; the independent final review
+and the CHECK gates remain the authority.
