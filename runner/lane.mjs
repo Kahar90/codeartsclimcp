@@ -851,6 +851,22 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     if (tracked.status !== 0 || others.status !== 0) return null;
     const list = new Set();
     for (const buf of [tracked.stdout, others.stdout]) for (const f of String(buf || '').split('\0')) if (f) list.add(f);
+    // A submodule is a directory in the working tree but a committed gitlink in the index: lstat alone
+    // would hash it as an opaque directory, so an in-submodule change (a moved HEAD the worker commits
+    // as a new gitlink) would leave the fingerprint unchanged and wrongly reuse a stale green check.
+    // Read the recorded gitlink commits from the index and hash the one this path points at.
+    let gitlinks = null;
+    const gitlinkSha = (f) => {
+      if (!gitlinks) {
+        gitlinks = new Map();
+        const r = spawnSync('git', ['ls-files', '-s', '-z'], { cwd: repo, encoding: 'buffer', windowsHide: true });
+        if (r.status === 0) for (const rec of String(r.stdout || '').split('\0')) {
+          const m = rec.match(/^(\d{6}) ([0-9a-f]+) \d+\t([\s\S]+)$/);
+          if (m && m[1] === '160000') gitlinks.set(m[3], m[2]);
+        }
+      }
+      return gitlinks.get(f) || null;
+    };
     for (const f of [...list].sort()) {
       h.update(f); h.update('\0');
       const full = path.join(repo, f);
@@ -865,7 +881,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         let data; try { data = fs.readFileSync(full); } catch { return null; }
         h.update('file:'); h.update(data); h.update('\0');
       } else {
-        h.update('other:'); h.update('\0');
+        const sha = gitlinkSha(f);
+        if (!sha) return null; // a directory the index does not track as a submodule: cannot vouch for it
+        h.update('gitlink:'); h.update(sha); h.update('\0');
       }
     }
     return h.digest('hex');
@@ -990,7 +1008,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     // `CHECK_PARALLEL: N` brief line or the CHECK_PARALLEL env var (the env wins, so a lead can force
     // it). Capped at 8 so a typo cannot spawn a check storm; results come back in CHECK order either way.
     const briefParallel = Number((brief.match(/^\s*CHECK_PARALLEL:\s*(\d+)/m) || [])[1]) || 0;
-    const want = Number(process.env.CHECK_PARALLEL) || briefParallel || 1;
+    // The env var wins even when it is 0: a lead must be able to force the safe sequential path over a
+    // brief `CHECK_PARALLEL` value. Only an unset or non-numeric env falls back to the brief line.
+    const envRaw = process.env.CHECK_PARALLEL;
+    const envParallel = envRaw !== undefined && envRaw !== '' && Number.isFinite(Number(envRaw)) ? Number(envRaw) : null;
+    const want = envParallel !== null ? envParallel : (briefParallel || 1);
     const width = Math.max(1, Math.min(want, 8, checks.length || 1));
     if (width > 1) L(`== gate checks: ${checks.length} lines, up to ${width} in parallel`);
     const results = await runOrdered(checks, async (c) => {
@@ -1007,7 +1029,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     }, { concurrency: width, stopOn: (r) => !r.value || r.value.kind !== 'pass' });
     // Report in CHECK order so the gates, the log and the fix message name the earliest failing line
     // whether the lines ran one by one or side by side. In parallel every line already ran, so every
-    // result is recorded; a stopped sequential run leaves the unstarted lines undefined and skips them.
+    // result is recorded: the loop does not stop early, and the fix message returned afterwards names
+    // the earliest failing line. A stopped sequential run leaves the unstarted lines undefined and skips
+    // them, so it still records exactly the lines that ran.
+    const bad = [];
     for (const res of results) {
       if (!res) continue;
       const c = res.value ? res.value.cmd : checks[res.index];
@@ -1017,10 +1042,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const kind = res.value ? res.value.kind : 'infra';
       const tail = out.trim().split(/\r?\n/).slice(-40).join('\n');
       S.gates.push({ at: res.started, gate: c, ok: code === 0, code, kind, ms }); save(true);
-      if (kind === 'infra') { L(`== gate check could not run (exit ${code}, ${dur(ms)})`); block('| ', tail); return { ok: false, infra: true, what: c, code, message: `Runner check could not run: \`${c}\` exited ${code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }; }
-      if (kind === 'fail') { L(`== gate check FAIL (exit ${code}, ${dur(ms)})`); block('| ', tail); return { ok: false, what: c, code, message: `Runner check failed: \`${c}\` exited ${code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }; }
+      if (kind === 'infra') { L(`== gate check could not run (exit ${code}, ${dur(ms)})`); block('| ', tail); bad.push({ infra: true, what: c, code, message: `Runner check could not run: \`${c}\` exited ${code}. This is the machine, not your work (missing tool, sandbox or timeout), so there is nothing to fix in the code. Last output:\n\`\`\`\n${tail}\n\`\`\`` }); continue; }
+      if (kind === 'fail') { L(`== gate check FAIL (exit ${code}, ${dur(ms)})`); block('| ', tail); bad.push({ what: c, code, message: `Runner check failed: \`${c}\` exited ${code}. Last output:\n\`\`\`\n${tail}\n\`\`\`\nFind the cause, fix it, rerun the check in the foreground with a timeout, and commit the fix. Never sleep-poll a background job (\`sleep N; cat log\`): every idle turn replays the whole context.` + CHECK_HELP }); continue; }
       L(`== gate check ok (${dur(ms)})`);
     }
+    if (bad.length) return { ok: false, ...bad[0] };
     return { ok: true };
   }
   // The final review runs while the CHECK lines run. It may use drive() because no builder turn runs
@@ -1060,21 +1086,39 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   };
   // The runner collects the review context once so the reviewer does not spend tool round trips
   // rediscovering it: the brief, the commits, the diff stat and, while the change is small, the diff
-  // itself. It is bounded, so a large change falls back to the diff stat and a pointer instead of
-  // pasting a huge diff. This is a starting point: the reviewer still reads whatever source it needs.
+  // itself. Every git read is bounded and fail-closed: a command that fails, overflows its buffer or a
+  // change too large to inline becomes an explicit "read it yourself" pointer, never a silent empty
+  // result that could read as "no changes". This is a starting point: the reviewer still reads the full
+  // spec and whatever source it needs.
   const reviewContext = (from) => {
-    const MAX_BRIEF = 8000, MAX_DIFF = 16000;
-    const briefText = brief.length > MAX_BRIEF ? brief.slice(0, MAX_BRIEF) + `\n[truncated at ${MAX_BRIEF} chars]` : brief;
-    const log = git(repo, 'log', '--oneline', `${from}..HEAD`).trim();
-    const stat = git(repo, 'diff', '--stat', from, 'HEAD').trim();
-    const diff = git(repo, 'diff', from, 'HEAD');
-    const parts = [
-      `Task brief (tasks/${task}.md):\n\`\`\`\n${briefText}\n\`\`\``,
-      `Commits (${from}..HEAD):\n\`\`\`\n${log || '(none)'}\n\`\`\``,
-      `Diff stat (${from}..HEAD):\n\`\`\`\n${stat || '(no changes)'}\n\`\`\``,
-    ];
-    if (diff.length <= MAX_DIFF) parts.push(`Diff (${from}..HEAD):\n\`\`\`\n${diff.trim()}\n\`\`\``);
-    else parts.push(`Diff (${from}..HEAD): omitted, ${diff.split('\n').length} lines are too large to inline. Run \`git diff ${from} HEAD\` or open the changed files for the full change.`);
+    const MAX_BRIEF = 8000, MAX_LOG = 6000, MAX_STAT = 6000, MAX_DIFF = 16000;
+    // Bounded git read: a non-zero exit or an output over maxBuffer returns ok:false so the caller can
+    // fall back to a pointer instead of presenting an empty stdout as a successful, empty result.
+    const capture = (args, maxBuffer) => {
+      const r = spawnSync('git', args, { cwd: repo, encoding: 'buffer', maxBuffer, windowsHide: true });
+      if (r.error || r.status !== 0) return { ok: false, text: '' };
+      return { ok: true, text: String(r.stdout || '') };
+    };
+    // A truncated brief must say so and send the reviewer to the full spec: a partially pasted spec
+    // could hide requirements, so it is never presented as the whole thing.
+    const briefText = brief.length > MAX_BRIEF
+      ? brief.slice(0, MAX_BRIEF) + `\n[truncated at ${MAX_BRIEF} chars: this is only the start of the spec. Open tasks/${task}.md and judge every requirement against the full file.]`
+      : brief;
+    const box = (label, c, max, empty, hint) => {
+      if (!c.ok) return `${label}: could not be read here; read it yourself with \`${hint}\` and open the changed files.`;
+      const t = c.text.trim();
+      if (!t) return `${label}:\n\`\`\`\n${empty}\n\`\`\``;
+      return `${label}:\n\`\`\`\n${t.length > max ? t.slice(0, max) + `\n[truncated at ${max} chars: read the rest with ${hint}]` : t}\n\`\`\``;
+    };
+    const parts = [`Task brief (tasks/${task}.md):\n\`\`\`\n${briefText}\n\`\`\``];
+    parts.push(box(`Commits (${from}..HEAD)`, capture(['log', '--oneline', `${from}..HEAD`], MAX_LOG + 4096), MAX_LOG, '(none)', `git log --oneline ${from}..HEAD`));
+    parts.push(box(`Diff stat (${from}..HEAD)`, capture(['diff', '--stat', from, 'HEAD'], MAX_STAT + 4096), MAX_STAT, '(no changes)', `git diff --stat ${from} HEAD`));
+    // The raw diff inlines only while it fits the buffer and is small enough; a failure, an overflow or
+    // a huge change all become the same explicit pointer, so a large change is never a silent empty diff.
+    const diffC = capture(['diff', from, 'HEAD'], MAX_DIFF + 1);
+    if (diffC.ok && !diffC.text.trim()) parts.push(`Diff (${from}..HEAD): no changes.`);
+    else if (diffC.ok && diffC.text.length <= MAX_DIFF) parts.push(`Diff (${from}..HEAD):\n\`\`\`\n${diffC.text.trim()}\n\`\`\``);
+    else parts.push(`Diff (${from}..HEAD): not inlined here (unavailable or too large to paste). Read the full change with \`git diff ${from} HEAD\` and open the changed source.`);
     return `\n\nPrepared context from the runner (a starting point; still open the source you need and judge every requirement yourself):\n\n${parts.join('\n\n')}`;
   };
   // One builder for the final review prompt, so the normal and the speculative review send the exact

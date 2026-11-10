@@ -17,9 +17,12 @@
 //   M. The CHECK_PARALLEL env var overrides the brief line.
 // Step 2: the final review must be handed prepared context, must fall back for a large diff, and must
 // still run and keep its gate.
-//   H. A small change: the prompt carries the brief, the commits, the diff stat and the diff.
-//   I. A large change: the prompt carries the diff stat and a fallback note, not the whole diff.
+//   H. A small change: the prompt carries the brief, the commits, the diff stat and the inline diff.
+//   I. A large change: the prompt carries the diff stat and an explicit read-it-yourself pointer, not
+//      the whole diff (a bounded read that overflows is never presented as an empty successful diff).
 //   N. A healthy speculative review past its polling budget is adopted on the same session (no replay).
+//   O. CHECK_PARALLEL=0 in the env forces the sequential path over a brief CHECK_PARALLEL value.
+//   P. A parallel run records every line that actually ran in the gates, naming the first failure.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -138,6 +141,19 @@ check('M the CHECK_PARALLEL env var overrides the brief line',
   m.code === 0 && m.gates.length === 4 && span(m.gates) * 2 < seqSpan,
   `span ${span(m.gates)} vs sequential ${seqSpan}`);
 
+// O: CHECK_PARALLEL=0 in the env must force the sequential path over a brief value (the env wins).
+const o0 = lane('envzero', slowBriefParallel(4), ['commit:1'], { CHECK_PARALLEL: '0' });
+check('O CHECK_PARALLEL=0 forces sequential over the brief value',
+  o0.code === 0 && o0.gates.length === 4 && o0.gates.every((x) => x.ok) && orderOf(o0.gates) === JSON.stringify(SLOW) && span(o0.gates) > parSpan * 2,
+  `span ${span(o0.gates)} parallel ${parSpan}`);
+
+// P: in a parallel run every line that ran is recorded in the gates, not only up to the first failure.
+const multiFailBrief = `Goal: multi fail.\nCHECK_PARALLEL: 4\n1. Write page1.html. Commit.\nCHECK: node -e "process.exit(3)"\nCHECK: ${sleep(300)}\nCHECK: node -e "process.exit(7)"\nCHECK: ${sleep(300)}\n`;
+const p = lane('parmulti', multiFailBrief, ['commit:1'], { MAX_FIXES: '0' });
+check('P a parallel run records every CHECK line that ran, in CHECK order',
+  p.code !== 0 && p.st?.result !== 'done' && p.gates.length === 4 && p.gates.map((x) => x.ok).join() === 'false,true,false,true',
+  `${p.code} ${p.st?.result} gates ${JSON.stringify(p.gates.map((x) => [x.gate.slice(0, 24), x.ok]))}`);
+
 // H: the small-change review gets prepared context and the review gate is unchanged.
 const REV = { NO_REVIEW: '', STEP_REVIEW: '0', FAKE_REVIEW_MS: '600' };
 const h = lane('revsmall', reviewBrief('review small'), ['commit:1'], REV);
@@ -147,14 +163,16 @@ check('H the final review still runs once and keeps its gate',
   `${h.code} ${h.st?.result} ${h.st?.verdict} rounds ${(h.st?.reviewRounds || []).length}`);
 check('H the review prompt carries the brief, the commits, the diff stat and the small diff',
   htext.includes('Task brief (tasks/work.md):') && htext.includes('Goal: review small') && htext.includes('Commits (') &&
-  htext.includes('step 1: thing 1') && htext.includes('Diff stat (') && htext.includes('Diff (') && htext.includes('page1.html'),
+  htext.includes('step 1: thing 1') && htext.includes('Diff stat (') && htext.includes('Diff (') && htext.includes('page1.html') &&
+  !htext.includes('not inlined here'),
   htext.slice(0, 300));
 
-// I: a large change falls back to the diff stat and a pointer, and the review still runs.
+// I: a large change falls back to the diff stat and an explicit pointer, and the review still runs.
 const i = lane('revlarge', reviewBrief('review large'), [`write:big.txt=${BIG}+commit:1`], REV);
 const itext = (i.prompts || []).filter((p) => p.agent === 'plan').map((p) => p.text).join('\n\n');
-check('I the large diff falls back to the diff stat, not the whole diff',
-  i.code === 0 && itext.includes('Diff stat (') && itext.includes('big.txt') && itext.includes('omitted') && !itext.includes('LARGE_LINE_'),
+check('I the large diff falls back to the diff stat and a read-it-yourself pointer, not the whole diff',
+  i.code === 0 && itext.includes('Diff stat (') && itext.includes('big.txt') && itext.includes('not inlined here') &&
+  itext.includes('git diff ') && !itext.includes('LARGE_LINE_'),
   itext.slice(0, 300));
 check('I the review still runs and keeps its gate',
   i.st?.result === 'done' && i.st?.verdict === 'ready' && (i.st?.reviewRounds || []).length === 1,
