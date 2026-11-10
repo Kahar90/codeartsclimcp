@@ -411,6 +411,9 @@ async function runLane(repoArg, task, opts = {}) {
   const checks = [...brief.matchAll(/^\s*(?:[-*]\s*)?CHECK:\s*`?(.+?)`?\s*$/gm)].map((m) => m[1]);
   const stepList = [...brief.matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) }));
   const stepCount = stepList.length;
+  // Warn (never block) about a brief that protects a file it also changes or runs a missing CHECK file.
+  const briefWarnings = briefWarningsFor(repo, task) || [];
+  for (const w of briefWarnings) say(`brief warning: ${briefWarningText(w)}`);
   // The worker's bash tool runs inside a sandbox that blocks the loopback network, so a check that
   // starts a local server hangs or fails there. Write a helper that asks this runner (outside the
   // sandbox) to run a CHECK line. Listing embeds the commands, so it needs no runner. Written now,
@@ -493,7 +496,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, noCommitAckAt: 0,
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, noCommitAckAt: 0, briefWarnings,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -1612,6 +1615,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
     `models: build ${buildModel}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}${byModel}`,
     `commits ${S.commits} (brief has ${stepCount} numbered lines):`, log || '(none)',
+    ...(S.briefWarnings?.length ? [`brief warnings: ${S.briefWarnings.map((w) => briefWarningText(w)).join(' | ')}`] : []),
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
@@ -1647,6 +1651,8 @@ function cmdDetach(repoArg, task) {
   const repo = path.resolve(repoArg);
   const briefFile = path.join(repo, 'tasks', `${task}.md`);
   if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
+  // Print the same brief warnings the foreground lane does, before the child starts.
+  for (const w of (briefWarningsFor(repo, task) || [])) console.log(`brief warning: ${briefWarningText(w)}`);
   const id = laneId(repo, task);
   const logFile = path.join(repo, 'tasks', `${task}.lane.log`);
   const out = fs.openSync(logFile, 'a');
