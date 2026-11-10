@@ -27,6 +27,10 @@ assert.equal(shouldDeferStepReview({model:'maas/flash',selfId:'self',lanes:[{id:
 assert.equal(shouldDeferStepReview({model:'maas/flash',selfId:'self',lanes:[{id:'peer',alive:true,s:{result:'done',phase:'build',models:{build:'maas/flash'}}}]}),false);
 assert.equal(shouldDeferStepReview({model:'maas/flash',selfId:'self',lanes:[{id:'peer',alive:false,s:{phase:'build',models:{build:'maas/flash'}}}]}),false);
 assert.equal(shouldDeferStepReview({model:'maas/glm',selfId:'self',lanes:[{id:'peer',alive:true,s:{phase:'build',models:{build:'maas/flash'}}}]}),false,'different models do not contend here');
+for (const [model, build] of [['maas/deepseek-v4.1-flash', 'maas/deepseek-v4.1-flash-fast'], ['maas/deepseek-v4.1-flash-fast', 'maas/deepseek-v4.1-flash']]) {
+  assert.equal(shouldDeferStepReview({ model, selfId:'self', lanes:[{ id:'peer', alive:true, s:{ phase:'build', models:{ build } } }] }), true, 'flash aliases share the same provider model quota');
+}
+assert.equal(shouldDeferStepReview({ model:'other/deepseek-v4.1-flash', selfId:'self', lanes:[{ id:'peer', alive:true, s:{ phase:'build', models:{ build:'maas/deepseek-v4.1-flash-fast' } } }] }), false, 'same model name on a different provider does not imply shared quota');
 
 // realistic extra peers: queued lanes reserve nothing, fix phases do, and bad input fails closed.
 check('a queued same-model peer holds no builder slot', shouldDeferStepReview({ model:'maas/flash', selfId:'self', lanes:[{ id:'peer', alive:true, s:{ phase:'build', activity:'queued: 3 builders on maas/flash', models:{ build:'maas/flash' } } }] }) === false);

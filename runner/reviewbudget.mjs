@@ -19,6 +19,7 @@
 
 // The peers that currently reserve `model` from this lane: the array is bounded by the caller's
 // lane list and is exposed so a deferred review can publish a bounded, human-readable reason.
+const quotaModel = (model) => model === 'maas/deepseek-v4.1-flash-fast' ? 'maas/deepseek-v4.1-flash' : model;
 export function stepReviewBlockers({ model, selfId, lanes } = {}) {
   const wanted = String(model || '');
   if (!wanted || !Array.isArray(lanes)) return [];
@@ -31,7 +32,7 @@ export function stepReviewBlockers({ model, selfId, lanes } = {}) {
     if (s.result) return false;                         // finished peer: its builders are gone
     if (/^queued/i.test(String(s.activity || ''))) return false; // queued: it holds no builder slot yet
     if (s.phase !== 'build' && s.phase !== 'fix') return false;  // review-only/other phase: no build quota
-    return !!(s.models && s.models.build) && s.models.build === wanted;
+    return !!(s.models && s.models.build) && quotaModel(s.models.build) === quotaModel(wanted);
   }).map((l) => ({ id: l.id, model: wanted, phase: l.s.phase }));
 }
 

@@ -64,6 +64,8 @@ step review while another lane is alive, unfinished, not queued and in a build o
 same model. Dead, finished, review-only and queued peers reserve nothing; a different model and the
 lane's own builder never block. A single lane therefore keeps its immediate step review, and the
 mandatory final review is never gated by this budget.
+The built-in flash-fast alias shares flash's provider quota, so those two names are treated as one
+model for this decision. An identical name on another provider does not imply shared quota.
 
 While a review is postponed the lane publishes a bounded `stepReviewDeferred` state (`model`,
 `peers`, `steps`, a one-line `reason`) so the lead can see why, and it neither advances its reviewed
