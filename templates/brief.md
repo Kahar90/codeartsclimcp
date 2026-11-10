@@ -1,4 +1,5 @@
 MODEL: maas/deepseek-v4.1-flash   (optional line: build model for this lane; REVIEW_MODEL: too; STEP_REVIEW: off skips the per-step reviews)
+TOOL_PROFILE: core   (this lane's private server keeps only the core coding tools; set to full, or set CA_TOOL_PROFILE=full, for a broader task)
 You are working in a git repo (current directory). <one sentence goal, the files to touch, the stack>.
 Do the steps in order. After each step that works, run its checks, then
 `git add -A && git commit -m "step N: <summary>"` (N = the step number; the dashboard tracks

@@ -5,17 +5,21 @@ import { EXE, caEnv, redactEnv, freePort, now, sleep, killTree } from './common.
 import { profileMode, parseToolIds, applyCoreProfile } from './toolprofile.mjs';
 import { reviewRoleEnv } from './reviewrole.mjs';
 
-// Opt-in per-lane tool profile: with CA_TOOL_PROFILE=core every prompt_async request denies the
-// tools a coding lane does not need (see runner/toolprofile.mjs). The tool ids come from the same
-// private server, fetched once and cached until the server restarts. No profile (unset/full) keeps
-// the exact previous request and fetches nothing.
+// Opt-in per-lane tool profile: with the core profile every prompt_async request denies the tools a
+// coding lane does not need (see runner/toolprofile.mjs). The tool ids come from the same private
+// server, fetched once and cached until the server restarts. No profile (full) keeps the exact
+// previous request and fetches nothing. A lane selects the profile once (from its brief and the
+// environment) and hands it to the Server; a direct caller that passes none still reads the
+// CA_TOOL_PROFILE environment dynamically, exactly as before.
 const TOOL_IDS_PATH = '/experimental/tool/ids';
 const TOOL_IDS_TIMEOUT = 5000;
 const isPromptAsync = (method, p) => method === 'POST' && /\/prompt_async$/.test(p);
 
 // ---------- one private codearts server ----------
 export class Server {
-  constructor(cwd, logFile) { this.cwd = cwd; this.logFile = logFile; this.ac = null; this.toolIdsP = null; }
+  // toolProfile is the optional mode already selected for this lane ('core' or 'full'); when it is
+  // not given the caller reads the environment dynamically, so existing direct callers are unchanged.
+  constructor(cwd, logFile, toolProfile) { this.cwd = cwd; this.logFile = logFile; this.ac = null; this.toolIdsP = null; this.toolProfile = toolProfile; }
   get auth() { return 'Basic ' + Buffer.from('codearts:' + this.pw).toString('base64'); }
   // Clear cached tool metadata: called on every (re)start, so a restarted private server refetches.
   resetToolProfile() { this.toolIdsP = null; }
@@ -33,9 +37,10 @@ export class Server {
   }
   // The outgoing body for a prompt_async request. No profile: returned untouched, nothing fetched.
   // Unknown profile: fails visibly. Core: denies every non-core id (a new body; never mutates the
-  // caller's object, never inserts true and never touches an inherited core/plan permission).
+  // caller's object, never inserts true and never touches an inherited core/plan permission). A lane
+  // passes its selected mode; a direct caller without one falls back to the CA_TOOL_PROFILE env.
   async profileBody(body) {
-    const mode = profileMode(process.env.CA_TOOL_PROFILE);
+    const mode = this.toolProfile !== undefined ? this.toolProfile : profileMode(process.env.CA_TOOL_PROFILE);
     if (mode === 'full') return body;
     if (mode === 'unknown') throw new Error(`tool profile: unknown CA_TOOL_PROFILE "${process.env.CA_TOOL_PROFILE}" (expected "core", "full" or unset)`);
     return applyCoreProfile(body, await this.toolIdsOnce());
