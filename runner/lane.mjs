@@ -582,8 +582,10 @@ export async function runLane(repoArg, task, opts = {}) {
     const t0 = now(); let sid = null, text = '', verdict = 'error'; const hash = to.slice(0, 12);
     try {
       sid = await newSession(`${task} step review ${n}`); reviewSessions.add(sid);
-      const prompt = stepReviewTemplate().replaceAll('{TASK}', task).replaceAll('{STEPS}', steps.map((k) => `step ${k}`).join(', '))
-        .replaceAll('{RANGE}', `${from}..${to}`).replaceAll('{SUBJECTS}', subjects.join('\n'));
+      // Function replacers: a commit subject is worker-authored text, and a `$&`/`$1`/`$'` in a string
+      // replacement would be read as a replacement directive and corrupt the prompt.
+      const prompt = stepReviewTemplate().replaceAll('{TASK}', () => task).replaceAll('{STEPS}', () => steps.map((k) => `step ${k}`).join(', '))
+        .replaceAll('{RANGE}', () => `${from}..${to}`).replaceAll('{SUBJECTS}', () => subjects.join('\n'));
       sent.add(prompt.trim()); // the runner's own prompt: never list it as a TUI steer
       await server.api('POST', `/session/${sid}/prompt_async`, { model: splitModel(STEP_REVIEWER), agent: 'plan', parts: [{ type: 'text', text: prompt }] });
       L(`== step review ${n} (${STEP_REVIEWER}, plan agent) session ${sid}: ${from.slice(0, 8)}..${to.slice(0, 8)} for ${steps.map((k) => `step ${k}`).join(', ')}`);
@@ -1249,13 +1251,15 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     // template plus a replay of the whole review context, which only competes with the fix instructions.
     // A custom tasks/<task>.review.md is still honored: its instructions are kept alongside the fix prompt.
     if (prev && prev.to && prev.verdict === 'needs fixes') {
+      // Function replacers: prior-review findings are untrusted text, and a `$&`/`$1`/`$'` in a string
+      // replacement would be read as a replacement directive and corrupt or inject into the fix prompt.
       let rb = fs.readFileSync(path.join(SKILL, 'templates', 'review-fix.md'), 'utf8')
-        .replaceAll('{TASK}', task).replaceAll('{START}', START).replaceAll('{FROM}', prev.to).replaceAll('{FINDINGS}', prev.text || '(no findings recorded)');
+        .replaceAll('{TASK}', () => task).replaceAll('{START}', () => START).replaceAll('{FROM}', () => prev.to).replaceAll('{FINDINGS}', () => prev.text || '(no findings recorded)');
       if (custom) rb += `\n\nAdditional review instructions (tasks/${task}.review.md):\n${fs.readFileSync(rf, 'utf8')}`;
       return rb;
     }
     let rb = custom ? fs.readFileSync(rf, 'utf8')
-      : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', task).replaceAll('{START}', START);
+      : fs.readFileSync(path.join(SKILL, 'templates', 'review.md'), 'utf8').replaceAll('{TASK}', () => task).replaceAll('{START}', () => START);
     rb += stepReviewAppendix();
     rb += reviewContext(prev && prev.to ? prev.to : START);
     return rb;
