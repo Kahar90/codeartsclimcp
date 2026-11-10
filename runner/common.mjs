@@ -375,7 +375,7 @@ export function briefWarningLines(warnings) {
 // evidence keeps every step open instead of guessing a fraction.
 export function stepProgress(s, steps = s.stepList || []) {
   const commits = s.commitLog || []; const done = new Map();
-  for (const c of commits) { const m = String(c.subject || '').match(/^\s*step\s+(\d+)\b/i); if (m) done.set(Number(m[1]), c.hash); }
+  for (const c of commits) { const m = String(c.subject || '').match(/^\s*step\s+(\d+)\s*:/i); if (m) done.set(Number(m[1]), c.hash); }
   const building = !s.result && ['build', 'fix', 'starting', 'backoff', 'restart', 'gate'].includes(s.phase);
   const cur = building ? steps.find((st) => !done.has(st.n))?.n : null;
   const list = steps.map((st) => ({ ...st, state: done.has(st.n) ? 'done' : st.n === cur ? 'current' : s.result ? 'open' : 'pending', commit: done.get(st.n) || '' }));

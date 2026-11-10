@@ -80,4 +80,5 @@ const stale = { status: { steps: 'complete' }, progress: { done: 1, total: 3 } }
 assert.equal(load('dash.html', 'laneStepsMode')(stale), 'partial');
 assert.equal(load('office.html', 'stepsFraction')(stale.status, stale), '1/3');
 console.log('PASS both views reject stale complete status beside unfinished steps');
+assert.equal(stepProgress({ stepList: steps(1), commitLog: [{ hash: 'wip', subject: 'step 1 WIP draft' }] }).done, 0, 'progress requires the same colon-delimited step proof as the completion gate');
 console.log('stepstruth: all checks passed');
