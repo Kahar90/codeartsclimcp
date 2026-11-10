@@ -65,8 +65,10 @@ fs.writeFileSync(path.join(repo, 'tasks', 'feat.md'), '1. Do a thing. Commit.\n'
 const clone = path.join(tmp, 'demo-repo-wt-feat');
 const w = ca(['workspace', repo, 'feat']);
 check('ca workspace creates the clone folder', w.code === 0 && fs.existsSync(clone), `exit ${w.code} ${w.out.slice(0, 100)}`);
-const gitDir = path.resolve(gitOut(clone, 'rev-parse', '--absolute-git-dir')).replace(/\\/g, '/').toLowerCase();
-const cloneAbs = path.resolve(clone).replace(/\\/g, '/').toLowerCase();
+// Real paths: on Windows TEMP may hold an 8.3 short segment (N00958~1) that git prints in long form.
+const realPath = (p) => fs.realpathSync.native(path.resolve(p)).replace(/\\/g, '/').toLowerCase();
+const gitDir = realPath(gitOut(clone, 'rev-parse', '--absolute-git-dir'));
+const cloneAbs = realPath(clone);
 check('the clone git dir lives inside the clone', gitDir === cloneAbs + '/.git' || gitDir.startsWith(cloneAbs + '/'), gitDir);
 check('the clone is on branch lane/feat', gitOut(clone, 'rev-parse', '--abbrev-ref', 'HEAD') === 'lane/feat');
 check('the untracked brief was copied into the clone', fs.existsSync(path.join(clone, 'tasks', 'feat.md')));

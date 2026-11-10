@@ -216,7 +216,9 @@ function writeProbe(repo) {
   // A worktree keeps its git dir outside the lane folder (in the main repo's .git/worktrees/<name>),
   // where the CodeArts sandbox refuses to write: flag it so doctor can warn instead of a false ok.
   const gd = git(repo, 'rev-parse', '--absolute-git-dir');
-  const worktree = !!gd && !gitDirInsideRepo(repo, gd);
+  // Compare real paths: on Windows a short 8.3 segment (N00958~1 in TEMP) never matches git's long form.
+  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return p; } };
+  const worktree = !!gd && !gitDirInsideRepo(real(repo), real(gd));
   if (String(process.env.CA_WRITE_PROBE_FAIL || '') === '1') return { ok: false, where: 'write probe (test hook)', error: 'CA_WRITE_PROBE_FAIL=1 forces a write failure', worktree };
   const sh = workerShell();
   const shell = sh && fs.existsSync(sh) ? sh : (process.platform === 'win32' ? 'bash' : (process.env.SHELL || 'sh'));
