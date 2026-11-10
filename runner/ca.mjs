@@ -1937,7 +1937,11 @@ function cmdAck(args) {
   const q = args.slice(0, ni >= 0 ? ni : undefined).find((a) => !a.startsWith('--'));
   if (!q) die('usage: ca ack <lane> [--note "text"] [--undo]', 2);
   const l = findLane(q);
-  if (!l.s.result) die(`lane ${l.id} is not finished (${health(l.s)}): resume or stop it instead`, 2);
+  if (!l.s.result) {
+    // A running lane with an open blocker: acknowledge it by file, the supervisor clears it on the next tick.
+    if (l.s.blocker && alive(l.s.pid)) { fs.writeFileSync(path.join(l.dir, 'BLOCKER_ACK'), String(now())); console.log(`${l.id}: blocker acknowledged (${l.s.blocker.kind})`); return; }
+    die(`lane ${l.id} is not finished (${health(l.s)}): resume or stop it instead`, 2);
+  }
   const undo = args.includes('--undo'); setAck(l.id, !undo, l.s.finishedAt || null, oneLine(note, 200));
   const b = bucketFor(l);
   console.log(`${l.id}: ${undo ? 'unseen again' : 'acknowledged'}; bucket ${b.bucket} (${b.reason})`);
