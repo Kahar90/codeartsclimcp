@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 220) : ''}`);
 const rd = (p) => { try { return fs.readFileSync(path.join(ROOT, p), 'utf8'); } catch { return ''; } };
@@ -21,7 +22,7 @@ for (const f of srcFiles) rd(f).split(/\r?\n/).forEach((l, i) => {
   if (/'codearts\.exe'|"codearts\.exe"|spawnSync\('powershell'|spawn\('powershell'|run\('powershell'|'cmd\.exe'/.test(l) && !/win32/.test(l)) winOnly.push(`${f}:${i + 1}`);
 });
 check('codearts.exe, powershell and cmd.exe only appear on lines guarded by a win32 test', winOnly.length === 0, winOnly.join(', '));
-check('Git bash fallback is only used on win32 (workerShell)', /function workerShell\(\)\s*\{\s*if \(process\.platform !== 'win32'\)/.test(rd('runner/ca.mjs')));
+check('Git bash fallback is only used on win32 (workerShell)', /function workerShell\(\)\s*\{\s*if \(process\.platform !== 'win32'\)/.test(runnerSource()));
 
 // 3. Chrome: one helper, no hardcoded path in the checks
 let lib = null; try { lib = await import(pathToFileURL(path.join(ROOT, 'checks', 'lib', 'chrome.mjs')).href); } catch (e) { check('checks/lib/chrome.mjs imports', false, e.message); }
