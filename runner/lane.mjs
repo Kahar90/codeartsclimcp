@@ -1474,9 +1474,25 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
           continue; // a steer arrived right at the end: let the builder handle it
         }
-        // The builder is idle: a numbered brief step with no explicit "step N:" commit is not done. Refresh
-        // the commits and send a focused continuation naming the missing steps (bounded) instead of letting
-        // the gates pass an incomplete lane. An unrelated wip commit never counts and a commit is never faked.
+        phase('gate', 'running gates');
+        // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
+        // passes the final review can start and run while the CHECK lines run. The runner's own recovery
+        // paths (write probe, refused-commit fallback and ordinary uncommitted handling) run here, before
+        // the strict numbered-step proof, so a completed step the sandbox refused to commit is recovered
+        // instead of being reported as a missing step.
+        let g = await gitCleanGate();
+        if (!g.ok) {
+          // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
+          if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
+          if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+          say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+          phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+          continue;
+        }
+        // Git clean passed (or the runner just recovered a refused commit). Refresh the commit evidence
+        // after any fallback, then enforce the strict proof: a numbered brief step with no explicit
+        // "step N:" commit is not done. Send a focused continuation naming the missing steps (bounded);
+        // an unrelated wip commit never counts and a commit is never faked.
         syncCommits();
         const missingSteps = uncommittedSteps(S.stepList, S.commitLog);
         if (stepCount > 0 && missingSteps.length) {
@@ -1493,21 +1509,12 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           say(`step ${missingSteps.join(', ')} still uncommitted after ${STEP_CONTINUES} continuation${STEP_CONTINUES === 1 ? '' : 's'}; needs review`);
           break;
         }
-        phase('gate', 'running gates');
-        // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
-        // passes the final review can start and run while the CHECK lines run.
-        let g = await gitCleanGate();
-        if (!g.ok) {
-          // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
-          if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
-          if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
-          say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-          phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
-          continue;
-        }
-        // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
-        // it reviews. A speculative review that is still valid is awaited in place of a new one; a stale
-        // one is aborted and replaced. A CHECK that fails or cannot run aborts and discards this review.
+        // Git clean and the strict step proof both passed: start the final review now (when review is on)
+        // and run the CHECK lines while it reviews. A speculative review that is still valid is awaited in
+        // place of a new one; a stale one is aborted and replaced. A CHECK that fails or cannot run aborts
+        // and discards this review. Record HEAD first: a CHECK that moves it or writes the tree makes this
+        // review stale, and that must be caught before the lane can be accepted as done.
+        const headBeforeChecks = git(repo, 'rev-parse', 'HEAD');
         const fr = await beginFinalReview();
         g = await runChecks();
         if (!g.ok) {
@@ -1520,7 +1527,28 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
           continue;
         }
-        // The checks passed: wait for the overlapped review to end and record its verdict.
+        // The checks were green, but a CHECK line can write the working tree or move HEAD (a stray test,
+        // a formatter, a check that commits). The green checks and the review describe the content as it
+        // was before the CHECK ran, so that proof is stale the moment the tree or HEAD moved. Never mark a
+        // tree the checks changed as done: discard the stale review and require a commit through the same
+        // bounded fix path, then run the gates and the review again on the new HEAD.
+        const dirtyAfterChecks = dirty();
+        const headAfterChecks = git(repo, 'rev-parse', 'HEAD');
+        if (dirtyAfterChecks.length || headAfterChecks !== headBeforeChecks) {
+          if (fr) { await discardFinalReview(fr); if (fr.spec) specReview = null; }
+          const what = dirtyAfterChecks.length ? `${dirtyAfterChecks.length} uncommitted change${dirtyAfterChecks.length === 1 ? '' : 's'} left by the checks` : 'the checks moved HEAD';
+          // Same result family as a failing check (exit 1, "checks failing"): a non-canonical result
+          // would render as an idle lane with no attention flag and no resume, hiding it from the human.
+          if (++S.fixes > CFG.fixes) { reason = `the checks changed the work after they passed, unresolved after ${CFG.fixes} fix round${CFG.fixes === 1 ? '' : 's'}: ${what}`; forcedResult = 'checks failing'; exitCode = 1; break; }
+          say(`checks changed the work after they passed (${what}); fix round ${S.fixes}/${CFG.fixes}`);
+          phase('fix', `fix round ${S.fixes}`);
+          await send(sid, (dirtyAfterChecks.length
+            ? `Runner check passed but left uncommitted changes, so the reviewed content is stale. Commit the intended result (a "step N:" or "fix:" subject) and leave the working tree clean; remove any change that is not part of the step. Changed paths:\n${dirtyAfterChecks.slice(0, 20).join('\n')}`
+            : `The CHECK lines moved HEAD after the content was reviewed, so that review is stale. Run \`git log --oneline\` and \`git status\`, keep the working tree clean, and commit anything still uncommitted.`) + CHECK_HELP, buildModel);
+          continue;
+        }
+        // The checks passed on content that is still the reviewed HEAD and clean: wait for the
+        // overlapped review to end and record its verdict.
         if (fr) {
           phase('review', 'reviewing');
           await finishFinalReview(fr);
