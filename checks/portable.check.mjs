@@ -46,7 +46,7 @@ check('Chrome profiles use a long-form temp path (helper), never the 8.3 short p
 const wf = rd('.github/workflows/check.yml');
 check('.github/workflows/check.yml exists', wf.length > 0);
 check('CI matrix: ubuntu-latest, macos-latest, windows-latest', /ubuntu-latest/.test(wf) && /macos-latest/.test(wf) && /windows-latest/.test(wf));
-check('CI uses Node 22 and runs npm run check on push and pull_request', (/node-version:\s*['"]?22/.test(wf) || (/node-version:\s*\$\{\{\s*matrix\.node\s*\}\}/.test(wf) && /node:\s*\[[^\]]*\b22\b/.test(wf))) && /npm run check/.test(wf) && /push/.test(wf) && /pull_request/.test(wf));
+check('CI uses Node 22 and runs npm run check on push and pull_request', (/node-version:\s*['"]?22/.test(wf) || (/node-version:\s*\$\{\{\s*matrix\.node\s*\}\}/.test(wf) && /node:\s*\[[^\]]*\b22\b/.test(wf))) && (/npm run check/.test(wf) || (/npm run \$\{\{\s*matrix\.suite\s*\}\}/.test(wf) && /suite:\s*\[?\s*check:full/.test(wf))) && /push/.test(wf) && /pull_request/.test(wf));
 check('CI keeps going on other OSes when one fails (fail-fast false)', /fail-fast:\s*false/.test(wf));
 
 // 5. check runner with GitHub annotations

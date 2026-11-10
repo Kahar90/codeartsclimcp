@@ -18,12 +18,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [20, 22]
-        exclude:
-          - os: macos-latest
+        node: [22]
+        suite: [check:full]
+        include:
+          # The runner supports Node 20 (package.json engines); the browser checks need Node 22's WebSocket.
+          - os: ubuntu-latest
             node: 20
-          - os: windows-latest
-            node: 20
+            suite: check
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -42,4 +43,4 @@ jobs:
       - name: package contents
         run: npm pack --dry-run
       - name: checks
-        run: npm run check:full
+        run: npm run ${{ matrix.suite }}
