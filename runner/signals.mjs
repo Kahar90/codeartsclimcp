@@ -148,3 +148,11 @@ export function classifySignal(input) {
   if (dl) return { kind: DECISION, text: clip(dl), why: 'the worker asks the lead to decide or grant permission' };
   return null;
 }
+
+// Numbered brief steps that still have no explicit "step N:" commit. Positional fallback is deliberately
+// NOT used: an unrelated wip commit must never be read as completing a step.
+export function uncommittedSteps(stepList = [], commitLog = []) {
+  const done = new Set();
+  for (const c of commitLog) { const m = String((c && c.subject) || '').match(/\bstep\s*(\d+)\b/i); if (m) done.add(Number(m[1])); }
+  return stepList.filter((s) => !done.has(s.n)).map((s) => s.n);
+}

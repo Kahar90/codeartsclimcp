@@ -6,7 +6,7 @@ import path from 'node:path';
 import { authProblem } from './authsignal.mjs';
 import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarningsFor, dashUrl, die, dur, ensureDash, git, health, hhmmss, killTree, laneId, lanes, now, oneLine, readJSON, resultOf, sleep, splitModel, stepProgress, workerShell, writeAtomic, writeProbe } from './common.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
-import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
+import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, uncommittedSteps, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { Server } from './server.mjs';
@@ -1205,6 +1205,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
 
   const contBrief = (cls, what) => `${brief}\n\n## Continuation (previous session stopped: ${cls}: ${what})\nAlready committed since the start:\n${git(repo, 'log', '--oneline', `${START}..HEAD`) || '(nothing)'}\nUncommitted changes:\n${git(repo, 'status', '--short') || '(none)'}\nCheck what is done, finish only the remaining steps, commit after each.` + CHECK_HELP;
   const resumeMsg = (cls, what) => `Your previous turn was interrupted (${cls}: ${what}). Run \`git log --oneline\` and \`git status\` to see where you are, then continue with the remaining steps of the brief. Commit after each step that works.`;
+  // A numbered brief step with no explicit "step N:" commit is not done. The builder gets a bounded number
+  // of focused continuations naming the missing steps before the lane ends as needs review.
+  const STEP_CONTINUES = Math.max(0, Number(process.env.STEP_CONTINUES || 2));
+  const stepContinuation = (missing) => `You stopped before committing every numbered step of the brief. Missing: ${missing.map((n) => `step ${n}`).join(', ')}. Do not ask questions. Do not redo steps already committed (see \`git log --oneline\`): finish each remaining numbered step and commit it with the subject \`step N: <summary>\`.` + CHECK_HELP;
 
   // Model slots: before a build session starts (and after a fallback model switch), wait until
   // fewer than the model's cap of the OTHER running lanes use it. A crowded model must not get
@@ -1300,6 +1304,25 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         if (await pumpInbox(sid)) {
           if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
           continue; // a steer arrived right at the end: let the builder handle it
+        }
+        // The builder is idle: a numbered brief step with no explicit "step N:" commit is not done. Refresh
+        // the commits and send a focused continuation naming the missing steps (bounded) instead of letting
+        // the gates pass an incomplete lane. An unrelated wip commit never counts and a commit is never faked.
+        syncCommits();
+        const missingSteps = uncommittedSteps(S.stepList, S.commitLog);
+        if (stepCount > 0 && missingSteps.length) {
+          if ((S.stepContinues || 0) < STEP_CONTINUES) {
+            S.stepContinues = (S.stepContinues || 0) + 1; save(true);
+            L(`== builder idle with step ${missingSteps.join(', ')} uncommitted; continuation ${S.stepContinues}/${STEP_CONTINUES}`);
+            say(`step ${missingSteps.join(', ')} not committed; asking the builder to finish (${S.stepContinues}/${STEP_CONTINUES})`);
+            phase('build', `continuation for step ${missingSteps.join(', ')}`);
+            await send(sid, stepContinuation(missingSteps), buildModel);
+            continue;
+          }
+          reason = `step ${missingSteps.join(', ')} not committed after ${STEP_CONTINUES} continuations`;
+          exitCode = 4; forcedResult = 'steps incomplete';
+          say(`step ${missingSteps.join(', ')} still uncommitted after ${STEP_CONTINUES} continuations; needs review`);
+          break;
         }
         phase('gate', 'running gates');
         // The git clean part runs first: a wrong tree ends the loop before any model call, and once it

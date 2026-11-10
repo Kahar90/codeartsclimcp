@@ -63,7 +63,7 @@ r = lane('noreview', { script: ['commit:1+commit:2+wait:3000+ok'], env: { NO_REV
 check('NO_REVIEW=1: no speculative review', r.code === 0 && !r.prompts.some((p) => p.agent === 'plan'), `${r.code}`);
 
 // D: steps not all committed yet: no speculative review before the builder goes idle
-r = lane('partial', { script: ['commit:1+wait:6000+ok'] });
+r = lane('partial', { script: ['commit:1+wait:6000+ok', 'commit:2+ok'] });
 f = finals(r);
 check('only step 1 of 2 committed: the review starts only after the builder is idle', f.length === 1 && gateAt(r) && f[0].t >= gateAt(r) - 500, `prompt ${f[0]?.t} gate ${gateAt(r)}`);
 

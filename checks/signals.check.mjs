@@ -21,12 +21,13 @@ const env = { ...process.env, CA_REGISTRY: reg, CA_SETTINGS: settings, CA_DASH: 
   NO_REVIEW: '1', STEP_REVIEW: '0', CODEARTS_CLI_AK: 'fake-ak', CODEARTS_CLI_SK: 'fake-sk', STALL_S: '600', THINK_S: '0', LANE_TIMEOUT: '240' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function makeRepo(name, script) {
+function makeRepo(name, script, steps = 1) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
   fs.writeFileSync(path.join(repo, 'fake-script.json'), JSON.stringify(script));
   fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-*.log\n');
-  fs.writeFileSync(path.join(repo, 'tasks', 'work.md'), 'Goal: one page.\n1. Write page1.html. Commit.\nCHECK: node -e 0\n');
+  const brief = `Goal: ${steps === 1 ? 'one page' : steps + ' pages'}.\n` + Array.from({ length: steps }, (_, i) => `${i + 1}. Write page${i + 1}.html. Commit.`).join('\n') + '\nCHECK: node -e 0\n';
+  fs.writeFileSync(path.join(repo, 'tasks', 'work.md'), brief);
   const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' });
   g('init', '-q'); g('add', '-A'); g('-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'init');
   return repo;
@@ -37,6 +38,7 @@ const row = (cwd, id) => { const r = run(cwd, ['status', '--json', '--all'], 300
 const state = (cwd) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, 'tasks', 'work.lane', 'state.json'), 'utf8')); } catch { return null; } };
 const until = async (f, ms) => { const end = Date.now() + ms; for (;;) { const v = f(); if (v || Date.now() > end) return v; await sleep(500); } };
 const prompts = (cwd) => { try { return fs.readFileSync(path.join(cwd, 'fake-prompts.log'), 'utf8').split('\n').filter(Boolean).map((x) => JSON.parse(x)); } catch { return []; } };
+const subjects = (cwd) => (spawnSync('git', ['log', '--format=%s'], { cwd, encoding: 'utf8' }).stdout || '').split(/\r?\n/).filter(Boolean);
 // Wait for the lane's live log to show the signal was recorded, so the e2e timing starts at the event.
 const waitBlocker = async (cwd, kind, ms) => until(() => { const s = state(cwd); return s && s.blocker && s.blocker.kind === kind ? s : null; }, ms);
 
@@ -199,6 +201,31 @@ r = run(pRepo, ['wait', pId, '--timeout', '60', '--quiet']);
 if (r.status === 11) r = run(pRepo, ['wait', pId, '--timeout', '60', '--quiet']);
 const pstate = state(pRepo);
 check('a builder question in a text part with no time.end is detected by the idle flush', !!pstate && pstate.blocker && pstate.blocker.kind === 'decision' && /SQLite/.test(pstate.blocker.text || ''), JSON.stringify(pstate && pstate.blocker));
+
+// ---------- pure: numbered steps without an explicit "step N:" commit ----------
+check('pure steps: an explicit step commit marks that step done', JSON.stringify(S.uncommittedSteps([{ n: 1 }, { n: 2 }], [{ subject: 'step 1: thing 1' }])) === '[2]');
+check('pure steps: an unrelated wip commit does not complete a step', JSON.stringify(S.uncommittedSteps([{ n: 1 }, { n: 2 }], [{ subject: 'wip: scratch work' }])) === '[1,2]');
+check('pure steps: every explicit step commit leaves nothing missing', S.uncommittedSteps([{ n: 1 }, { n: 2 }], [{ subject: 'step 1: a' }, { subject: 'step 2: b' }]).length === 0);
+
+// ---------- early idle then completion end to end ----------
+const sRepo = makeRepo('stepsdone', ['commit:1', 'commit:2'], 2);
+const sId = 'stepsdone--work';
+r = run(sRepo, ['lane', sRepo, 'work', '--detach']);
+check('two-step lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+r = run(sRepo, ['wait', sId, '--timeout', '120', '--quiet']);
+const sSubjects = subjects(sRepo);
+check('an early idle after step 1 is continued and the lane finishes only after step 2', r.status === 0 && /CA_RESULT/.test(r.stdout) && sSubjects.some((x) => /^step 1\b/.test(x)) && sSubjects.some((x) => /^step 2\b/.test(x)), `${r.status} ${JSON.stringify(sSubjects)}`);
+check('the continuation named the missing step 2', prompts(sRepo).some((p) => /Missing: step 2/.test(p.text)), JSON.stringify(prompts(sRepo).map((p) => p.text.slice(0, 90))));
+
+// ---------- exhausted continuation end to end ----------
+const tRepo = makeRepo('stepsstuck', ['commit:1', 'ok', 'ok'], 2);
+const tId = 'stepsstuck--work';
+r = run(tRepo, ['lane', tRepo, 'work', '--detach'], 120000, { STEP_CONTINUES: '1' });
+check('stuck two-step lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+r = run(tRepo, ['wait', tId, '--timeout', '120', '--quiet'], 120000, { STEP_CONTINUES: '1' });
+const tSubjects = subjects(tRepo);
+check('an incomplete lane with an exhausted continuation reports steps incomplete', r.status === 1 && /"result":"steps incomplete"/.test(r.stdout) && tSubjects.some((x) => /^step 1\b/.test(x)) && !tSubjects.some((x) => /^step 2\b/.test(x)), `${r.status} ${r.stdout.slice(0, 300)} ${JSON.stringify(tSubjects)}`);
+check('the runner did not manufacture a step 2 commit', !tSubjects.some((x) => /^step 2\b/.test(x)), JSON.stringify(tSubjects));
 
 for (const l of results) console.log(l);
 const fails = results.filter((l) => l.startsWith('FAIL')).length;
