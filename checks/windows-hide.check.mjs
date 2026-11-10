@@ -90,7 +90,7 @@ run('taskkill cleanup hides its window', () => {
 // 4. the private codearts serve spawn
 run('codearts serve spawn hides its window', () => {
   calls.length = 0;
-  runCall(callExpr('this.child = spawn', 'spawn'), { spawn: stub.spawn, EXE: 'codearts', caEnv: () => ({}), out: 1 }, { cwd: '/repo', port: 1234, pw: 'secret' });
+  runCall(callExpr('this.child = spawn', 'spawn'), { spawn: stub.spawn, EXE: 'codearts', childEnv: {}, out: 1 }, { cwd: '/repo', port: 1234, pw: 'secret' });
   const c = calls[0];
   check('codearts serve spawn hides its window', !!c && c.fn === 'spawn' && c.file === 'codearts' && c.options.windowsHide === true, JSON.stringify(c && c.options));
   check('codearts serve spawn keeps stdio, cwd and args', !!c && Array.isArray(c.options.stdio) && c.options.stdio[0] === 'ignore' && c.options.cwd === '/repo' && Array.isArray(c.argv) && c.argv.includes('serve') && c.argv.includes('--print-logs'), JSON.stringify(c && c.argv));
