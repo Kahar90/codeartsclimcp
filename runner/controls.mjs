@@ -69,7 +69,7 @@ export function sleepPoll(text) {
 // states. It reads legacy states too: "failed (gates still failing)" was both a check that could
 // not run and a check that really failed; the last failed gate tells them apart.
 // Besides { key, label, tone, reason } it carries { attention, steps, glyph } (status contract part 1).
-export function laneOutcome({ s, health, handled, note, closed }) {
+export function laneOutcome({ s, health, handled, note, closed, progress }) {
   const res = s.result === 'failed' && s.reason === 'timeout' ? 'paused' : s.result; // legacy pause
   let o;
   if (handled && res) {
@@ -113,7 +113,7 @@ export function laneOutcome({ s, health, handled, note, closed }) {
         : { key: 'failed', label: 'Failed', tone: 'bad', reason: `failed: ${s.reason || 'see the summary'}` };
     } else o = { key: res, label: res.charAt(0).toUpperCase() + res.slice(1), tone: 'idle', reason: s.reason || res };
   }
-  return withStatusFields(o, { res, handled, closed });
+  return withStatusFields(o, { res, handled, closed, progress });
 }
 
 // The glance glyphs (status contract part 1): the one marker a person reads at a glance.
@@ -122,13 +122,16 @@ export const GLYPHS = { working: '\u25CF', 'needs-you': '!', failed: '\u2715', d
 // Add the three contract fields to a lane status: attention (the human must act), steps (live |
 // complete | hide) and glyph (one glance glyph). A lane the lead handled, and every ended lane of a
 // closed plan, is never attention: nothing is left for the human.
-export function withStatusFields(o, { res, handled, closed } = {}) {
+export function withStatusFields(o, { res, handled, closed, progress } = {}) {
   const attention = !(handled || (closed && res)) && (o.key === 'failed' || o.key === 'checks failing'
     || o.key === 'unverified' || o.key === 'needs review' || o.key === 'paused' || (o.key === 'running' && o.label === 'Stalled'));
   const merged = o.key === 'handled' && o.tone === 'done';
   const stoppedHandled = !!handled && res === 'stopped';
+  // Truthful steps: driven by the actual step evidence, never by the result alone. A lane with a real
+  // fraction is complete only when every step is done, partial while steps are open (even done/merged),
+  // and hidden when no step list is known (a legacy lane whose progress cannot be trusted).
   const steps = o.key === 'running' || o.key === 'planned' ? 'live'
-    : o.key === 'done' || o.key === 'verified' || merged ? 'complete' : 'hide';
+    : progress && progress.total ? (progress.done >= progress.total ? 'complete' : 'partial') : 'hide';
   let glyph;
   if (o.key === 'failed' || o.key === 'checks failing' || o.key === 'killed') glyph = GLYPHS.failed;
   else if (attention) glyph = GLYPHS['needs-you'];

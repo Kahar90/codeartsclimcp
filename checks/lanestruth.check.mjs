@@ -74,18 +74,19 @@ try {
     check(`plan ${pid}: the pill word equals the banner word`, !!bw && bw === pw, JSON.stringify({ banner: bw, pill: pw }));
   }
 
-  // ---------- lane truth on the closed plan: complete full bar, hide no bar ----------
+  // ---------- lane truth on the closed plan: a full bar only when every step is done ----------
   await send('Page.navigate', { url: base + '/?demo=1&closed=1#/plan/glance-status' }); await wait(1400);
   const merged = await cardSteps('demo-repo--glance-merged');
-  check('a complete lane shows a full step bar with a check', !!merged && merged.prog === true && /6\/6/.test(merged.text) && /width:\s*100%/.test(merged.w), JSON.stringify(merged));
+  check('a fully done merged lane shows a full step bar with a check', !!merged && merged.prog === true && /6\/6/.test(merged.text) && /width:\s*100%/.test(merged.w), JSON.stringify(merged));
   const handled = await cardSteps('demo-repo--glance-handled');
+  check('a merged/handled lane with open steps shows its true fraction, not a forced full bar', !!handled && handled.prog === true && /1\/3/.test(handled.text) && !/width:\s*100%/.test(handled.w), JSON.stringify(handled));
   const stopped = await cardSteps('demo-repo--glance-stopped');
-  check('a hide lane shows no step fraction or bar on its card', handled === null && stopped === null, JSON.stringify({ handled, stopped }));
+  check('a stopped lane with open steps shows its true fraction', !!stopped && stopped.prog === true && /0\/2/.test(stopped.text) && !/width:\s*100%/.test(stopped.w), JSON.stringify(stopped));
   await shot('lanestruth-plan-closed');
-  // the same hide lane still lists its steps on the lane detail page
+  // the same lane still lists its steps on the lane detail page
   await send('Page.navigate', { url: base + '/?demo=1&closed=1#/lane/demo-repo--glance-handled' }); await wait(1300);
   const stepRows = await ev('document.querySelectorAll(".steprow").length');
-  check('the hide lane detail page still lists its steps', stepRows === 3, String(stepRows));
+  check('the handled lane detail page still lists its steps', stepRows === 3, String(stepRows));
 
   // ---------- the Glance toggle: hides the banner on the plan home, survives a reload ----------
   await send('Page.navigate', { url: base + '/?demo=1&closed=1#/plan/office-polish' }); await wait(1400);

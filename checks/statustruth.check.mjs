@@ -30,8 +30,8 @@ if (C) {
     ['running', { s: { phase: 'build' }, health: 'running tool' }, 'running', false, 'live', W],
     ['stalled', { s: { phase: 'build' }, health: 'STALLED' }, 'running', true, 'live', BANG],
     ['supervisor died', { s: { phase: 'build' }, health: 'DEAD (ca stop cleans up)' }, 'failed', true, 'hide', X],
-    ['done', { s: { result: 'done', gates: [] } }, 'done', false, 'complete', CK],
-    ['verified', { s: { result: 'done', gates: doneGates } }, 'verified', false, 'complete', CK],
+    ['done', { s: { result: 'done', gates: [] }, progress: { done: 2, total: 2 } }, 'done', false, 'complete', CK],
+    ['verified', { s: { result: 'done', gates: doneGates }, progress: { done: 2, total: 2 } }, 'verified', false, 'complete', CK],
     ['unverified', { s: { result: 'unverified', reason: 'x' } }, 'unverified', true, 'hide', BANG],
     ['checks failing', { s: { result: 'checks failing', reason: 'x' } }, 'checks failing', true, 'hide', X],
     ['needs review', { s: { result: 'needs review' } }, 'needs review', true, 'hide', BANG],
@@ -42,14 +42,15 @@ if (C) {
     ['dropped', { s: { result: 'dropped' } }, 'dropped', false, 'hide', DASH],
     ['auth failed', { s: { result: 'failed', exitCode: 3, reason: 'auth' } }, 'failed', true, 'hide', X],
     ['handled done', { s: { result: 'done' }, handled: true, note: 'took it over' }, 'handled', false, 'hide', CK],
-    ['merged', { s: { result: 'done' }, handled: true, note: 'merged by the lead' }, 'handled', false, 'complete', CK],
+    ['merged', { s: { result: 'done' }, handled: true, note: 'merged by the lead', progress: { done: 2, total: 2 } }, 'handled', false, 'complete', CK],
+    ['merged with open steps', { s: { result: 'done' }, handled: true, note: 'merged by the lead', progress: { done: 1, total: 3 } }, 'handled', false, 'partial', CK],
     ['stopped then handled', { s: { result: 'stopped' }, handled: true }, 'handled', false, 'hide', DASH],
     ['closed-plan checks failing', { s: { result: 'checks failing', reason: 'x' }, closed: true }, 'checks failing', false, 'hide', X],
   ];
   for (const [name, input, key, attention, steps, glyph] of cases) {
     const o = lo(input);
     const ok = o.key === key && o.attention === attention && o.steps === steps && o.glyph === glyph
-      && typeof o.attention === 'boolean' && ['live', 'complete', 'hide'].includes(o.steps);
+      && typeof o.attention === 'boolean' && ['live', 'complete', 'partial', 'hide'].includes(o.steps);
     check(`laneOutcome ${name}: ${key} attention=${attention} steps=${steps} glyph=${glyph}`, ok, JSON.stringify(o));
   }
   check('acked lane reads "Handled by lead"', lo({ s: { result: 'done' }, handled: true, note: 'took it over' }).label === 'Handled by lead');
@@ -88,7 +89,12 @@ const ack = ca(['ack', 'sbx--stop1']);
 check('ca ack on a stopped lane exits 0', ack.code === 0, ack.out + ack.err);
 rows = rowsOf(ca(['status', '--json', '--all']).out);
 const after = rowOf(rows, 'sbx--stop1').status || {};
-check('acked stopped lane reads "Handled by lead" with steps hide', after.key === 'handled' && after.label === 'Handled by lead' && after.steps === 'hide' && after.attention === false, JSON.stringify(after));
+check('acked stopped lane reads "Handled by lead" with steps partial', after.key === 'handled' && after.label === 'Handled by lead' && after.steps === 'partial' && after.attention === false, JSON.stringify(after));
+
+// 1b. a done lane whose steps are open reports partial, never a forced complete.
+lane('dp', 'open', { result: 'done', verdict: 'ready', steps: 3, stepList: [{ n: 1, text: 'a' }, { n: 2, text: 'b' }, { n: 3, text: 'c' }], commitLog: [{ hash: 'h1', subject: 'step 1: a' }], commits: 1 });
+const drow = rowOf(rowsOf(ca(['status', '--json', '--all']).out), 'dp--open').status || {};
+check('a done lane with open steps reports steps partial, not complete', drow.key === 'done' && drow.steps === 'partial', JSON.stringify(drow));
 
 // 2. a closed plan's lanes are never attention, and its badge is the glance word.
 lane('cp', 'bad', { result: 'checks failing', reason: 'checks failing: x (exit 1)' });

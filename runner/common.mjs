@@ -369,11 +369,12 @@ export function briefWarningLines(warnings) {
   }).flat();
 }
 
-// Step state from commits: "step N" in a subject wins, otherwise commits map to steps in order.
+// Step state from commits: only an explicit "step N" subject completes a numbered step. A commit with
+// any other subject (wip, housekeeping, fix, ...) is never inferred as a step, and a lane with no step
+// evidence keeps every step open instead of guessing a fraction.
 export function stepProgress(s, steps = s.stepList || []) {
   const commits = s.commitLog || []; const done = new Map();
-  for (const c of commits) { const m = c.subject.match(/\bstep\s*(\d+)/i); if (m) done.set(Number(m[1]), c.hash); }
-  if (!done.size) commits.forEach((c, i) => { if (i < steps.length) done.set(steps[i].n, c.hash); });
+  for (const c of commits) { const m = String(c.subject || '').match(/^\s*step\s+(\d+)\b/i); if (m) done.set(Number(m[1]), c.hash); }
   const building = !s.result && ['build', 'fix', 'starting', 'backoff', 'restart', 'gate'].includes(s.phase);
   const cur = building ? steps.find((st) => !done.has(st.n))?.n : null;
   const list = steps.map((st) => ({ ...st, state: done.has(st.n) ? 'done' : st.n === cur ? 'current' : s.result ? 'open' : 'pending', commit: done.get(st.n) || '' }));
