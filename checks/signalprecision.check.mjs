@@ -19,6 +19,9 @@ const sig = (text, source) => classifySignal({ text, source, agentRole: 'build' 
 assert.equal(sig('Fixed persistence: loading now distinguishes missing optional data (ENOENT) from read errors.', 'assistant'), null, 'resolved-error narration does not require intervention');
 assert.equal(sig('I hit `Permission denied` while running it, then chmodded the file and fixed it.', 'assistant'), null, 'a fixed error described in prose is not an incident');
 assert.equal(sig('Step 2 committed; note the earlier ENOENT was only a missing optional cache.', 'assistant'), null, 'an incidental status mention is not an incident');
+assert.equal(sig('Fixed: the earlier missing optional data (ENOENT) is now distinguished from a read error.', 'assistant'), null, 'a resolved summary that names an already-handled application error stays quiet');
+assert.equal(sig('fatal: Unable to create .git/index.lock: Permission denied', 'assistant')?.kind, 'env', 'a raw commit refusal in the reply stays actionable without first-person phrasing');
+assert.equal(sig('git commit failed: Permission denied', 'assistant')?.kind, 'env', 'a raw git permission failure in the reply stays actionable');
 assert.equal(sig('I cannot proceed: git commit failed with Permission denied', 'assistant')?.kind, 'env');
 assert.equal(sig("I'm stuck: the toolchain is not installed", 'assistant')?.kind, 'env');
 assert.equal(sig('Should I use a different API?', 'assistant')?.kind, 'decision');
@@ -85,6 +88,21 @@ try {
   r = run(nRepo, ['wait', nId, '--timeout', '120', '--quiet']);
   assert.equal(r.status, 0, `assertion-noise lane finishes (exit ${r.status}): ${r.stdout.slice(0, 300)}`);
   assert.equal(/CA_BLOCKED/.test(r.stdout), false, 'an expected application assertion must not raise an env blocker');
+
+  // A builder's final reply can carry a raw commit/environment failure even when the failed tool event
+  // never reached the runner: the assistant text path must still raise the env blocker.
+  const wRepo = makeRepo('rawdiag', ['decide:fatal: Unable to create .git/index.lock: Permission denied+commit:1+wait:4000', 'ok']);
+  const wId = 'rawdiag--work';
+  r = run(wRepo, ['lane', wRepo, 'work', '--detach']);
+  assert.equal(r.status, 0, `raw-diagnostic lane starts detached: ${r.stderr.slice(0, 200)}`);
+  const wsig = await until(() => { const s = state(wRepo); return s && s.blocker ? s : null; }, 20000);
+  assert.equal(wsig?.blocker?.kind, 'env', `a raw commit failure in the builder reply still blocks: ${JSON.stringify(wsig && wsig.blocker)}`);
+  assert.equal(/index\.lock|Permission denied/.test(wsig.blocker.text || ''), true, 'the blocker names the raw refusal');
+  const wack = run(wRepo, ['ack', wId]);
+  assert.equal(wack.status, 0, `ca ack clears the raw-diagnostic blocker: ${wack.status} ${wack.stderr.slice(0, 200)}`);
+  await until(() => { const x = row(wRepo, wId); return x && !x.blocked ? x : null; }, 10000);
+  r = run(wRepo, ['wait', wId, '--timeout', '120', '--quiet']);
+  assert.equal(r.status, 0, `raw-diagnostic lane finishes after ack (exit ${r.status}): ${r.stdout.slice(0, 300)}`);
 
   // A genuine environment failure in a failed tool still blocks: the wiring must not mute real incidents.
   const gRepo = makeRepo('genuine', ['toolerr:fatal: Unable to create .git/index.lock: Permission denied+commit:1+wait:4000', 'ok']);

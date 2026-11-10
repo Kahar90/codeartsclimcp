@@ -149,9 +149,15 @@ const TOOL_ENV_RX = [
 // word, but nothing failed, so they are not diagnostics. ("ok 1 - name", "PASS name", "✓ name".)
 const PASS_ASSERTION_RX = /^(?:ok|pass|passed)\b|^[✓√✔]/i;
 
+// The builder's own reply must reach the lead both when the worker says it is stuck (ACTIVE_RX) and when
+// it carries a genuine raw environment or commit failure (TOOL_ENV_RX). The failed tool event may never
+// reach the runner, but the refusal the reply names still must. A bare application-data ENOENT is not in
+// TOOL_ENV_RX, so a resolved-error summary stays quiet.
+const ASSISTANT_ENV_RX = [...ACTIVE_RX, ...TOOL_ENV_RX];
+
 // The env vocabulary depends on where the text came from: a tool's failed output, the builder's own
 // narration, or (untyped) the legacy classifier used directly on reply text.
-const envRxFor = (source) => (source === 'tool' ? TOOL_ENV_RX : source === 'assistant' ? ACTIVE_RX : ENV_RX);
+const envRxFor = (source) => (source === 'tool' ? TOOL_ENV_RX : source === 'assistant' ? ASSISTANT_ENV_RX : ENV_RX);
 
 const clip = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, 160);
 // A question that answers itself or quotes the brief is not a request for the lead.
