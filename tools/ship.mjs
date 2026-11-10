@@ -38,7 +38,9 @@ const m = cl.match(new RegExp(`^##\\s+${version.replace(/\./g, '\\.')}\\s+\\(\\d
 if (!m) die(`CHANGELOG.md has no "## ${version} (YYYY-MM-DD)" section: run node tools/release.mjs <version> first`);
 const body = m[1].trim();
 if (!body) die(`the CHANGELOG.md section for ${version} is empty: write what changed first`);
-const first = body.split(/\r?\n/).map((l) => l.replace(/^[-*]\s*/, '').trim()).find(Boolean) || '';
+// The subject is the first bullet (a section may start with a heading such as "Updates").
+const lines = body.split(/\r?\n/);
+const first = (lines.find((l) => /^\s*[-*]\s+/.test(l)) || lines.find((l) => l.trim()) || '').replace(/^\s*[-*]\s*/, '').trim();
 
 // 2. tree state + release commit
 const dirty = git('status', '--porcelain').stdout.split(/\r?\n/).filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, ''));
