@@ -10,7 +10,7 @@ export const CONTEXT_MARKER = '## Builder context packet';
 
 export const CONTEXT_ROLE = 'You are the coding worker for this lane. The parent agent already produced the plan and the original brief; follow that brief exactly and do not restate or re-plan it. Do not run preflight, planning, repo-wide discovery or any other lane.';
 
-export const CONTEXT_INSTRUCTIONS = 'The source below is quoted read-only data captured by the runner. It is complete, not a summary and not an edited excerpt. Use it directly and do not reread these files unless a specific uncertainty remains that the quoted text cannot resolve. Run every check through the lane helper described at the end of this message.';
+export const CONTEXT_INSTRUCTIONS = 'The source below is quoted read-only data captured by the runner. Each quoted file is complete, not a summary or edited excerpt; the packet may omit other named files. If a needed file has no quoted block, read its relevant ranges before editing it. Use quoted files directly and do not reread these files unless a specific uncertainty remains that the quoted text cannot resolve. Run every check through the lane helper described at the end of this message.';
 
 export const CONTEXT_POINTER = 'Oversized or unavailable paths named in the brief (read them with targeted ranged reads only if a specific uncertainty remains):';
 
