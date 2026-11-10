@@ -176,6 +176,7 @@ function envLine(s, source) {
     if (fenced || !line || isQuoted(line)) continue;
     if (source === 'tool' && PASS_ASSERTION_RX.test(line)) continue; // a passing assertion is not a diagnostic
     const body = stripInlineCode(line);
+    if (source === 'assistant' && /\b(?:I|we)\s+(?:have\s+)?(?:fixed|resolved|removed|generated|recovered|handled)\b|\b(?:now|already)\s+(?:fixed|resolved|working|handled)\b/i.test(body) && !/\b(?:still|cannot|can't|blocked|need help)\b/i.test(body)) continue;
     if (TRANSIENT_RX.some((rx) => rx.test(body))) continue;
     if (envRxFor(source).some((rx) => rx.test(body))) return line;
   }

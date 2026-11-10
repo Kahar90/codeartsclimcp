@@ -16,6 +16,9 @@ const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const sig = (text, source) => classifySignal({ text, source, agentRole: 'build' });
 
 // ---------- pure: assistant narration is a report, not an incident ----------
+assert.equal(sig('The build was unable to access the header, so I generated it.', 'assistant'), null);
+assert.equal(sig('The earlier Permission denied was a stale lock; I removed it.', 'assistant'), null);
+assert.equal(sig('I removed the stale lock but git commit still failed: Permission denied', 'assistant')?.kind, 'env');
 assert.equal(sig('Fixed persistence: loading now distinguishes missing optional data (ENOENT) from read errors.', 'assistant'), null, 'resolved-error narration does not require intervention');
 assert.equal(sig('I hit `Permission denied` while running it, then chmodded the file and fixed it.', 'assistant'), null, 'a fixed error described in prose is not an incident');
 assert.equal(sig('Step 2 committed; note the earlier ENOENT was only a missing optional cache.', 'assistant'), null, 'an incidental status mention is not an incident');

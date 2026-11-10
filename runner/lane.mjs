@@ -1181,7 +1181,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   const applyFinalReview = async (rsid, rres, head0, from, at) => {
     const text = String(rres.text || '').trim();
     let body = text || `(no review text: ${rres.reason || 'empty'})`;
-    const vm = text.match(/VERDICT:\s*(ready|needs fixes)/i);
+    const vm = rres.ok && text.match(/VERDICT:\s*(ready|needs fixes)/i);
     S.verdict = vm ? vm[1].toLowerCase() : `missing${rres.ok ? '' : ' (' + rres.reason + ')'}`;
     // Acceptance revalidation: the reviewer is read-only. If HEAD moved or the work tree is dirty after
     // its turn, the verdict describes content that no longer exists, so it can never be accepted: end
@@ -1429,7 +1429,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     // duplicate it in the reviewer's context, so force a fresh session in that case. A fresh speculative
     // session is not the reuse candidate, so the normal path is unchanged.
     let forceFresh = false;
-    if (specReview) { forceFresh = !!specReview.reused; await discardSpecReview(); } // stale: HEAD moved after it started, so abort and review again now
+    if (specReview) { const stale = specReview; await discardSpecReview(); forceFresh = !!stale.reused; } // settle asynchronous selection before deciding whether it reused context
     const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1], forceFresh);
     return asNormalFr(fr);
   };
