@@ -9,6 +9,7 @@
 | `ca doctor [--json] [repo]` | preflight: node, codearts, credentials, MaaS key, git, trust, shell, dashboard |
 | `ca setup <harness> [repo] [--dry-run] [--user]` | MCP + rules config for claude, kiro, cursor, codex, opencode, vscode (`--user`: machine-wide) |
 | `ca init <repo> <task> [--goal ..] [--force]` | scaffold `tasks/<task>.md` from the brief template |
+| `ca brief-check <repo> <task> [--json]` | lint the brief before a lane: `brief warning:` lines (or `brief: no warnings`); always exit 0 |
 | `ca lane <repo> <task> [--detach] [--resume]` | run a lane (foreground, or detached with a log file) |
 | `ca wait <lane...> [--timeout S] [--json] [--quiet]` | block until lanes finish; exit code = worst result |
 | `ca status [--json] [--all]` | one row per lane: health, phase, step, idle, verdict, now |
@@ -31,11 +32,13 @@
 | `ca uninstall [--harness h] [--keys] [--dry-run]` | remove exactly what setup added (and the keys with `--keys`) |
 | `ca gc` | forget lanes finished more than 3 days ago |
 
-MCP tools: `ca_doctor`, `ca_init`, `ca_lane_start`, `ca_status`, `ca_wait`, `ca_summary`,
+MCP tools: `ca_doctor`, `ca_init`, `ca_brief_check`, `ca_lane_start`, `ca_status`, `ca_wait`, `ca_summary`,
 `ca_tail`, `ca_steer`, `ca_stop`, `ca_kick`, `ca_resume`, `ca_ack`, `ca_plan`, `ca_plan_list`,
 `ca_plan_close`, `ca_note`, `ca_lead_tokens`, `ca_gc`, plus the prompt `codearts_build` (the lead
 workflow in [workflow.md](workflow.md)). Read-only tools carry `readOnlyHint`, so clients can
 auto-approve them; `ca_wait` returns every result (including 3 keys and 5 paused) with a `next` hint.
+The supervisor also runs two guards each tick: the helper guard restores `tasks/<task>.lane/check.mjs` if a
+worker overwrites it, and the orphan guard stops the lane and its own server when the repo's `.git` is deleted.
 
 ## Exit codes
 

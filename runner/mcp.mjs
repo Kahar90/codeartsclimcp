@@ -181,6 +181,21 @@ const TOOLS = [
       ...(a.force ? ['--force'] : [])],
   },
   {
+    name: 'ca_brief_check',
+    description: 'Lint a lane brief before starting it (ca brief-check <repo> <task> --json): returns {warnings: [...]} for a file the brief protects and also changes, and for a CHECK line that runs a file the repo does not contain. Warnings never block a lane. Run it after editing tasks/<task>.md and before ca_lane_start, and fix the real warnings.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'path of the repo the lane works in' },
+        task: { type: 'string', description: 'task name; the brief tasks/<task>.md must exist' },
+      },
+      required: ['repo', 'task'],
+    },
+    ok: [0],
+    timeout: 30000,
+    build: (a) => ['brief-check', needStr(a.repo, 'repo'), needStr(a.task, 'task'), '--json'],
+  },
+  {
     name: 'ca_workspace',
     description: 'Prepare a parallel lane workspace as a LOCAL CLONE at ../<repo-name>-wt-<task> on a new branch lane/<task> (ca workspace), or merge that branch back with land: true (ca workspace --land, which refuses a dirty main tree and removes the clone). Use a clone, never git worktree add: a worktree keeps its git dir in the main repo, outside the lane folder, so the CodeArts sandbox refuses every commit ("Permission denied"). Start the lane in the printed workspace folder.',
     inputSchema: {
@@ -200,7 +215,7 @@ const TOOLS = [
   },
   {
     name: 'ca_lane_start',
-    description: 'Start a lane in the background (ca lane <repo> <task> --detach): a CodeArts worker reads the brief, builds, commits each step and runs the CHECK lines itself. Returns at once; follow it with ca_wait. Use it only after ca_doctor is clean and the brief at tasks/<task>.md exists.',
+    description: 'Start a lane in the background (ca lane <repo> <task> --detach): a CodeArts worker reads the brief, builds, commits each step and runs the CHECK lines itself. Returns at once; follow it with ca_wait. Use it only after ca_doctor is clean and the brief at tasks/<task>.md exists. Run ca_brief_check first and fix real warnings.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -552,7 +567,7 @@ async function cliResult(tool, cliArgs) {
 // MCP annotations per tool: read-only tools are safe to auto-approve; the tools that end or delete
 // work (ca_stop, ca_plan_close, ca_rm, ca_plan_rm) are destructive; every other tool changes state
 // without destroying it.
-const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list', 'ca_update_check']);
+const READ_ONLY_TOOLS = new Set(['ca_doctor', 'ca_brief_check', 'ca_status', 'ca_wait', 'ca_summary', 'ca_tail', 'ca_plan_list', 'ca_update_check']);
 const DESTRUCTIVE_TOOLS = new Set(['ca_stop', 'ca_plan_close', 'ca_rm', 'ca_plan_rm']);
 const annotationsFor = (name) => (READ_ONLY_TOOLS.has(name)
   ? { readOnlyHint: true }

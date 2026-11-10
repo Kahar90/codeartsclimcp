@@ -53,6 +53,9 @@ summaries, not transcripts.
   repo, outside the lane folder, so the CodeArts sandbox refuses every commit ("Permission denied").
 
 ## 3. Brief (one per lane)
+- Lint the brief before starting: `ca_brief_check {repo, task}` (CLI `ca brief-check <repo> <task>`)
+  warns about rules that protect files the brief changes and about CHECK lines that run a missing file;
+  fix the real warnings. It never blocks a lane.
 - `ca_init {repo, task, goal}` writes `tasks/<task>.md` from the template; then edit it to be lean:
   - aim for 1 to 3 outcome steps, and never more than 8. Each step is a piece of behaviour a check
     can prove, names the exact files and behaviour, and says "commit after each step" with subject
@@ -85,6 +88,9 @@ summaries, not transcripts.
   (`node tasks/<task>.lane/check.mjs <N|all>`): it runs the CHECK line outside the sandbox and prints the
   real output. When the worker ran every CHECK line green on the final commit, the gate reuses those
   results instead of running them again. Briefs need nothing extra for this; the runner tells the worker.
+- The runner guards itself: the helper guard restores `tasks/<task>.lane/check.mjs` if the worker
+  overwrites it (and tells it not to), and the orphan guard stops the lane and its own server when the
+  repo's `.git` is gone.
 
 Precise briefs reduce ambiguity; they cannot disable model reasoning. Keep file reads and tool
 outputs targeted, batch independent reads, and avoid rereading full files. Token savings require

@@ -24,6 +24,9 @@
 //                                  --steps also returns (exit 10, CA_STEP) when a lane commits a new step; pass the printed commits as --after next time
 //        ca summary <lane> [--json]        final report of a lane (live status row while it runs)
 //        ca init <repo> <task> [--goal "<text>"] [--force]  scaffold <repo>/tasks/<task>.md
+//        ca brief-check <repo> <task> [--json]  lint the brief for problems a lead used to find by hand
+//                                  (a protected file the brief changes, a CHECK that runs a missing file);
+//                                  warnings never block a lane; --json prints {warnings: [...]}
 //        ca workspace <repo> <task> [--from <branch>]   prepare a parallel lane workspace as a local
 //                                  clone (../<repo-name>-wt-<task>) on branch lane/<task>; --land merges
 //                                  that branch back into <repo> and deletes the clone
@@ -87,6 +90,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { thinkStall, progressAge } from './watchdog.mjs';
+import { lintBrief } from './brieflint.mjs';
 import { emptyTokens, addStepTokens, tokenTotal, withTotal, sumTokens } from './tokens.mjs';
 import { laneActions, laneBucket, laneKind, laneOutcome, classifyCheck, GLYPHS, gitDirInsideRepo, commitRefused, commitFallbackDecision, sleepPoll } from './controls.mjs';
 import authCmd, { readCreds } from './auth.mjs';
@@ -407,10 +411,14 @@ async function runLane(repoArg, task, opts = {}) {
   const checks = [...brief.matchAll(/^\s*(?:[-*]\s*)?CHECK:\s*`?(.+?)`?\s*$/gm)].map((m) => m[1]);
   const stepList = [...brief.matchAll(/^\s*(\d+)\.\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), text: oneLine(m[2], 220) }));
   const stepCount = stepList.length;
+  // Warn (never block) about a brief that protects a file it also changes or runs a missing CHECK file.
+  const briefWarnings = briefWarningsFor(repo, task) || [];
+  for (const w of briefWarnings) say(`brief warning: ${briefWarningText(w)}`);
   // The worker's bash tool runs inside a sandbox that blocks the loopback network, so a check that
   // starts a local server hangs or fails there. Write a helper that asks this runner (outside the
   // sandbox) to run a CHECK line. Listing embeds the commands, so it needs no runner. Written now,
   // after the lane dir exists and before the first prompt.
+  let HELPER_TEXT = '';
   {
     const helper = [
       '// Check service helper written by the runner for this lane. The CodeArts sandbox blocks the',
@@ -456,11 +464,49 @@ async function runLane(repoArg, task, opts = {}) {
       'process.exit(res.code);',
       '',
     ].join('\n');
+    HELPER_TEXT = helper;
     fs.writeFileSync(path.join(dir, 'check.mjs'), helper);
   }
   // The build prompt, the continuation brief and every gate fix round tell the worker to run a CHECK
   // line through that helper instead of its sandboxed shell.
   const CHECK_HELP = `\n\nRun a CHECK line with \`node tasks/${task}.lane/check.mjs <N>\` (1 = first line, \`all\` = every line, no argument lists them). It runs outside your sandbox, where the local network works, and prints the output and exit code. Use it instead of running a check command directly.`;
+  // The runner owns tasks/<task>.lane/check.mjs: a worker that overwrites or deletes it gets it back
+  // on the next tick, and at most once a minute a notice not to edit runner files (delivered like a steer).
+  let lastHelperNotice = 0;
+  const helperGuard = () => {
+    let cur = ''; try { cur = fs.readFileSync(path.join(dir, 'check.mjs'), 'utf8'); } catch {}
+    if (cur === HELPER_TEXT) return false;
+    try { fs.writeFileSync(path.join(dir, 'check.mjs'), HELPER_TEXT); } catch { return false; }
+    L(`helper restored (tasks/${task}.lane/check.mjs)`);
+    if (now() - lastHelperNotice >= 60000) {
+      lastHelperNotice = now();
+      try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-helper.txt`), `Message from the runner: do not edit runner files in tasks/${task}.lane/ (check.mjs was restored). Run checks with node tasks/${task}.lane/check.mjs <N>.`); } catch {}
+    }
+    return true;
+  };
+  // Orphan guard: a repo deleted out from under the lane (no .git for two ticks in a row) leaves the
+  // supervisor running against a folder that is gone, so it stops itself and its own server.
+  let repoGoneTicks = 0;
+  const orphanGuard = () => {
+    // The repo is gone when its git metadata is gone. A normal repo has `.git` as a directory with a
+    // HEAD file; a linked worktree or submodule has `.git` as a file (a gitfile). Test the HEAD marker
+    // for real repos too, because a restarted codearts server can recreate `.git/info/` (but not HEAD)
+    // and otherwise make a deleted repo look present again.
+    let gitAlive = false;
+    try {
+      const gitPath = path.join(repo, '.git');
+      gitAlive = fs.lstatSync(gitPath).isDirectory() ? fs.existsSync(path.join(gitPath, 'HEAD')) : true;
+    } catch { gitAlive = false; }
+    if (gitAlive) { repoGoneTicks = 0; return false; }
+    if (++repoGoneTicks < 2) return false;
+    L('repo deleted: stopping');
+    try { killTree(server?.child?.pid || S.server?.pid); } catch {}
+    S.result = 'stopped'; S.exitCode = 1;
+    S.phase = 'finished'; S.activity = 'repo deleted: stopping'; S.busy = false; S.finishedAt = now();
+    try { save(true); } catch {}
+    try { fs.rmSync(path.join(REG, `${id}.json`), { force: true }); } catch {}
+    process.exit(1);
+  };
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
@@ -489,7 +535,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, noCommitAckAt: 0,
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, stepSeen: 0, noCommitAckAt: 0, briefWarnings,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -499,7 +545,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [], blocker: resumed.blocker || null });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [], blocker: resumed.blocker || null, stepSeen: resumed.stepSeen || 0 });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -526,13 +572,29 @@ async function runLane(repoArg, task, opts = {}) {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
     S.commits = S.commitLog.length;
-    // The no-progress clock runs on real commit times: a new commit resets it (or the first sync after a
-    // resume). A commit that landed after the blocker clears it; an older one observed late must not.
+    // The no-progress clock runs on real commit times. In the build phase only a commit for a NEW step
+    // (`step N:` with an N above every step seen so far) restarts it, so busywork ("wip: ...") cannot hide
+    // a stuck step; during a fix round any new commit counts. A commit that landed after the blocker clears
+    // it; an older one observed late must not.
     if (S.commits > (S.commitsSeen || 0)) {
+      // Classify every commit that landed since the last tick, not just the tip: a `step N:` commit
+      // followed by a non-step commit in the same window must still restart the clock. The highest new
+      // step number wins, so any `step N:` above every step seen so far counts as a new step.
+      const fresh = S.commitLog.slice(S.commitsSeen || 0);
       S.commitsSeen = S.commits;
-      const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
-      S.lastCommitAt = ct ? Number(ct) * 1000 : now();
-      if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+      let maxStep = S.stepSeen || 0;
+      for (const c of fresh) {
+        const m = c.subject.match(/^step\s*(\d+)\s*:/i);
+        const n = m ? Number(m[1]) : 0;
+        if (n > maxStep) maxStep = n;
+      }
+      const newStep = maxStep > (S.stepSeen || 0);
+      if (newStep) S.stepSeen = maxStep;
+      if (newStep || S.phase === 'fix') {
+        const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
+        S.lastCommitAt = ct ? Number(ct) * 1000 : now();
+        if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+      }
     }
   };
 
@@ -753,7 +815,7 @@ async function runLane(repoArg, task, opts = {}) {
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep/i.test(f) ? 'runner notice' : 'ca steer';
+      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep|helper/i.test(f) ? 'runner notice' : 'ca steer';
       if (by === 'step review') lastPumpHadStepReview = true;
       // A lead steer queued after the blocker clears it: the person answered the worker's question.
       if (S.blocker && by === 'ca steer') { const at = Number((f.match(/^(\d+)/) || [])[1]) || 0; if (at > S.blocker.at) clearBlocker('steer delivered'); }
@@ -879,6 +941,8 @@ async function runLane(repoArg, task, opts = {}) {
       }
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
+      helperGuard();
+      orphanGuard();
       await pumpInbox(sid);
       // The worker's helper (inside its sandbox) asks this runner to run a CHECK line outside the
       // sandbox. Pick up one request per tick and run it in the background so the tick never blocks.
@@ -903,7 +967,7 @@ async function runLane(repoArg, task, opts = {}) {
         const base = Math.max(S.runStartedAt || S.startedAt || T0, S.lastCommitAt || 0, S.blockerClearedAt || 0);
         if (now() - base > CFG.noCommitS * 1000) {
           const cur = stepProgress(S).current;
-          const text = `no commit in ${dur(now() - base)}${cur ? ` (step ${cur.n})` : ''}`;
+          const text = `no commit in ${dur(now() - base)} for a new step${cur ? ` (stuck before step ${cur.n})` : ''}`;
           S.blocker = { kind: 'no-progress', text, at: now() };
           L(`  ! blocked: ${text}`); save(true);
         }
@@ -955,6 +1019,8 @@ async function runLane(repoArg, task, opts = {}) {
     const until = now() + sec * 1000;
     while (now() < until) {
       if (fs.existsSync(stopFile)) return false;
+      helperGuard();
+      orphanGuard();
       const k = takeKick();
       if (k) { L(`== backoff skipped by ${k.by}`); pendingKick = k; return true; }
       S.activity = `${label}: ${dur(until - now())} left`; save(); await sleep(1000);
@@ -1448,6 +1514,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // Waiting for a slot is not a stall: keep ca status from reading STALLED while we queue.
       S.lastEventAt = now(); S.turnStartAt = now(); S.lastToolAt = now(); S.lastTextAt = now(); save();
       if (fs.existsSync(stopFile)) { const e = new Error('stopped'); e.caStop = true; throw e; }
+      helperGuard(); orphanGuard();
       await sleep(20000);
     }
     if (logged) { queuedTotal += now() - t0; S.queuedMs = queuedTotal; say(`slot free for ${model} after ${dur(now() - t0)}`); save(true); }
@@ -1608,6 +1675,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
     `models: build ${buildModel}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}${byModel}`,
     `commits ${S.commits} (brief has ${stepCount} numbered lines):`, log || '(none)',
+    ...(S.briefWarnings?.length ? [`brief warnings: ${S.briefWarnings.map((w) => briefWarningText(w)).join(' | ')}`] : []),
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
@@ -1643,6 +1711,8 @@ function cmdDetach(repoArg, task) {
   const repo = path.resolve(repoArg);
   const briefFile = path.join(repo, 'tasks', `${task}.md`);
   if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
+  // Print the same brief warnings the foreground lane does, before the child starts.
+  for (const w of (briefWarningsFor(repo, task) || [])) console.log(`brief warning: ${briefWarningText(w)}`);
   const id = laneId(repo, task);
   const logFile = path.join(repo, 'tasks', `${task}.lane.log`);
   const out = fs.openSync(logFile, 'a');
@@ -2317,6 +2387,30 @@ function cmdInit(args) {
   if (!git(repo, 'rev-parse', '--git-dir')) console.log('not a git repo yet: run git init && git commit --allow-empty -m init');
   console.log(`next: ca lane ${repoArg} ${task} --detach`);
   console.log(`      ca wait ${laneId(repo, task)}`);
+}
+// Lint a brief the way `ca brief-check` and the start of `ca lane` do (tracked files from git ls-files).
+function briefWarningsFor(repo, task) {
+  const file = path.join(repo, 'tasks', `${task}.md`);
+  let briefText = null; try { briefText = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const tracked = git(repo, 'ls-files').split(/\r?\n/).filter(Boolean);
+  return lintBrief({ repo, briefText, listFiles: () => tracked, readFile: (rel) => { try { return fs.readFileSync(path.join(repo, rel), 'utf8'); } catch { return ''; } } });
+}
+function briefWarningText(w) {
+  if (w.kind === 'protected-dependent') return `${w.file} is protected by a rule ("${w.rule}") but the brief changes ${(w.references || []).join(', ')}, which that file names`;
+  if (w.kind === 'missing-check-file') return `a CHECK line runs ${w.file}, which is not a file in the repo`;
+  return `${w.kind}: ${w.file}`;
+}
+// `ca brief-check <repo> <task> [--json]`: print the brief warnings a lead should fix before a lane
+// starts. Warnings never block a lane; the command always exits 0, so a missing brief just has none.
+function cmdBriefCheck(args) {
+  const asJson = args.includes('--json');
+  const [repoArg, task] = args.filter((a) => !a.startsWith('--'));
+  if (!repoArg || !task) die('usage: ca brief-check <repo> <task> [--json]', 2);
+  const repo = path.resolve(repoArg);
+  const warnings = briefWarningsFor(repo, task) || [];
+  if (asJson) { console.log(JSON.stringify({ warnings }, null, 2)); return; }
+  if (!warnings.length) console.log('brief: no warnings');
+  else for (const w of warnings) console.log(`brief warning: ${briefWarningText(w)}`);
 }
 // `ca workspace <repo> <task>`: prepare a parallel lane workspace as a LOCAL CLONE
 // (../<repo-name>-wt-<task>) on a new branch lane/<task>, from --from (default: the repo's current
@@ -3324,7 +3418,7 @@ function die(msg, code = 1) { process.stderr.write(msg + '\n'); process.exit(cod
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');
-const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), workspace: () => cmdWorkspace(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
+const table = { lane: () => { const pos = args.filter((a) => !a.startsWith('--')); return args.includes('--detach') ? cmdDetach(...pos) : runLane(pos[0], pos[1], { resume: args.includes('--resume') }); }, status: () => cmdStatus(args), summary: () => cmdSummary(args), wait: () => cmdWait(args), init: () => cmdInit(args), 'brief-check': () => cmdBriefCheck(args), workspace: () => cmdWorkspace(args), doctor: () => cmdDoctor(args), mcp: () => cmdMcp(), tail: () => cmdTail(args), steer: () => cmdSteer(args), attach: () => cmdAttach(args), stop: () => cmdStop(args), ack: () => cmdAck(args), resume: () => cmdResume(args), kick: () => cmdKick(args), dash: () => cmdDash(args), gc: () => cmdGc(), rm: () => cmdRm(args), plan: () => cmdPlan(args), note: () => cmdNote(args), 'lead-tokens': () => cmdLeadTokens(args), setup: () => cmdSetup(args), onboard: () => cmdOnboard(args), auth: () => cmdAuth(args), update: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.update(args); }, uninstall: async () => { const m = await import(pathToFileURL(path.join(HERE, 'lifecycle.mjs')).href); return m.uninstall(args); }, workflow: () => process.stdout.write(fs.readFileSync(path.join(HERE, '..', 'docs', 'workflow.md'), 'utf8')) };
 if (cmd === 'help' || cmd === '-h' || cmd === '--help' || !cmd) { process.stdout.write(usageText() + '\n'); await updateNotice(args); process.exit(0); }
 if (cmd === 'version' || cmd === '--version' || cmd === '-v') {
   let v = '0.0.0'; try { v = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version || v; } catch {}
