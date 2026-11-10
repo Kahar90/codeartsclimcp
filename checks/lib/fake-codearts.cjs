@@ -50,6 +50,8 @@ function playReview(sid, text) {
 //   run:ARG    runs the runner's check helper (tasks/*.lane/check.mjs ARG) like a worker's bash tool
 //              would, and appends {arg, code, out} to fake-checks.log
 //   wait:MS    waits
+//   noise:K    commits noise<K>.txt as "wip: noise K" (a commit that is not a step)
+//   write:REL=TEXT  writes TEXT to REL (relative to the repo), no commit
 //   ask:TEXT   asks the lead a question (question.asked); rejections land in fake-questions.log
 async function playChain(sid, kind) {
   const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -57,7 +59,9 @@ async function playChain(sid, kind) {
     const [verb, arg = ''] = [part.split(':')[0], part.split(':').slice(1).join(':')];
     if (verb === 'commit') { fs.writeFileSync(`page${arg}.html`, `<p>thing ${arg}</p>\n`); git('add', '-A'); git('commit', '-qm', `step ${arg}: thing ${arg}`); }
     else if (verb === 'wait') await sleepMs(Number(arg));
-    else if (verb === 'ask') emit('question.asked', { id: `que_fake${++n}`, sessionID: sid, questions: [{ header: 'Choice', question: arg, options: [{ label: 'A' }, { label: 'B' }] }] });
+    else if (verb === 'noise') { fs.writeFileSync(`noise${arg}.txt`, `noise ${arg}\n`); git('add', '-A'); git('commit', '-qm', `wip: noise ${arg}`); }
+    else if (verb === 'write') { const [rel, ...rest] = arg.split('='); fs.mkdirSync(require('node:path').dirname(rel), { recursive: true }); fs.writeFileSync(rel, rest.join('=') || 'written by the worker\n'); }
+    else if (verb === 'ask')emit('question.asked', { id: `que_fake${++n}`, sessionID: sid, questions: [{ header: 'Choice', question: arg, options: [{ label: 'A' }, { label: 'B' }] }] });
     else if (verb === 'run') {
       const lane = (fs.readdirSync('tasks').find((d) => d.endsWith('.lane') && fs.existsSync(`tasks/${d}/check.mjs`)));
       const helper = lane ? `tasks/${lane}/check.mjs` : 'tasks/missing-helper.mjs';
