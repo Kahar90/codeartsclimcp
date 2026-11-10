@@ -83,6 +83,12 @@ stopped.
 Open any lane for its live transcript, the brief it is following, a box to steer it mid-run, and
 the checks the runner ran before reporting done.
 
+Step counts come from committed `step N:` evidence. A lane that finishes only part of its brief
+keeps that partial count, and the plan stays active while the lead is verifying the result. Worker
+questions and actionable tool failures wake the lead through `ca wait` with `CA_BLOCKED`, including
+while the final reviewer runs. The lead answers with `ca steer` or marks a handled incident with
+`ca ack`.
+
 ## Reference
 
 ### Why it is safe to leave running

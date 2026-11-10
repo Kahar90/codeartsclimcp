@@ -44,6 +44,17 @@ read when relevant. The independent reviewer remains responsible for every requi
 that outlives the speculative polling budget can continue in its existing session instead of
 restarting on the same commit.
 
+A focused repair review reuses the healthy reviewer session when its model and completed-turn
+evidence match. It must return a fresh answer for the new turn; an old cached verdict cannot approve
+the fix. A queued asynchronous turn gets its own start allowance. If reuse is unsafe, the runner
+starts a fresh review instead. Once the full final review covers the completed work, the runner does
+not start another optional step review for that same work.
+
+The lead can steer, stop or kick the reviewer while the final review is pending. Taking over a
+speculative review preserves its session rather than aborting it, while normal control handling and
+watchdog checks continue. Review watchdog continuations retain the read-only review instructions.
+Any change to the reviewed commit or working tree invalidates approval.
+
 ## Reserving the shared model for foreground builders
 
 The optional early (step) reviews usually run on the same fast model as the builders, so several
