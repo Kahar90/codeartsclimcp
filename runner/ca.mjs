@@ -484,6 +484,19 @@ async function runLane(repoArg, task, opts = {}) {
     }
     return true;
   };
+  // Orphan guard: a repo deleted out from under the lane (no .git for two ticks in a row) leaves the
+  // supervisor running against a folder that is gone, so it stops itself and its own server.
+  let repoGoneTicks = 0;
+  const orphanGuard = () => {
+    if (fs.existsSync(path.join(repo, '.git'))) { repoGoneTicks = 0; return false; }
+    if (++repoGoneTicks < 2) return false;
+    L('repo deleted: stopping');
+    try { killTree(server?.child?.pid || S.server?.pid); } catch {}
+    S.phase = 'finished'; S.activity = 'repo deleted: stopping'; S.finishedAt = now();
+    try { save(true); } catch {}
+    try { fs.rmSync(path.join(REG, `${id}.json`), { force: true }); } catch {}
+    process.exit(0);
+  };
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
@@ -903,6 +916,7 @@ async function runLane(repoArg, task, opts = {}) {
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
       helperGuard();
+      orphanGuard();
       await pumpInbox(sid);
       // The worker's helper (inside its sandbox) asks this runner to run a CHECK line outside the
       // sandbox. Pick up one request per tick and run it in the background so the tick never blocks.
@@ -980,6 +994,7 @@ async function runLane(repoArg, task, opts = {}) {
     while (now() < until) {
       if (fs.existsSync(stopFile)) return false;
       helperGuard();
+      orphanGuard();
       const k = takeKick();
       if (k) { L(`== backoff skipped by ${k.by}`); pendingKick = k; return true; }
       S.activity = `${label}: ${dur(until - now())} left`; save(); await sleep(1000);
@@ -1473,6 +1488,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       // Waiting for a slot is not a stall: keep ca status from reading STALLED while we queue.
       S.lastEventAt = now(); S.turnStartAt = now(); S.lastToolAt = now(); S.lastTextAt = now(); save();
       if (fs.existsSync(stopFile)) { const e = new Error('stopped'); e.caStop = true; throw e; }
+      helperGuard(); orphanGuard();
       await sleep(20000);
     }
     if (logged) { queuedTotal += now() - t0; S.queuedMs = queuedTotal; say(`slot free for ${model} after ${dur(now() - t0)}`); save(true); }
