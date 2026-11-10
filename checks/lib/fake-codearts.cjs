@@ -18,6 +18,7 @@
 //   { commit: ['rel=text'] }  write and commit the files while reviewing (reviewer-time mutation)
 //   { write: ['rel=text'] }   write the files, no commit (a dirty tree during review)
 //   { busyAfter: MS }         after the turn goes idle, flip the session busy (busy-reuse fallback)
+//   { errorAfter: MS }        after the turn goes idle, emit a session error (error-reuse fallback)
 // /session/:id/message returns every assistant message for the session (with its stable id).
 // A prompt sent to a busy session is queued and played when the turn ends (steering).
 // Logs in the cwd: fake-turns.log (one scenario per line), fake-prompts.log (JSON per prompt:
@@ -71,6 +72,8 @@ function playReview(sid, text) {
       if (opts.commit) { try { git('add', '-A'); git('commit', '-qm', opts.msg || 'reviewer: stray change'); } catch {} }
     }
     if (opts.busyAfter) later(sid, Number(opts.busyAfter), () => setStatus(sid, 'busy'));
+    // An error on a completed review session must block its reuse (the runner reads sess[sid].error).
+    if (opts.errorAfter) later(sid, Number(opts.errorAfter), () => emit('session.error', { sessionID: sid, error: { name: 'UnknownError', data: { message: 'injected review-session error' } } }));
     // A stale reply reuses the session's existing message id, so the runner must reject it as no new turn.
     const cached = opts.stale && msgs[sid] && msgs[sid].length ? msgs[sid][msgs[sid].length - 1].info.id : null;
     answer(sid, hit ? hit[1] : '1. DONE\nVERDICT: ready', cached ? { msgId: cached } : { noId: !!opts.noId });

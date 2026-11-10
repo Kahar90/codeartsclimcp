@@ -1350,6 +1350,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           // must never be accepted as this turn's verdict.
           const fresh = await freshReviewReply(rec.sid, rec.baseline);
           text = fresh.text;
+          // A NEW message id alone is not enough. Mirror drive()/waitTurn, which returns kind 'error'
+          // when the session error is set: a turn that errors mid-reply can leave a partial assistant
+          // message whose fresh id would otherwise be accepted as this turn's verdict. Fail here so the
+          // normal final review takes over with its retry and auth detection instead.
+          if (sx(rec.sid).error) return { sid: rec.sid, ok: false, reason: 'error', text: fresh.text, reused: rec.reused };
           if (sawBusy || fresh.ok) {
             return fresh.ok
               ? { sid: rec.sid, ok: true, reason: '', text: fresh.text, msgId: fresh.msgId, reused: rec.reused }
@@ -1419,8 +1424,13 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       const sid = specReview.sid || (specReview.sidP ? await specReview.sidP.catch(() => null) : null);
       return { sid, head, from: specReview.from, at: specReview.at, promise: specReview.promise, spec: true, baseline: specReview.baseline, reused: specReview.reused, prev: specReview.prev };
     }
-    if (specReview) await discardSpecReview(); // stale: HEAD moved after it started, so abort and review again now
-    const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
+    // A discarded speculative review may have REUSED the previous reviewer session and already sent it
+    // this round's prompt. Re-selecting that same idle session would send the prompt a second time and
+    // duplicate it in the reviewer's context, so force a fresh session in that case. A fresh speculative
+    // session is not the reuse candidate, so the normal path is unchanged.
+    let forceFresh = false;
+    if (specReview) { forceFresh = !!specReview.reused; await discardSpecReview(); } // stale: HEAD moved after it started, so abort and review again now
+    const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1], forceFresh);
     return asNormalFr(fr);
   };
   // Await the overlapped final review and record it. A speculative review that did not finish (a transient

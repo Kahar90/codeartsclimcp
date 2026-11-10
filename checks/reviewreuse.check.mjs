@@ -109,6 +109,38 @@ const e = lane('mutcommit', { script: ['steps:1', 'ok'], review: REV_COMMIT, env
 check('reviewer-time commit: the lane ends needs review, never ready', e.code === 4 && e.st?.result === 'needs review' && e.st?.verdict !== 'ready', `${e.code} ${e.st?.result} ${e.st?.verdict}`);
 check('reviewer-time commit: the reason names the reviewer mutation', /reviewer changed the reviewed content/.test(e.st?.reason || ''), e.st?.reason);
 
+// H: a previous reviewer session that is BUSY when the fix round starts must not be reused (the reuse gate
+// requires the session to be idle). The full review's session is flipped busy a few seconds after it
+// answers; the long fix turn keeps that state in place until the fix round re-reviews, so the fix review
+// must run on a fresh session and the lane still ends ready.
+const REV_BUSY = [['Previous review findings', '1. DONE: the finding is fixed\nVERDICT: ready'], ['VERDICT', FINDING, { busyAfter: 6000 }]];
+const h = lane('busy', { script: ['steps:1', 'wait:14000', 'ok'], review: REV_BUSY, env: { FAKE_REVIEW_MS: '800' } });
+const hRev = h.prompts.filter((p) => p.agent === 'plan');
+check('busy reviewer session is not reused; the fix review is a fresh session and the lane still ends ready',
+  h.code === 0 && h.st?.result === 'done' && h.st?.verdict === 'ready' && hRev.length >= 2 && hRev.slice(1).every((p) => p.sid !== hRev[0].sid),
+  `${h.code} ${h.st?.result} ${h.st?.verdict} ${hRev.map((p) => p.sid).join(',')}`);
+
+// I: a previous reviewer session that recorded a session error must not be reused either (the reuse gate
+// fails closed on sess[sid].error). Same shape as H; falls back to a fresh session.
+const REV_ERR = [['Previous review findings', '1. DONE: the finding is fixed\nVERDICT: ready'], ['VERDICT', FINDING, { errorAfter: 6000 }]];
+const i = lane('reuserr', { script: ['steps:1', 'wait:14000', 'ok'], review: REV_ERR, env: { FAKE_REVIEW_MS: '800' } });
+const iRev = i.prompts.filter((p) => p.agent === 'plan');
+check('errored reviewer session is not reused; the fix review is a fresh session and the lane still ends ready',
+  i.code === 0 && i.st?.result === 'done' && i.st?.verdict === 'ready' && iRev.length >= 2 && iRev.slice(1).every((p) => p.sid !== iRev[0].sid),
+  `${i.code} ${i.st?.result} ${i.st?.verdict} ${iRev.map((p) => p.sid).join(',')}`);
+
+// J: a speculative fix round that REUSED the previous reviewer session is discarded when HEAD moves again
+// before it is used. The follow-up normal review must NOT re-select that same idle session and send the
+// fix prompt a second time (a duplicate in the reviewer's context): it must use a fresh session.
+const j = lane('dupprompt', { script: ['steps:1', 'noise:1+wait:9000+noise:2', 'ok'], review: REV });
+const jRev = j.prompts.filter((p) => p.agent === 'plan');
+const jSid0 = jRev[0]?.sid;
+const jResends = jRev.filter((p) => p.sid === jSid0 && /Previous review findings/.test(p.text));
+const jrr = j.st?.reviewRounds || [];
+check('a discarded reused speculative review does not resend the fix prompt to the same reviewer session',
+  j.code === 0 && jResends.length === 1 && jrr.length === 2 && jrr[1].sid !== jrr[0].sid,
+  `resends to ${jSid0}: ${jResends.length}; rounds ${jrr.map((x) => x.sid).join(',')}; sids ${jRev.map((p) => p.sid).join(',')}`);
+
 for (const l of results) console.log(l);
 const fails=results.filter(l=>l.startsWith('FAIL')).length;
 try {fs.rmSync(tmp,{recursive:true,force:true});}catch{}
