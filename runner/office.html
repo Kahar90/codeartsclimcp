@@ -1671,7 +1671,7 @@ function stepsFraction(st, l) {
   const d = p.done || 0, t = p.total || 0;
   const mode = st && st.steps;
   if (mode === "live") return t ? "step " + d + "/" + t : "";
-  if (mode === "complete") { const n = t || d; return n ? n + "/" + n + " \u2713" : "\u2713"; }
+  if (mode === "complete") { if (t && d < t) return d + "/" + t; const n = t || d; return n ? n + "/" + n + " \u2713" : "\u2713"; }
   if (mode === "hide") return "";
   if (mode === "partial") return t ? d + "/" + t : ""; // some steps open: show the true fraction
   return t ? d + "/" + t : ""; // older server: keep today's behaviour

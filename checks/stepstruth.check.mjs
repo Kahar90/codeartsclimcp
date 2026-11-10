@@ -68,4 +68,16 @@ const absent = laneOutcome({ s: { result: 'done' }, progress: { done: 0, total: 
 assert.equal(absent.steps, 'hide', 'no known step list hides the fraction instead of faking completion');
 console.log('PASS absent legacy progress is hidden, not faked');
 
+// Stale payloads and demo variants can carry a complete status beside an incomplete fraction.
+const { readFileSync } = await import('node:fs');
+const { runInNewContext } = await import('node:vm');
+const load = (file, name) => {
+  const html = readFileSync(new URL('../runner/' + file, import.meta.url), 'utf8');
+  const source = html.match(new RegExp('function ' + name + '\\([^]*?\\n\\}'))[0];
+  return runInNewContext(source + '; ' + name);
+};
+const stale = { status: { steps: 'complete' }, progress: { done: 1, total: 3 } };
+assert.equal(load('dash.html', 'laneStepsMode')(stale), 'partial');
+assert.equal(load('office.html', 'stepsFraction')(stale.status, stale), '1/3');
+console.log('PASS both views reject stale complete status beside unfinished steps');
 console.log('stepstruth: all checks passed');

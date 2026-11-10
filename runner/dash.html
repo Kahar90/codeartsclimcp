@@ -1101,6 +1101,7 @@ function laneBucket(l) {
 const LANE_GLYPH = { working: '\u25CF', needs: '!', failed: '\u2715', done: '\u2713', idle: '\u2013' };
 function laneAttention(l) { const s = l && l.status; return (s && typeof s.attention === 'boolean') ? s.attention : laneBucket(l) === 'attention'; }
 function laneStepsMode(l) {
+  if (l && l.progress && l.progress.total && l.progress.done < l.progress.total && l.status && l.status.steps === 'complete') return 'partial';
   const s = l && l.status; if (s && s.steps) return s.steps;
   if (l && (l.running || l.health === 'planned')) return 'live';
   // An older payload: derive the truth from the real fraction, never from the result alone.
