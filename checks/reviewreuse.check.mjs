@@ -21,9 +21,10 @@ const base = { ...process.env, CA_REGISTRY: reg, CA_SETTINGS: settings, CA_DASH:
   CODEARTS_CLI_AK: 'fake-ak', CODEARTS_CLI_SK: 'fake-sk', STALL_S: '60', THINK_S: '0', LANE_TIMEOUT: '240', FAKE_REVIEW_MS: '800' };
 delete base.NO_REVIEW; delete base.REVIEW_FIXES;
 const FINDING = '1. DONE\nBugs:\n- page1.html:1 says thing 1, the spec wants thing one\nVERDICT: needs fixes';
-function lane(name, { script, review, env = {}, briefExtra = '', reviewFile = '' }) {
+function lane(name, { script, review, env = {}, briefExtra = '', reviewFile = '', fakeSrc }) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
-  fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
+  if (fakeSrc) fs.writeFileSync(path.join(repo, 'serve'), fakeSrc);
+  else fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
   fs.writeFileSync(path.join(repo, 'fake-script.json'), JSON.stringify(script));
   fs.writeFileSync(path.join(repo, 'fake-review.json'), JSON.stringify(review));
   fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-*.log\n');
@@ -140,6 +141,17 @@ const jrr = j.st?.reviewRounds || [];
 check('a discarded reused speculative review does not resend the fix prompt to the same reviewer session',
   j.code === 0 && jResends.length === 1 && jrr.length === 2 && jrr[1].sid !== jrr[0].sid,
   `resends to ${jSid0}: ${jResends.length}; rounds ${jrr.map((x) => x.sid).join(',')}; sids ${jRev.map((p) => p.sid).join(',')}`);
+
+// K: a reused reviewer can be idle while its new asynchronous turn waits to start.
+const startBase = fs.readFileSync(path.join(ROOT, 'checks/lib/fake-codearts.cjs'), 'utf8');
+const delayedFixStart = startBase.replace('else setTimeout(() => start(sid, p), 400);',
+  "else setTimeout(() => start(sid, p), p.agent === 'plan' && /Previous review findings/.test(text) ? 6500 : 400);");
+if (delayedFixStart === startBase) throw new Error('review start fixture hook no longer matches');
+const k = lane('reusedelayedstart', { script: ['steps:1', 'fix', 'ok'], review: REV, fakeSrc: delayedFixStart });
+const kRev = k.prompts.filter(p => p.agent === 'plan');
+check('a delayed new turn reuses the healthy reviewer without replay or an extra session',
+  k.code === 0 && k.st?.verdict === 'ready' && kRev.length === 2 && kRev[0].sid === kRev[1].sid,
+  `${k.code} ${k.st?.verdict} sessions ${kRev.map(p => p.sid).join(',')}`);
 
 for (const l of results) console.log(l);
 const fails=results.filter(l=>l.startsWith('FAIL')).length;

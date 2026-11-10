@@ -56,7 +56,7 @@ check('step reviews ran on the plan agent while the builder was still working (f
 check('a step review prompt names the commit range and the brief step it covers', stepPrompts.some((p) => /step 1:/.test(p.text) && /git (show|diff|log)/.test(p.text) && /tasks\/work\.md/.test(p.text)), stepPrompts[0]?.text?.slice(0, 300));
 const sr = r.st?.stepReviews || [];
 const covered = new Set(sr.flatMap((x) => x.steps || []));
-check('state.stepReviews covers steps 1 and 2 (coalescing allowed)', covered.has(1) && covered.has(2), JSON.stringify(sr.map((x) => ({ steps: x.steps, verdict: x.verdict }))));
+check('early review covers step 1 and the mandatory final review covers the full range', covered.has(1) && r.st.reviewRounds?.some(x => x.from === r.st.start && x.verdict === 'ready'), JSON.stringify(sr.map((x) => ({ steps: x.steps, verdict: x.verdict }))));
 check('each step review records hash, verdict, ms and a short text', sr.length && sr.every((x) => x.hash && ['ok', 'fix', 'missing', 'timeout', 'error', 'cancelled'].includes(x.verdict) && Number.isFinite(x.ms) && typeof x.text === 'string' && x.text.length <= 1500), JSON.stringify(sr).slice(0, 300));
 check('the step 1 review verdict is fix', sr.some((x) => (x.steps || []).includes(1) && x.verdict === 'fix'), JSON.stringify(sr.map((x) => [x.steps, x.verdict])));
 const steerPrompt = buildPrompts.find((p) => /page1\.html:1/.test(p.text));
@@ -72,8 +72,11 @@ check('no review session was left busy: no plan-agent abort in the clean run', !
 check('step review prompts are not listed as TUI steers', !(r.st?.steers || []).some((s) => s.by === 'tui'), JSON.stringify((r.st?.steers || []).map((s) => s.by)));
 
 // A2: a slow step review is cancelled after the grace when the builder goes idle; the lane does not wait for it
-r = lane('slowstep', { script: ['steps:1', 'ok'], brief: `Goal: one page.\n1. Write page1.html. Commit.\nCHECK: node -e 0\n`, env: { FAKE_STEP_GAP_MS: '1000', FAKE_STEP_REVIEW_MS: '90000', STEP_REVIEW_GRACE_S: '3' } });
+r = lane('slowstep', { script: ['steps:1,2', 'ok'], brief: brief2.replace(SLOW, 'node -e 0'), env: { FAKE_STEP_GAP_MS: '6000', FAKE_STEP_REVIEW_MS: '90000', STEP_REVIEW_GRACE_S: '3' } });
 check('slow step review: cancelled after the grace, lane DONE well before the review would answer', r.code === 0 && r.st?.result === 'done' && (r.st?.stepReviews || []).some((x) => x.verdict === 'cancelled') && r.ms < 60000 && r.aborts.some((a) => a.agent === 'plan'), `${r.code} ${r.st?.result} ${r.ms} ms ${JSON.stringify((r.st?.stepReviews || []).map((x) => x.verdict))}`);
+
+const coveredFinal = lane('coveredfinal', { script: ['steps:1', 'ok'], brief: '1. Write page1.html. Commit.\nCHECK: node -e 0\n', env: { FAKE_STEP_REVIEW_MS: '90000' } });
+check('no optional review starts after the final reviewer already covers the completed work', coveredFinal.code === 0 && coveredFinal.st?.verdict === 'ready' && !coveredFinal.prompts.some(p => /STEP VERDICT/.test(p.text)) && coveredFinal.prompts.filter(p => p.agent === 'plan').length === 1);
 
 // B: the gate fails once: the overlapped final review is aborted and runs again after the fix
 r = lane('gatefail', { script: ['steps:1', 'fix', 'ok'], brief: `Goal: one page.\n1. Write page1.html. Commit.\nCHECK: ${FIXED}\n`, review: [['STEP VERDICT', 'STEP VERDICT: ok'], ['VERDICT', '1. DONE\nVERDICT: ready']], env: { FAKE_REVIEW_MS: '4000' } });

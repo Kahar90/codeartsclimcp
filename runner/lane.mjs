@@ -641,7 +641,7 @@ export async function runLane(repoArg, task, opts = {}) {
   // Clear the deferred marker once the review runs (resume) or the final review covers the range.
   const clearStepReviewDeferred = () => { if (S.stepReviewDeferred) { S.stepReviewDeferred = null; save(true); } };
   const maybeStepReview = () => {
-    if (!STEP_REVIEW || stepReviewRunning) return;
+    if (!STEP_REVIEW || stepReviewRunning || specReview || specReviewStarting) return;
     const idx = S.commitLog.findIndex((c) => c.hash === lastReviewedHash);
     const fresh = idx >= 0 ? S.commitLog.slice(idx + 1) : lastReviewedHash === START ? S.commitLog.slice() : S.commitLog.filter((c) => !reviewedAlready(c.hash));
     const stepFresh = fresh.filter((c) => /^step\s+\d+:/i.test(c.subject));
@@ -1405,6 +1405,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       try {
         rec.sid = await rec.sidP;
         reviewSessions.add(rec.sid);
+        Object.assign(sx(rec.sid), { sawBusy: false, busy: false, error: null, sentAt: now(), lastAct: now(), tools: new Map() });
         sent.add(rb.trim()); // the runner's own prompt: never list it as a TUI steer
         await server.api('POST', `/session/${rec.sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: rb }] });
         L(`== speculative review (${REVIEW}, plan agent) session ${rec.sid}${rec.reused ? ' (reused healthy reviewer context)' : ''} on ${head.slice(0, 8)}: starts while the builder wraps up`);
