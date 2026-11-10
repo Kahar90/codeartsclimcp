@@ -485,7 +485,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null,
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, noCommitAckAt: 0,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -854,7 +854,7 @@ async function runLane(repoArg, task, opts = {}) {
       }
       prevTick = tickMs;
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
-      if (fs.existsSync(blockerAckFile)) { try { fs.rmSync(blockerAckFile, { force: true }); } catch {} clearBlocker('ack'); }
+      if (fs.existsSync(blockerAckFile)) { try { fs.rmSync(blockerAckFile, { force: true }); } catch {} S.noCommitAckAt = now(); clearBlocker('ack'); }
       const k = takeKick();
       if (k) {
         L(`== kick (${k.mode}) from ${k.by}${k.text ? ': ' + oneLine(k.text, 160) : ''}`);
@@ -885,8 +885,10 @@ async function runLane(repoArg, task, opts = {}) {
       if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
       if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview().catch((err) => L(`! speculative review start failed: ${oneLine(String((err && err.message) || err), 200)}`)); maybeStepReview(); } }
       // No-progress alarm: a running builder that lands no commit for NO_COMMIT_S seconds is stuck. Raise
-      // one blocker for the lead (ca wait / status / the bucket) instead of showing "running" forever.
-      if (CFG.noCommitS > 0 && !S.blocker && (S.phase === 'build' || S.phase === 'fix')) {
+      // one blocker for the lead (ca wait / status / the bucket) instead of showing "running" forever. An
+      // ack mutes it until a new commit lands, so the lead is not nagged about a gap it already saw.
+      const ackMuted = S.noCommitAckAt && !(S.lastCommitAt > S.noCommitAckAt);
+      if (CFG.noCommitS > 0 && !ackMuted && !S.blocker && (S.phase === 'build' || S.phase === 'fix')) {
         const base = Math.max(S.runStartedAt || S.startedAt || T0, S.lastCommitAt || 0, S.blockerClearedAt || 0);
         if (now() - base > CFG.noCommitS * 1000) {
           const cur = stepProgress(S).current;
