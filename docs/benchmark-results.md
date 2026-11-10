@@ -27,6 +27,14 @@ as a blocker and the lead acknowledged it and kicked the turn with the outside-s
 That interruption is included. The median is still 13.6% slower than the baseline, so these results
 do not establish the requested speed improvement.
 
+A later `candidate-6561c7b-fast-core` experiment disabled thinking for the flash builder only
+(`BUILD_MODEL=maas/deepseek-v4.1-flash-fast`), retaining the original GLM reviewer. The lead stopped
+all three runs after each had exceeded the delivery target and required review repairs; none had a
+final passing delivery. They are incomplete trials, not passing timings or a median. The trial also
+exposed a quota-priority bug: the flash and flash-fast aliases were treated as different provider
+models. Commit `197efc1` corrects that comparison and its regressions; the frozen experiment did not
+contain that fix. No default model or reasoning setting was changed.
+
 On this backend, a separate identical ACK request with the same flash model and plan agent used
 23,189 input-plus-cache-read tokens with the full tool profile and 20,566 with the core profile.
 That is a context-size observation from one pair, not an end-to-end speed claim.
