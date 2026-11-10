@@ -525,7 +525,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, noCommitAckAt: 0, briefWarnings,
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, stepSeen: 0, noCommitAckAt: 0, briefWarnings,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -535,7 +535,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [], blocker: resumed.blocker || null });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [], blocker: resumed.blocker || null, stepSeen: resumed.stepSeen || 0 });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -562,13 +562,22 @@ async function runLane(repoArg, task, opts = {}) {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
     S.commits = S.commitLog.length;
-    // The no-progress clock runs on real commit times: a new commit resets it (or the first sync after a
-    // resume). A commit that landed after the blocker clears it; an older one observed late must not.
+    // The no-progress clock runs on real commit times. In the build phase only a commit for a NEW step
+    // (`step N:` with an N above every step seen so far) restarts it, so busywork ("wip: ...") cannot hide
+    // a stuck step; during a fix round any new commit counts. A commit that landed after the blocker clears
+    // it; an older one observed late must not.
     if (S.commits > (S.commitsSeen || 0)) {
       S.commitsSeen = S.commits;
-      const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
-      S.lastCommitAt = ct ? Number(ct) * 1000 : now();
-      if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+      const subject = S.commitLog[S.commitLog.length - 1]?.subject || '';
+      const m = subject.match(/^step\s*(\d+)\s*:/i);
+      const n = m ? Number(m[1]) : 0;
+      const newStep = n > (S.stepSeen || 0);
+      if (newStep) S.stepSeen = n;
+      if (newStep || S.phase === 'fix') {
+        const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
+        S.lastCommitAt = ct ? Number(ct) * 1000 : now();
+        if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+      }
     }
   };
 
@@ -941,7 +950,7 @@ async function runLane(repoArg, task, opts = {}) {
         const base = Math.max(S.runStartedAt || S.startedAt || T0, S.lastCommitAt || 0, S.blockerClearedAt || 0);
         if (now() - base > CFG.noCommitS * 1000) {
           const cur = stepProgress(S).current;
-          const text = `no commit in ${dur(now() - base)}${cur ? ` (step ${cur.n})` : ''}`;
+          const text = `no commit in ${dur(now() - base)} for a new step${cur ? ` (stuck before step ${cur.n})` : ''}`;
           S.blocker = { kind: 'no-progress', text, at: now() };
           L(`  ! blocked: ${text}`); save(true);
         }
