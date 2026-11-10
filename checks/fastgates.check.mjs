@@ -42,7 +42,7 @@ const count = (n) => `node -e "require('fs').appendFileSync('tasks/work.lane/cou
 const sleep = (ms) => `node -e "setTimeout(()=>{}, ${ms})"`;
 const pass = `node -e "process.exit(0)"`;
 const SLOW = [sleep(500), sleep(500), sleep(500), sleep(500)];
-const countBrief = `Goal: counter checks.\n1. Write page1.html. Commit.\n2. Write page2.html. Commit.\nCHECK: ${count(1)}\nCHECK: ${count(2)}\n`;
+const countBrief = `Goal: counter checks.\n1. Write page1.html. Commit.\nCHECK: ${count(1)}\nCHECK: ${count(2)}\n`;
 const slowBrief = `Goal: slow checks.\n1. Write page1.html. Commit.\n${SLOW.map((c) => 'CHECK: ' + c).join('\n')}\n`;
 const slowBriefParallel = (n) => `Goal: slow checks.\nCHECK_PARALLEL: ${n}\n1. Write page1.html. Commit.\n${SLOW.map((c) => 'CHECK: ' + c).join('\n')}\n`;
 const failFirstBrief = `Goal: stop at the first failure.\n1. Write page1.html. Commit.\nCHECK: node -e "process.exit(5)"\nCHECK: ${count(2)}\n`;
