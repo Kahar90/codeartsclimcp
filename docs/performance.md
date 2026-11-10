@@ -23,3 +23,21 @@ For lead responsiveness, test event-to-alert latency independently using the scr
 A model's response time is different from the runner's time to make its question visible through
 `ca wait`, status and the dashboards. The lead must keep waiting with step events enabled and act
 on `CA_BLOCKED`; visibility does not itself answer the worker.
+
+## Using the delivery improvements
+
+For independent CHECK lines, put `CHECK_PARALLEL: 4` in the lane brief. The runner defaults to
+sequential execution because one check may depend on another. An explicit `CHECK_PARALLEL`
+environment value overrides the brief; `0` forces sequential execution. Parallel results are
+reported in CHECK order, and every executed result remains visible even when another line fails.
+
+Use `node tasks/<task>.lane/check.mjs <N|all>` for worker checks. Successful helper results can
+be reused within that lane when the command and tested source content are unchanged, including
+across a commit. Failures, unreadable content, content mutations and dirty submodules do not qualify.
+The final gate validates the content again before accepting reused results.
+
+The initial builder prompt includes a bounded packet of explicitly named source files; the final
+review receives prepared brief and diff context. Files omitted from either packet still need to be
+read when relevant. The independent reviewer remains responsible for every requirement. A review
+that outlives the speculative polling budget can continue in its existing session instead of
+restarting on the same commit.
