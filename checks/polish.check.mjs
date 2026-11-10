@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
 import { guard, settle } from './lib/exit.mjs';
+import { settleAnims } from './lib/settle.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2); const oi = argv.indexOf('--only'); const ONLY = oi >= 0 ? argv.splice(oi, 2)[1] : null; // office | lanes | update
 const want = (part) => !ONLY || ONLY.split(',').includes(part);
@@ -100,7 +101,7 @@ try {
       await key('Escape'); await wait(250);
       await click(t.x, t.y); await wait(40);
       const anim = await ev(ANIM('#win'));
-      await wait(400);
+      await wait(400); await settleAnims(ev);
       const r = await ev(RECT('#win'));
       if (!r) continue; // not every opener opens the window (e.g. the +N pill toggles its list)
       // a phone/tablet bottom sheet is docked flush to the bottom and sides: inside the viewport is enough there

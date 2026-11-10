@@ -34,7 +34,7 @@ try {
   r = run(['--full']);
   check('--full runs browser checks too', r.code === 0 && /ok\s+web\.check\.mjs/.test(r.out) && /checks: 3 passed, 0 failed/.test(r.out), r.out);
   check('each check line shows its time', /alpha\.check\.mjs\s+\d+\.\d s/.test(r.out), r.out);
-  fs.writeFileSync(path.join(checksDir, 'zeta.check.mjs'), "console.log('FAIL zeta broke'); process.exit(1);\n");
+  fs.writeFileSync(path.join(checksDir, 'zeta.check.mjs'), "console.log('FAIL zeta broke'); process.exitCode = 1;\n");
   r = run([]);
   check('a failing check fails the run and its FAIL line is shown', r.code !== 0 && /FAIL zeta\.check\.mjs/.test(r.out) && /FAIL zeta broke/.test(r.out) && /1 failed \(zeta\.check\.mjs\)/.test(r.out), r.out);
   fs.rmSync(path.join(checksDir, 'zeta.check.mjs'));

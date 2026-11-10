@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
 import { guard, settle } from './lib/exit.mjs';
+import { settleAnims } from './lib/settle.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chromePath = findChrome();
 if (!chromePath) { console.log('SKIP officeclick: no Chrome found (set CHROME_PATH)'); process.exit(0); }
@@ -58,7 +59,7 @@ try {
   check('every seated hot desk shows a nameplate', robots.length === hits.length, `${robots.length} plates, ${hits.length} lanes`);
   const opened = new Set();
   for (const rb of robots) {
-    await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`); await wait(200);
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`); await wait(200); await settleAnims(ev);
     const top = await ev(`(() => { const e = document.elementFromPoint(${rb.x}, ${rb.y}); return e ? e.className : ''; })()`);
     for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: rb.x, y: rb.y, button: 'left', clickCount: 1 });
     let w = null; for (let i = 0; i < 10; i++) { await wait(150); w = await ev('window.__office.state().window'); if (w?.open) break; }

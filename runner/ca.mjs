@@ -91,6 +91,11 @@ import { cmdAuth, cmdBriefCheck, cmdDoctor, cmdInit, cmdMcp, cmdOnboard, cmdSetu
 import { cmdDetach, runLane } from './lane.mjs';
 import { cmdLeadTokens, cmdNote, cmdPlan } from './plan.mjs';
 
+// On macOS a pipe to stdout/stderr is asynchronous, so a line printed right before process.exit() (CA_RESULT,
+// a die() message) can be lost when an agent or the MCP server reads ca through a pipe. Blocking writes
+// flush before every exit, on every OS.
+for (const s of [process.stdout, process.stderr]) { try { if (s._handle && typeof s._handle.setBlocking === 'function') s._handle.setBlocking(true); } catch {} }
+
 const [cmd, ...args] = process.argv.slice(2);
 const usageText = () => fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n')
   .filter((l) => l.startsWith('// usage') || l.startsWith('//        ')).map((l) => l.slice(3)).join('\n');

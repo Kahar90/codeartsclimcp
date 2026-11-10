@@ -7,6 +7,7 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
 import { guard, settle } from './lib/exit.mjs';
+import { settleAnims } from './lib/settle.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const chromePath = findChrome();
 if (!chromePath) { console.log('SKIP office: no Chrome found (set CHROME_PATH)'); process.exit(0); }
@@ -42,6 +43,7 @@ try {
   sock.addEventListener('message', (e) => { const m = JSON.parse(e.data); if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); sock.send(JSON.stringify({ id: i, method, params })); });
   const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result?.result?.value;
+  const evAwait = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })).result?.result?.value;
   const st = () => ev('window.__office && window.__office.state()');
   const stReady = async () => { let v; for (let i = 0; i < 12 && !v; i++) { v = await st(); if (!v) await wait(400); } return v; };
   const shot = async (name) => { const r = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(out, `${name}.png`), Buffer.from(r.result.data, 'base64')); };
@@ -189,7 +191,7 @@ try {
   check('nameplates hidden when narrow', s.stations.every((x) => x.plate.w === 0));
   const rows = await ev('document.querySelectorAll("#stlist .st-row").length');
   check('station list shows lead and workers when narrow', rows === 4, String(rows));
-  await ev('window.__office.press("office-review")'); await wait(300);
+  await ev('window.__office.press("office-review")'); await wait(300); await settleAnims(evAwait);
   s = await st();
   check('window opens as a card when narrow', s.window.open && s.window.laneId === 'office-review', s.window.laneId);
   check('narrow window is a bottom sheet: full width, docked to the viewport bottom, tall enough to read', near(s.window.x, 0) && near(s.window.w, 390) && near(s.window.y + s.window.h, 844) && s.window.h >= 300 && s.window.h <= 844 * 0.86, `${Math.round(s.window.x)},${Math.round(s.window.y)} ${Math.round(s.window.w)}x${Math.round(s.window.h)}`);
