@@ -945,7 +945,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           switched = true;
         }
         if (switched) await waitForSlot(model);
-        await send(sid, o.nudge, model, agent);
+        await send(sid, label === 'review' ? resumeText('think', o.what) : o.nudge, model, agent);
       } else if (++sameSessionFails >= 2 && freshSession) {
         sid = await newSession(`${task} ${label} (fresh)`); sameSessionFails = 0;
         if (label === 'build' || label === 'fix') builderSessions.add(sid);
