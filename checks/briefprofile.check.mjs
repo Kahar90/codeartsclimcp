@@ -59,6 +59,9 @@ const mock = () => {
 const probe = (mode) => { const s = new Server('.', 'unused', mode); s.url = 'http://local-probe'; s.pw = 'test'; return s; };
 
 try {
+  const badCalls = mock(); let badModeRejected = false;
+  try { await probe('bogus').api('POST', '/session/bad/prompt_async', { parts: [] }); } catch { badModeRejected = true; }
+  check('invalid explicit Server profile fails before metadata or prompt', badModeRejected && badCalls.ids === 0 && badCalls.requests.length === 0);
   const envBefore = process.env.CA_TOOL_PROFILE;
   const coreMode = T.selectToolProfile(generated, undefined);
   const s = probe(coreMode); const calls = mock();

@@ -40,7 +40,7 @@ export class Server {
   // caller's object, never inserts true and never touches an inherited core/plan permission). A lane
   // passes its selected mode; a direct caller without one falls back to the CA_TOOL_PROFILE env.
   async profileBody(body) {
-    const mode = this.toolProfile !== undefined ? this.toolProfile : profileMode(process.env.CA_TOOL_PROFILE);
+    const mode = profileMode(this.toolProfile !== undefined ? this.toolProfile : process.env.CA_TOOL_PROFILE);
     if (mode === 'full') return body;
     if (mode === 'unknown') throw new Error(`tool profile: unknown CA_TOOL_PROFILE "${process.env.CA_TOOL_PROFILE}" (expected "core", "full" or unset)`);
     return applyCoreProfile(body, await this.toolIdsOnce());
