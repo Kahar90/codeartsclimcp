@@ -418,6 +418,7 @@ async function runLane(repoArg, task, opts = {}) {
   // starts a local server hangs or fails there. Write a helper that asks this runner (outside the
   // sandbox) to run a CHECK line. Listing embeds the commands, so it needs no runner. Written now,
   // after the lane dir exists and before the first prompt.
+  let HELPER_TEXT = '';
   {
     const helper = [
       '// Check service helper written by the runner for this lane. The CodeArts sandbox blocks the',
@@ -463,11 +464,26 @@ async function runLane(repoArg, task, opts = {}) {
       'process.exit(res.code);',
       '',
     ].join('\n');
+    HELPER_TEXT = helper;
     fs.writeFileSync(path.join(dir, 'check.mjs'), helper);
   }
   // The build prompt, the continuation brief and every gate fix round tell the worker to run a CHECK
   // line through that helper instead of its sandboxed shell.
   const CHECK_HELP = `\n\nRun a CHECK line with \`node tasks/${task}.lane/check.mjs <N>\` (1 = first line, \`all\` = every line, no argument lists them). It runs outside your sandbox, where the local network works, and prints the output and exit code. Use it instead of running a check command directly.`;
+  // The runner owns tasks/<task>.lane/check.mjs: a worker that overwrites or deletes it gets it back
+  // on the next tick, and at most once a minute a notice not to edit runner files (delivered like a steer).
+  let lastHelperNotice = 0;
+  const helperGuard = () => {
+    let cur = ''; try { cur = fs.readFileSync(path.join(dir, 'check.mjs'), 'utf8'); } catch {}
+    if (cur === HELPER_TEXT) return false;
+    try { fs.writeFileSync(path.join(dir, 'check.mjs'), HELPER_TEXT); } catch { return false; }
+    L(`helper restored (tasks/${task}.lane/check.mjs)`);
+    if (now() - lastHelperNotice >= 60000) {
+      lastHelperNotice = now();
+      try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-helper.txt`), `Message from the runner: do not edit runner files in tasks/${task}.lane/ (check.mjs was restored). Run checks with node tasks/${task}.lane/check.mjs <N>.`); } catch {}
+    }
+    return true;
+  };
   const BUILD = (brief.match(/^\s*MODEL:\s*([\w.-]+\/[\w.-]+)/m) || [])[1] || CFG.build;
   const FALLBACK = (brief.match(/^\s*FALLBACK_MODEL:\s*([\w.-]+\/[\w.-]+|none)/m) || [])[1] ?? CFG.thinkFallback;
   let buildModel = BUILD; // becomes FALLBACK after repeated thinking stalls
@@ -760,7 +776,7 @@ async function runLane(repoArg, task, opts = {}) {
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep/i.test(f) ? 'runner notice' : 'ca steer';
+      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep|helper/i.test(f) ? 'runner notice' : 'ca steer';
       if (by === 'step review') lastPumpHadStepReview = true;
       // A lead steer queued after the blocker clears it: the person answered the worker's question.
       if (S.blocker && by === 'ca steer') { const at = Number((f.match(/^(\d+)/) || [])[1]) || 0; if (at > S.blocker.at) clearBlocker('steer delivered'); }
@@ -886,6 +902,7 @@ async function runLane(repoArg, task, opts = {}) {
       }
       if (now() - T0 > CFG.laneTimeout * 1000) { L('== lane timeout'); await abort(sid); return { kind: 'timeout' }; }
       if (!server.alive) return { kind: 'server-died' };
+      helperGuard();
       await pumpInbox(sid);
       // The worker's helper (inside its sandbox) asks this runner to run a CHECK line outside the
       // sandbox. Pick up one request per tick and run it in the background so the tick never blocks.
@@ -962,6 +979,7 @@ async function runLane(repoArg, task, opts = {}) {
     const until = now() + sec * 1000;
     while (now() < until) {
       if (fs.existsSync(stopFile)) return false;
+      helperGuard();
       const k = takeKick();
       if (k) { L(`== backoff skipped by ${k.by}`); pendingKick = k; return true; }
       S.activity = `${label}: ${dur(until - now())} left`; save(); await sleep(1000);
