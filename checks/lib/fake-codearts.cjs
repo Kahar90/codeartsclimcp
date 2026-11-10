@@ -50,12 +50,14 @@ function playReview(sid, text) {
 //   run:ARG    runs the runner's check helper (tasks/*.lane/check.mjs ARG) like a worker's bash tool
 //              would, and appends {arg, code, out} to fake-checks.log
 //   wait:MS    waits
+//   ask:TEXT   asks the lead a question (question.asked); rejections land in fake-questions.log
 async function playChain(sid, kind) {
   const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
   for (const part of kind.split('+')) {
     const [verb, arg = ''] = [part.split(':')[0], part.split(':').slice(1).join(':')];
     if (verb === 'commit') { fs.writeFileSync(`page${arg}.html`, `<p>thing ${arg}</p>\n`); git('add', '-A'); git('commit', '-qm', `step ${arg}: thing ${arg}`); }
     else if (verb === 'wait') await sleepMs(Number(arg));
+    else if (verb === 'ask') emit('question.asked', { id: `que_fake${++n}`, sessionID: sid, questions: [{ header: 'Choice', question: arg, options: [{ label: 'A' }, { label: 'B' }] }] });
     else if (verb === 'run') {
       const lane = (fs.readdirSync('tasks').find((d) => d.endsWith('.lane') && fs.existsSync(`tasks/${d}/check.mjs`)));
       const helper = lane ? `tasks/${lane}/check.mjs` : 'tasks/missing-helper.mjs';
@@ -135,6 +137,8 @@ http.createServer((req, res) => {
       for (const t of timers[sid] || []) clearTimeout(t); timers[sid] = []; queue[sid] = [];
       setStatus(sid, 'idle'); return json(true);
     }
+    m = u.pathname.match(/^\/question\/([^/]+)\/reject$/);
+    if (m) { fs.appendFileSync('fake-questions.log', JSON.stringify({ t: Date.now(), id: m[1], reply: 'reject' }) + '\n'); return json(true); }
     m = u.pathname.match(/^\/session\/([^/]+)\/message$/);
     if (m) return json(answers[m[1]] ? [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: answers[m[1]] }] }] : []);
     return json({});
