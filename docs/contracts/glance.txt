@@ -14,4 +14,5 @@ Glyphs (write them as JS unicode escapes): working U+25CF (filled dot), needs-yo
 done U+2713 (check), quiet "?", idle U+2013 (dash).
 Priority when combining several plans (worst first): needs-you, failed, quiet, working, done, idle.
 Tab title: "<glyph> <word> - <plan title>" (idle: the view's plain title).
-Favicon: a 32x32 canvas data: URL, rounded square in the state color with the glyph in dark #1a1424.
+Favicon: a 32x32 canvas data: URL, rounded square in the state color with the glyph in dark #1a1424.A running lane with an open blocker (a worker question, or no new step for NO_COMMIT_S) makes its plan
+"needs-you" ahead of "working": the lane keeps running, but the lead has to answer.

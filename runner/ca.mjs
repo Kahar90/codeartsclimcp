@@ -1797,7 +1797,7 @@ function kindOf(l) {
 function laneRow(l) {
   const s = l.s; const end = s.finishedAt || now();
   return { lane: l.id, bucket: bucketOf(l), health: laneHealthOf(l), phase: s.phase, elapsed: dur(end - s.startedAt), idle: s.result ? '-' : dur(now() - (s.lastEventAt || s.startedAt)),
-    commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: s.steers?.length || 0, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
+    commits: `${s.commits}/${s.steps}`, tokens: compact(tokenTotal(s.tokens)), steers: (s.steers || []).filter((x) => x.by !== 'runner notice').length, interrupts: s.interruptions?.length || 0, verdict: s.verdict || '', now: oneLine(s.activity, 70) };
 }
 const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
 // A status row for scripts: every laneRow field plus identity, result, progress and file paths.
@@ -3005,6 +3005,9 @@ function glanceOf(view) {
   if (phase === 'asking') return out('needs-you', `Claude is asking: ${lastText || view.now || ''}`, lead.nowAt || lead.updatedAt || null);
   // c. the lead reports done.
   if (phase === 'done') return out('done', lastText || 'Claude is done', atIso(Math.max(leadMs, laneMs)));
+  // d0. a running lane is blocked on the lead (a worker question or no progress): that needs a human now.
+  const blk = lanes.find((x) => x.running && x.blocked);
+  if (blk) return out('needs-you', `${blk.task}: ${blk.blocked.kind === 'question' ? 'asked the lead' : 'no progress'}: ${blk.blocked.text || ''}`, atIso(ms(blk.blocked.at)));
   // d. a lane is running.
   if (view.counts && view.counts.running > 0) {
     const r = lanes.find((x) => x.running);

@@ -1163,6 +1163,7 @@ function crDot(key) { const m = crMeta(key); return `<span class="ca-dot s-${m.t
 function crTime(l) {
   const b = laneBucket(l), p = l.progress || {};
   if (b === 'running') return `running ${l.elapsed || ''}${p.total ? `, step ${p.done}/${p.total}` : ''}`.trim();
+  if (b === 'attention' && l.running && l.blocked) return l.blocked.kind === 'question' ? 'waiting for your answer, still working' : 'no new step, still working';
   if (b === 'attention' && l.running) return `stuck ${(l.idle && l.idle !== '-') ? l.idle : 'quiet'}`.trim();
   if (b === 'attention') return `${esc(l.result || 'needs you')} ${ago(l.finishedAt)}`.trim();
   if (b === 'done') return `finished ${ago(l.finishedAt)}`.trim();
@@ -1518,7 +1519,7 @@ function renderLane(d, keep) {
   const na = (v) => (v == null || v === '' || v === '-') ? 'n/a' : esc(v);
   const metric = (lb, val, title) => `<span class="m"${title ? ` title="${esc(title)}"` : ''}><span class="lb">${lb}</span><b>${val}</b></span>`;
   const tokens = CAUI.fmtTokens(CAUI.tokenTotal(t));
-  const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Tokens', tokens, CAUI.tokenDetail(t))}${metric('Elapsed', na(d.elapsed), d.time ? CAUI.timeRowsByPhase(d.time.byPhase) : '')}${metric('Idle', na(d.idle))}${metric('Steers', d.steers.length)}${metric('Interruptions', d.interruptions.length)}</div>`;
+  const metrics = `<div class="metrics">${metric('Build', na(short(d.models?.build)))}${metric('Review', na(short(d.models?.review)))}${metric('Tokens', tokens, CAUI.tokenDetail(t))}${metric('Elapsed', na(d.elapsed), d.time ? CAUI.timeRowsByPhase(d.time.byPhase) : '')}${metric('Idle', na(d.idle))}${metric('Steers', d.steers.filter((x) => x.by !== 'runner notice').length)}${metric('Interruptions', d.interruptions.length)}</div>`;
   const tokRows = (() => { const rows = CAUI.tokenSplit(d.tokensBy); const max = Math.max(1, ...rows.map((r) => r.total)); return `<div class="tokby">${rows.map((r) => `<div class="tokrow" data-role="${r.role}" data-total="${r.total}" title="${esc(r.label)}: ${esc(CAUI.tokenDetail(r.t))}"><span class="tk-lb">${esc(r.label)}</span><span class="tk-n">${CAUI.fmtTokens(r.total)}</span><span class="tk-bar"><i class="${r.role}" style="width:${Math.round((100 * r.total) / max)}%"></i></span></div>`).join('')}</div>`; })();
   const tools = d.running && d.tools.length ? `<div class="small" style="margin-top:4px">${d.tools.map((x) => `&gt; ${esc(x.tool)} ${esc(x.input)} <span class="mute">(${Math.round((Date.now() - x.since) / 1000)}s)</span>`).join('<br>')}</div>` : '';
   const nowInner = d.running ? `${d.progress?.current ? `Step ${d.progress.current.n} &middot; ` : ''}${esc(d.now || d.phase)}` : `${esc(st.label)}${(st.reason || d.reason) ? ' &middot; ' + esc(st.reason || d.reason) : ''}`;
