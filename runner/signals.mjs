@@ -98,6 +98,9 @@ const ENV_RX = [
 const TRANSIENT_RX = [
   /\bECONNRESET\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|\bENOTFOUND\b/i,
   /fetch failed|socket hang ?up|Cannot connect/i,
+  // Git transport fatals: a transient clone/fetch/push network error (not an actionable env failure).
+  /fatal:\s*unable to access/i,
+  /Failed to connect|Could not resolve host/i,
   /\bnetwork\b/i,
   /\b429\b|rate.?limit|too many requests|quota|Queuing/i,
   /\b50[0234]\b/,
@@ -109,6 +112,9 @@ const clip = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice
 const isRhetorical = (line) => /^(why|how come|isn'?t|aren'?t|doesn'?t|don'?t|surely|obviously)\b/i.test(line);
 // Lines that are fenced code or quoted text are never read as a request or an error.
 const isQuoted = (line) => /^[>»|]/.test(line);
+// Inline `code` spans in prose are quoted too: a builder narrating an error it already fixed
+// ("I hit `Permission denied` and fixed it") must not raise an ENV blocker that survives the fix.
+const stripInlineCode = (line) => line.replace(/`[^`]*`/g, ' ');
 
 function envLine(s) {
   let fenced = false;
@@ -116,8 +122,9 @@ function envLine(s) {
     const line = raw.trim();
     if (/^```/.test(line)) { fenced = !fenced; continue; }
     if (fenced || !line || isQuoted(line)) continue;
-    if (TRANSIENT_RX.some((rx) => rx.test(line))) continue;
-    if (ENV_RX.some((rx) => rx.test(line))) return line;
+    const body = stripInlineCode(line);
+    if (TRANSIENT_RX.some((rx) => rx.test(body))) continue;
+    if (ENV_RX.some((rx) => rx.test(body))) return line;
   }
   return '';
 }

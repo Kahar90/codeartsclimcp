@@ -58,6 +58,11 @@ check('pure env: fatal git line', sig("fatal: not a git repository (or any of th
 check('pure ignore: transient network error (fetch failed / ECONNRESET)', sig('TypeError: fetch failed\n  cause: ECONNRESET') === null);
 check('pure ignore: rate limit already retried', sig('Too many requests, the rate limit is 1000000 tokens per minute.') === null);
 check('pure ignore: a 5xx transport error', sig('Error: 503 Service Unavailable\nCannot connect to host') === null);
+check('pure ignore: git transient network fatal (unable to access / Failed to connect)', sig("fatal: unable to access 'https://example.com/x.git/': Failed to connect to example.com port 443") === null);
+check('pure ignore: git transient network fatal (Could not resolve host)', sig('fatal: unable to access ...: Could not resolve host: github.com') === null);
+check('pure env still: a non-network git fatal is actionable', sig("fatal: not a git repository (or any of the parent directories): .git")?.kind === 'env');
+check('pure ignore: inline-backtick quoted error in prose', sig('I hit `Permission denied` while running it, then chmodded the file and fixed it.') === null);
+check('pure ignore: inline-code error in prose is stripped, real unquoted env still fires', sig('Note `leftover` then fatal: Unable to create .git/index.lock: Permission denied')?.kind === 'env');
 check('pure ignore: a review session never blocks the lead', sig('Should I use SQLite?', { agentRole: 'review' }) === null);
 check('pure ignore: quoted code in a fenced block', sig('Here is the guard:\n```\nif (should I) { handle(); }\n```\ndone') === null);
 check('pure ignore: a quoted line', sig('> Should I use SQLite?') === null);
