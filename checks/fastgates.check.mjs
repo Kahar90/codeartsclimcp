@@ -1,13 +1,20 @@
-// Contract check for the fast gates: the runner must not repeat a CHECK line whose tested content is
-// unchanged, and it must be able to run CHECK lines side by side when a lane opts in. End to end
-// against the fake CodeArts server; private registry and settings, no real CodeArts.
-//   A. The worker runs every CHECK line green on a dirty tree and then commits content that is
-//      byte-identical: the commit does not change the tested content, so the gate reuses the runs
-//      instead of running them again (the old HEAD+clean cache could not, because the tree was dirty).
+// Contract check for the fast gates.
+// Step 1: the runner must not repeat a CHECK line whose tested content is unchanged, must be able to run
+// CHECK lines side by side when a lane opts in, and must keep the old stop-at-the-first-failure behaviour
+// when it does not. End to end against the fake CodeArts server; private registry and settings.
+//   A. Run every CHECK green on a dirty tree, then commit byte-identical content: the gate reuses the
+//      runs (the old HEAD+clean cache could not, the tree was dirty).
 //   B. A commit that changes the content disables the reuse: the gate runs the lines itself.
-//   C. By default the CHECK lines run one at a time (checks may depend on order) and keep CHECK order.
+//   C. By default the CHECK lines run one at a time and keep CHECK order.
 //   D. With CHECK_PARALLEL set, independent slow lines run together and the gate span drops by more
 //      than half, while the gate output stays in CHECK order.
+//   E. A failing first CHECK line stops the run: the second line never executes its side effect.
+//   F. A file whose path has a non-ASCII character and a space is fingerprinted (reuse still works).
+//   G. Changing such a file's content after the worker run disables the reuse.
+//   J. The worker runs the same helper twice on identical content: the check service runs it once.
+//   K. Content changes between the two helper runs: the second is not reused.
+//   L. A `CHECK_PARALLEL: N` brief line opts in without env (a lead using only the MCP brief workflow).
+//   M. The CHECK_PARALLEL env var overrides the brief line.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,12 +32,20 @@ delete base.STEP_REVIEW; delete base.CHECK_PARALLEL;
 
 const count = (n) => `node -e "require('fs').appendFileSync('tasks/work.lane/count${n}.txt','x')"`;
 const sleep = (ms) => `node -e "setTimeout(()=>{}, ${ms})"`;
+const pass = `node -e "process.exit(0)"`;
 const SLOW = [sleep(500), sleep(500), sleep(500), sleep(500)];
 const countBrief = `Goal: counter checks.\n1. Write page1.html. Commit.\n2. Write page2.html. Commit.\nCHECK: ${count(1)}\nCHECK: ${count(2)}\n`;
 const slowBrief = `Goal: slow checks.\n1. Write page1.html. Commit.\n${SLOW.map((c) => 'CHECK: ' + c).join('\n')}\n`;
+const slowBriefParallel = (n) => `Goal: slow checks.\nCHECK_PARALLEL: ${n}\n1. Write page1.html. Commit.\n${SLOW.map((c) => 'CHECK: ' + c).join('\n')}\n`;
+const failFirstBrief = `Goal: stop at the first failure.\n1. Write page1.html. Commit.\nCHECK: node -e "process.exit(5)"\nCHECK: ${count(2)}\n`;
+const reviewBrief = (goal) => `Goal: ${goal}.\n1. Write page1.html. Commit.\nCHECK: ${pass}\n`;
+const BIG = Array.from({ length: 800 }, (_, i) => `LARGE_LINE_${i}_${'x'.repeat(40)}`).join('\n') + '\n';
 
-function lane(name, brief, script, env = {}) {
+const jsonl = (p) => { try { return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } };
+
+function lane(name, brief, script, env = {}, extra = {}) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
+  for (const [rel, text] of Object.entries(extra)) { const full = path.join(repo, rel); fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, text); }
   fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
   fs.writeFileSync(path.join(repo, 'fake-script.json'), JSON.stringify(script));
   fs.writeFileSync(path.join(repo, '.gitignore'), 'fake-*.log\n');
@@ -43,7 +58,7 @@ function lane(name, brief, script, env = {}) {
   const gates = (st?.gates || []).filter((x) => x.gate !== 'git clean');
   return { repo, code: r.status, out: (r.stdout || '') + (r.stderr || ''), st, gates,
     count1: read('tasks/work.lane/count1.txt').length, count2: read('tasks/work.lane/count2.txt').length,
-    status: g('status', '--porcelain').stdout };
+    prompts: jsonl(path.join(repo, 'fake-prompts.log')), status: g('status', '--porcelain').stdout };
 }
 const span = (gates) => Math.max(...gates.map((g) => g.at + (g.ms || 0))) - Math.min(...gates.map((g) => g.at));
 const orderOf = (gates) => JSON.stringify(gates.map((g) => g.gate));
@@ -76,6 +91,47 @@ check('D CHECK_PARALLEL: the CHECK lines run together and all pass', d.code === 
 check('D parallelism keeps the gate output in CHECK order', orderOf(d.gates) === JSON.stringify(SLOW), orderOf(d.gates).slice(0, 200));
 const parSpan = d.gates.length === 4 ? span(d.gates) : 0;
 check('D parallelism cuts the gate span by more than half', seqSpan > 1500 && parSpan > 0 && parSpan * 2 < seqSpan, `sequential ${seqSpan}ms parallel ${parSpan}ms`);
+
+// E: a failing first check must stop the run (no second side effect).
+const e = lane('stopfirst', failFirstBrief, ['commit:1'], { MAX_FIXES: '0' });
+check('E the lane fails on the first failing CHECK line', e.code !== 0 && e.st?.result !== 'done', `${e.code} ${e.st?.result}`);
+check('E the second CHECK line never ran its side effect', e.count2 === 0 && e.gates.length === 1 && e.gates[0].ok === false,
+  `count2 ${e.count2} gates ${JSON.stringify(e.gates.map((x) => [x.gate.slice(0, 30), x.ok, x.code]))}`);
+
+// F / G: a non-ASCII path with a space must still be fingerprinted (and its change must invalidate).
+const UNI = { 'caf\u00e9 notes.txt': 'hello \u03b1\n' };
+const f = lane('unicode', countBrief, ['write:page1.html=<p>thing 1</p>\n+run:all+commit:1'], {}, UNI);
+check('F a non-ASCII, spaced filename is fingerprinted: the gate still reuses',
+  f.code === 0 && f.count1 === 1 && f.count2 === 1 && f.gates.every((x) => x.ok && x.reused === true),
+  `${f.code} count1 ${f.count1} count2 ${f.count2} reused ${f.gates.filter((x) => x.reused).length}`);
+const g = lane('unicode-mutate', countBrief, ['run:all+write:caf\u00e9 notes.txt=CHANGED\n+commit:1'], {}, UNI);
+check('G changing the non-ASCII file after the run disables the reuse',
+  g.code === 0 && g.count1 === 2 && g.count2 === 2 && !g.gates.some((x) => x.reused),
+  `${g.code} count1 ${g.count1} count2 ${g.count2} reused ${g.gates.filter((x) => x.reused).length}`);
+
+// J: the worker runs the same helper twice on identical content: the check service runs it once.
+const j = lane('serverreuse', countBrief, ['commit:1+run:all+run:all']);
+check('J a repeated helper on identical content executes the check only once',
+  j.code === 0 && j.count1 === 1 && j.count2 === 1 && (j.st?.workerChecks || []).some((x) => x.cached === true),
+  `${j.code} count1 ${j.count1} count2 ${j.count2} cached ${(j.st?.workerChecks || []).filter((x) => x.cached).length}`);
+
+// K: content changes between the two helper runs, so the second is not reused.
+const k = lane('serverinvalidate', countBrief, ['run:all+write:page1.html=<p>thing 1</p>\n+run:all+commit:1']);
+check('K a content change between helper runs invalidates the check-service cache',
+  k.code === 0 && k.count1 === 2 && k.count2 === 2,
+  `${k.code} count1 ${k.count1} count2 ${k.count2}`);
+
+// L: a brief line opts in without env, for leads using only the MCP brief workflow.
+const l = lane('briefpar', slowBriefParallel(4), ['commit:1']);
+check('L a CHECK_PARALLEL brief line opts in without env',
+  l.code === 0 && l.gates.length === 4 && l.gates.every((x) => x.ok) && orderOf(l.gates) === JSON.stringify(SLOW) && span(l.gates) * 2 < seqSpan,
+  `span ${span(l.gates)} vs sequential ${seqSpan}`);
+
+// M: the env var overrides a brief value.
+const m = lane('envwins', slowBriefParallel(1), ['commit:1'], { CHECK_PARALLEL: '4' });
+check('M the CHECK_PARALLEL env var overrides the brief line',
+  m.code === 0 && m.gates.length === 4 && span(m.gates) * 2 < seqSpan,
+  `span ${span(m.gates)} vs sequential ${seqSpan}`);
 
 for (const l of results) console.log(l);
 const fails = results.filter((l) => l.startsWith('FAIL')).length;

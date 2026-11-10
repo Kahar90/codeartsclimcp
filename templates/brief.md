@@ -23,6 +23,8 @@ Safety rules (hard):
 Checks: run targeted checks for changed behavior before committing. Run each check in the foreground with a timeout (for example `timeout 600 node checks/x.check.mjs`); never sleep-poll a background job (`sleep N; cat log`), because every idle turn replays the whole context. Do not repeat the full suite for every step. The runner runs the CHECK lines once when you finish and sends failures back for fixes.
 CHECK: <exact command, e.g. npm run typecheck>
 CHECK: <another command, e.g. npm test>
+Optional: put `CHECK_PARALLEL: 8` on its own line to run independent CHECK lines side by side (1 by
+default, because checks may depend on order; capped at 8). The CHECK_PARALLEL env var overrides it.
 Constraints: no em dashes anywhere. Only touch <files>. Numbers only, never print private data.
 
 Final reply: the steps with their commit hashes, and anything skipped.

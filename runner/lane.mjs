@@ -843,32 +843,66 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // changes it and disables the reuse.
   const contentFingerprint = () => {
     const h = crypto.createHash('sha256');
+    // NUL-delimited output, so a path with a space or a non-ASCII name is the raw bytes git has, not
+    // the quoted escape form the newline output would give. Any git, stat or read error means the
+    // fingerprint cannot vouch for the tree: return null so nothing is reused (fail closed).
+    const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: repo, encoding: 'buffer', windowsHide: true });
+    const others = spawnSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: repo, encoding: 'buffer', windowsHide: true });
+    if (tracked.status !== 0 || others.status !== 0) return null;
     const list = new Set();
-    for (const f of git(repo, 'ls-files').split('\n')) if (f) list.add(f);
-    for (const f of git(repo, 'ls-files', '--others', '--exclude-standard').split('\n')) if (f) list.add(f);
+    for (const buf of [tracked.stdout, others.stdout]) for (const f of String(buf || '').split('\0')) if (f) list.add(f);
     for (const f of [...list].sort()) {
       h.update(f); h.update('\0');
-      try { h.update(fs.readFileSync(path.join(repo, f))); } catch { h.update('\0'); }
-      h.update('\0');
+      const full = path.join(repo, f);
+      let st;
+      try { st = fs.lstatSync(full); } catch { return null; }
+      // File type and permission bits: an exec bit or a symlink swap changes the fingerprint.
+      h.update(String(st.mode & 0o777777)); h.update('\0');
+      if (st.isSymbolicLink()) {
+        let target; try { target = fs.readlinkSync(full); } catch { return null; }
+        h.update('link:'); h.update(target); h.update('\0');
+      } else if (st.isFile()) {
+        let data; try { data = fs.readFileSync(full); } catch { return null; }
+        h.update('file:'); h.update(data); h.update('\0');
+      } else {
+        h.update('other:'); h.update('\0');
+      }
     }
     return h.digest('hex');
   };
   // Run one CHECK request from the worker's helper: same shell, env and timeout as the gates. Every
   // line run is recorded in S.workerChecks, and the result file is written atomically (tmp + rename).
   const writeCheckResult = (rid, obj) => writeAtomic(path.join(reqDir, `${rid}.result.json`), JSON.stringify(obj));
+  // Bounded in-memory cache of green check-service runs, keyed by line, command and content
+  // fingerprint: repeating the same helper for the same content answers from here instead of running
+  // the check again. Failures and mutated runs are never cached, and the cache holds only the output.
+  const checkCache = [];
   const handleCheckRequest = async (req) => {
     const head = git(repo, 'rev-parse', 'HEAD');
     const clean = dirty().length === 0;
     const arg = String(req.arg || '').trim();
     const runLine = async (n, cmd) => {
-      L(`  > check service: ${n} ${cmd}`);
       const fpBefore = contentFingerprint();
+      // Reuse the most recent green run of this exact line when the tested content and the command are
+      // unchanged: the worker can run the same helper twice (a permission prompt, a retry) and should
+      // not pay for the check twice. A missing fingerprint, changed content or a failed run is never
+      // reused.
+      let hit = null;
+      if (fpBefore) for (let i = checkCache.length - 1; i >= 0; i--) { const e = checkCache[i]; if (e.n === n && e.cmd === cmd && e.fp === fpBefore) { hit = e; break; } }
+      if (hit) {
+        L(`  = check service: reused green ${n} (identical content)`);
+        S.workerChecks.push({ n, cmd, code: hit.code, ms: hit.ms, at: now(), head, clean, fp: fpBefore, cached: true }); save(true);
+        return { n, cmd, code: hit.code, ms: hit.ms, out: hit.out };
+      }
+      L(`  > check service: ${n} ${cmd}`);
       const t0 = now(); const r = await runCheck(cmd);
       // A check that mutated the tree cannot vouch for the content the gate will see: record no
       // fingerprint so the run is never reused.
       const fp = contentFingerprint() === fpBefore ? fpBefore : null;
       L(`  < check service: exit ${r.code} (${dur(now() - t0)})`);
       S.workerChecks.push({ n, cmd, code: r.code, ms: r.ms, at: now(), head, clean, fp }); save(true);
+      // Cache only green runs with a valid fingerprint, bounded in memory: no secrets, no extra logs.
+      if (fp && r.code === 0) { checkCache.push({ n, cmd, fp, code: r.code, ms: r.ms, out: r.out }); while (checkCache.length > 64) checkCache.shift(); }
       return { n, cmd, code: r.code, ms: r.ms, out: r.out };
     };
     const lines = [];
@@ -952,9 +986,12 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       save(true);
       return { ok: true };
     }
-    // Bounded opt-in parallelism: one at a time by default (checks may depend on order), more with
-    // CHECK_PARALLEL. Results come back in CHECK order either way.
-    const width = Math.max(1, Math.min(Number(process.env.CHECK_PARALLEL) || 1, checks.length || 1));
+    // Bounded opt-in parallelism: one at a time by default (checks may depend on order), more with a
+    // `CHECK_PARALLEL: N` brief line or the CHECK_PARALLEL env var (the env wins, so a lead can force
+    // it). Capped at 8 so a typo cannot spawn a check storm; results come back in CHECK order either way.
+    const briefParallel = Number((brief.match(/^\s*CHECK_PARALLEL:\s*(\d+)/m) || [])[1]) || 0;
+    const want = Number(process.env.CHECK_PARALLEL) || briefParallel || 1;
+    const width = Math.max(1, Math.min(want, 8, checks.length || 1));
     if (width > 1) L(`== gate checks: ${checks.length} lines, up to ${width} in parallel`);
     const results = await runOrdered(checks, async (c) => {
       phase('gate', `running check: ${oneLine(c, 80)}`); L(`== gate check: ${c}`);
@@ -967,10 +1004,12 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         r = await runCheck(c); kind = classifyCheck({ code: r.code, out: r.out });
       }
       return { cmd: c, code: r.code, out: r.out, ms: r.ms, kind };
-    }, { concurrency: width });
+    }, { concurrency: width, stopOn: (r) => !r.value || r.value.kind !== 'pass' });
     // Report in CHECK order so the gates, the log and the fix message name the earliest failing line
-    // whether the lines ran one by one or side by side.
+    // whether the lines ran one by one or side by side. In parallel every line already ran, so every
+    // result is recorded; a stopped sequential run leaves the unstarted lines undefined and skips them.
     for (const res of results) {
+      if (!res) continue;
       const c = res.value ? res.value.cmd : checks[res.index];
       const code = res.value ? res.value.code : 1;
       const out = res.value ? res.value.out : String(res.error || 'the check did not run');
