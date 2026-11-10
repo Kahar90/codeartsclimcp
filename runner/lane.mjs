@@ -883,6 +883,8 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       } else {
         const sha = gitlinkSha(f);
         if (!sha) return null; // a directory the index does not track as a submodule: cannot vouch for it
+        const subState = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: full, encoding: 'utf8', windowsHide: true });
+        if (subState.status !== 0 || subState.stdout.trim() || git(full, 'rev-parse', 'HEAD') !== sha) return null;
         h.update('gitlink:'); h.update(sha); h.update('\0');
       }
     }
