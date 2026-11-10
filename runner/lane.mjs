@@ -1468,9 +1468,25 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           if (lastPumpHadStepReview) S.stepReviewContinues = (S.stepReviewContinues || 0) + 1;
           continue; // a steer arrived right at the end: let the builder handle it
         }
-        // The builder is idle: a numbered brief step with no explicit "step N:" commit is not done. Refresh
-        // the commits and send a focused continuation naming the missing steps (bounded) instead of letting
-        // the gates pass an incomplete lane. An unrelated wip commit never counts and a commit is never faked.
+        phase('gate', 'running gates');
+        // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
+        // passes the final review can start and run while the CHECK lines run. The runner's own recovery
+        // paths (write probe, refused-commit fallback and ordinary uncommitted handling) run here, before
+        // the strict numbered-step proof, so a completed step the sandbox refused to commit is recovered
+        // instead of being reported as a missing step.
+        let g = await gitCleanGate();
+        if (!g.ok) {
+          // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
+          if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
+          if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
+          say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
+          phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
+          continue;
+        }
+        // Git clean passed (or the runner just recovered a refused commit). Refresh the commit evidence
+        // after any fallback, then enforce the strict proof: a numbered brief step with no explicit
+        // "step N:" commit is not done. Send a focused continuation naming the missing steps (bounded);
+        // an unrelated wip commit never counts and a commit is never faked.
         syncCommits();
         const missingSteps = uncommittedSteps(S.stepList, S.commitLog);
         if (stepCount > 0 && missingSteps.length) {
@@ -1487,21 +1503,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           say(`step ${missingSteps.join(', ')} still uncommitted after ${STEP_CONTINUES} continuation${STEP_CONTINUES === 1 ? '' : 's'}; needs review`);
           break;
         }
-        phase('gate', 'running gates');
-        // The git clean part runs first: a wrong tree ends the loop before any model call, and once it
-        // passes the final review can start and run while the CHECK lines run.
-        let g = await gitCleanGate();
-        if (!g.ok) {
-          // A blocked disk ends the build loop at once: the worker cannot commit, so a fix round is wasted.
-          if (g.write) { reason = g.reason; exitCode = 1; forcedResult = ''; say(`${g.what === 'repo writable' ? 'repo not writable' : 'commit could not be made'}; no fix round (${g.reason || g.what})`); break; }
-          if (++S.fixes > CFG.fixes) { reason = `gates still failing after ${CFG.fixes} fix rounds: ${g.what}`; exitCode = 1; break; }
-          say(`gate failed (${g.what}); fix round ${S.fixes}/${CFG.fixes}`);
-          phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
-          continue;
-        }
-        // Git clean passed: start the final review now (when review is on) and run the CHECK lines while
-        // it reviews. A speculative review that is still valid is awaited in place of a new one; a stale
-        // one is aborted and replaced. A CHECK that fails or cannot run aborts and discards this review.
+        // Git clean and the strict step proof both passed: start the final review now (when review is on)
+        // and run the CHECK lines while it reviews. A speculative review that is still valid is awaited in
+        // place of a new one; a stale one is aborted and replaced. A CHECK that fails or cannot run aborts
+        // and discards this review.
         const fr = await beginFinalReview();
         g = await runChecks();
         if (!g.ok) {
