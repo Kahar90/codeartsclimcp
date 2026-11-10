@@ -120,6 +120,7 @@ const CFG = {
   rateWait: num('RATE_WAIT_S', 1800),  // total time a phase may wait out model rate limits (not counted as retries)
   rateBackoff: num('RATE_BACKOFF_S', 45), // first rate-limit wait, doubles per hit, capped at 300 s
   fixes: num('MAX_FIXES', 3),          // gate failures fed back to the builder
+  noCommitS: num('NO_COMMIT_S', 900),  // a running builder with no new commit this long raises a blocker (0 disables)
   laneTimeout: num('LANE_TIMEOUT', 5400),
   checkTimeout: num('CHECK_TIMEOUT', 900),
   netWait: num('NET_WAIT_S', 1800),    // a network error waits up to this long for the network (no retry spent)
@@ -480,7 +481,7 @@ async function runLane(repoArg, task, opts = {}) {
     v: 1, id, task, repo, dir, pid: process.pid, startedAt: T0, updatedAt: T0, phase: 'starting', attempt: 0, fixes: 0,
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
     lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
-    config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes },
+    config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes, noCommit: CFG.noCommitS },
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
@@ -514,6 +515,8 @@ async function runLane(repoArg, task, opts = {}) {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
     S.commits = S.commitLog.length;
+    // The no-progress clock: a new commit (or the first sync after a resume) resets it.
+    if (S.commits > (S.commitsSeen || 0)) { S.commitsSeen = S.commits; S.lastCommitAt = now(); }
   };
 
   // The codearts server writes sign-in failures to server.log right at start. Read only its tail:
@@ -863,6 +866,17 @@ async function runLane(repoArg, task, opts = {}) {
       // is normal, so keep the tool watchdog from aborting that wait.
       if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
       if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview().catch((err) => L(`! speculative review start failed: ${oneLine(String((err && err.message) || err), 200)}`)); maybeStepReview(); } }
+      // No-progress alarm: a running builder that lands no commit for NO_COMMIT_S seconds is stuck. Raise
+      // one blocker for the lead (ca wait / status / the bucket) instead of showing "running" forever.
+      if (CFG.noCommitS > 0 && !S.blocker && (S.phase === 'build' || S.phase === 'fix')) {
+        const base = Math.max(S.runStartedAt || S.startedAt || T0, S.lastCommitAt || 0, S.blockerClearedAt || 0);
+        if (now() - base > CFG.noCommitS * 1000) {
+          const cur = stepProgress(S).current;
+          const text = `no commit in ${dur(now() - base)}${cur ? ` (step ${cur.n})` : ''}`;
+          S.blocker = { kind: 'no-progress', text, at: now() };
+          L(`  ! blocked: ${text}`); save(true);
+        }
+      }
       if (now() - lastPoll > 15000 || !S.sse) { // backup for missed SSE events
         lastPoll = now();
         try {
