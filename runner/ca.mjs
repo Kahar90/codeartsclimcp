@@ -522,8 +522,14 @@ async function runLane(repoArg, task, opts = {}) {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
     S.commits = S.commitLog.length;
-    // The no-progress clock: a new commit (or the first sync after a resume) resets it.
-    if (S.commits > (S.commitsSeen || 0)) { S.commitsSeen = S.commits; S.lastCommitAt = now(); if (S.blocker) clearBlocker('a new commit landed'); }
+    // The no-progress clock runs on real commit times: a new commit resets it (or the first sync after a
+    // resume). A commit that landed after the blocker clears it; an older one observed late must not.
+    if (S.commits > (S.commitsSeen || 0)) {
+      S.commitsSeen = S.commits;
+      const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
+      S.lastCommitAt = ct ? Number(ct) * 1000 : now();
+      if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+    }
   };
 
   // The codearts server writes sign-in failures to server.log right at start. Read only its tail:
@@ -1786,7 +1792,7 @@ function statusRow(l) {
   const s = l.s; const pg = stepProgress(s); const sm = path.join(l.dir, 'summary.md');
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, result: s.result || '', reason: s.reason || '', status: laneStatusOf(l),
     progress: { done: pg.done, total: pg.total, current: pg.current }, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s),
-    summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
+    blocked: s.blocker || null, summaryPath: fs.existsSync(sm) ? sm : null, dashUrl: dashUrl() };
 }
 // cacheWrite bills into the totals but is not modeled by tokens.mjs (kept read-only): carry it here.
 const tokTotal = (t) => (!t ? 0 : (t.input || 0) + (t.output || 0) + (t.reasoning || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0));
@@ -1859,7 +1865,7 @@ function cmdSummary(args) {
     const pg = stepProgress(s);
     console.log(JSON.stringify({ id: l.id, task: l.task, repo: l.repo, result: s.result || '', status: laneStatusOf(l), reason: s.reason || '', verdict: s.verdict || '',
       elapsedMs: (s.finishedAt || now()) - s.startedAt, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), commits: s.commitLog || [], steps: pg.list,
-      gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir }, null, 2));
+      gates: s.gates || [], steers: s.steers || [], interruptions: s.interruptions || [], outside: s.outside || [], summary: text, dir: l.dir, blocked: s.blocker || null }, null, 2));
     return;
   }
   if (text) { process.stdout.write(text.endsWith('\n') ? text : text + '\n'); return; }
@@ -2241,6 +2247,18 @@ async function cmdWait(args) {
         process.stdout.write(JSON.stringify(any ? { lanes, any: true, running: run } : { lanes }) + '\n');
       } else if (any && running.length) process.stdout.write(`still running: ${running.map((l) => l.id).join(', ')}\n`);
       process.exit(worstExit(objs.map((o) => o.exit)));
+    }
+    // Blocked rule: a running lane with an open blocker reaches the lead at once (exit 11), so a worker's
+    // question or a silent run is answered long before the lane ends. The finished-lane rule above wins.
+    const blockedStates = states.filter(({ l, s }) => !s.result && s.blocker);
+    if (blockedStates.length) {
+      const blocked = blockedStates.map(({ l, s }) => ({ lane: l.id, kind: s.blocker.kind, text: s.blocker.text, at: s.blocker.at }));
+      for (const o of blocked) process.stdout.write(`CA_BLOCKED ${JSON.stringify(o)}\n`);
+      if (asJson) {
+        const running = states.filter(({ s }) => !s.result && !s.blocker).map(({ l, s }) => (wantCompact ? compactWaitRow(l, s) : statusRow(l)));
+        process.stdout.write(JSON.stringify({ blocked, running }) + '\n');
+      }
+      process.exit(11);
     }
     // --steps: a lane that passed its baseline has a new step. Wake the lead with one CA_STEP line per
     // such lane and exit 10; the finished-lane rule above wins, so an ended lane still reports its result.
@@ -2834,7 +2852,7 @@ function laneView(l) {
   return { ...laneRow(l), id: l.id, task: l.task, repo: l.repo, tokens: withTotal(s.tokens), tokensBy: tokensByView(s), tokensByModel: tokensByModelView(s), tools: s.tools || [], models: s.models, session: s.activeSession,
     reason: s.reason || '', running: !s.result && isAlive, result: resultOf(s) || '', runs: (s.runs || []).length + 1, progress: { done: pg.done, total: pg.total, current: pg.current },
     startedAt: s.startedAt, finishedAt: s.finishedAt || null, fixes: s.fixes || 0, time: laneTime(s, isAlive),
-    actions, suggest, why, bucket, bucketWhy, status: laneStatusOf(l), project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, ...(handled ? { suggest: '', why: '' } : {}) };
+    actions, suggest, why, bucket, bucketWhy, status: laneStatusOf(l), project: projectOf(l.repo), kind: kindOf(l), seen: laneSeen(l.id, s.finishedAt), handled: !!handled, blocked: s.blocker || null, ...(handled ? { suggest: '', why: '' } : {}) };
 }
 // A finished lane whose state folder is gone (worktree merged and removed): rebuild its state from the summary
 // that `ca lane ... > tasks/<task>.lane.log` left in the main repo. Returns null when the log has no result.

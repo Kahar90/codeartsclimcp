@@ -223,7 +223,7 @@ const TOOLS = [
   },
   {
     name: 'ca_wait',
-    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). With any: true it returns as soon as one lane has a result (the finished lanes in lanes, the rest in running), so an early failure is seen at once when lanes run in parallel. With steps: true it also returns (exit 10) as soon as a lane commits a new step, so you can look at it and steer early instead of waiting for the lane to end. Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 10 a step was committed, 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
+    description: 'Block until every given lane has a result or timeout_s passes (default 45, max 55: MCP clients such as Codex and opencode cancel a tool call after about 60 s, so it always answers in time; a lane takes minutes, so expect to call it several times). With any: true it returns as soon as one lane has a result (the finished lanes in lanes, the rest in running), so an early failure is seen at once when lanes run in parallel. With steps: true it also returns (exit 10) as soon as a lane commits a new step, so you can look at it and steer early instead of waiting for the lane to end. Returns the per-lane results plus exit (worst lane: 0 done, 1 failed, stopped or checks failing, 3 keys missing or rejected (run ca auth), 4 needs review or unverified (a check could not run), 5 paused (ca_resume continues it), 10 a step was committed, 11 a lane is blocked (a worker question or no progress; ca_steer answers it and clears the blocker, ca_ack dismisses it), 124 still running) and a next field that says what to do. timedOut true (exit 124) means still running: the lanes field carries current status rows, decide and call it again. Use this instead of polling ca_status.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -286,7 +286,7 @@ const TOOLS = [
   },
   {
     name: 'ca_ack',
-    description: 'Acknowledge a finished lane after you dealt with it (merged it yourself, took it over, or decided to drop it): a failed, paused or needs-review lane moves from "needs you" to ended with your note, so the human\'s Control room only lists what still needs them. A later run of the lane makes it count again. Pass stale:true to clean up drift in one call: every finished Needs-you lane older than older_than_h (default 48) is marked handled; running, stalled and DEAD lanes are never touched.',
+    description: 'Acknowledge a finished lane after you dealt with it (merged it yourself, took it over, or decided to drop it): a failed, paused or needs-review lane moves from "needs you" to ended with your note, so the human\'s Control room only lists what still needs them. A later run of the lane makes it count again. On a running lane it clears an open blocker (a worker question or a no-progress note) and the lane keeps running. Pass stale:true to clean up drift in one call: every finished Needs-you lane older than older_than_h (default 48) is marked handled; running, stalled and DEAD lanes are never touched.',
     inputSchema: { type: 'object', properties: { lane: { type: 'string', description: 'lane id or task name; the lane must be finished' }, note: { type: 'string', description: 'short reason, for example "merged by the lead"' }, stale: { type: 'boolean', description: 'mark every finished Needs-you lane older than older_than_h handled, without naming one' }, older_than_h: { type: 'number', description: 'age in hours for the stale form (default 48)' } } },
     ok: [0],
     timeout: 60000,
@@ -496,7 +496,7 @@ function lastJsonObject(s) {
   return null;
 }
 
-// ca_wait: exit codes 0, 1, 3, 4, 5, 10 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
+// ca_wait: exit codes 0, 1, 3, 4, 5, 10, 11 and 124 are results (each carries a next step); 2 (unknown lane) and anything else are tool errors.
 const WAIT_NEXT = {
   0: 'read ca_summary for each lane and verify the work',
   1: 'read ca_summary; ca_resume continues a failed, stopped or checks-failing lane with a note',
@@ -504,6 +504,7 @@ const WAIT_NEXT = {
   4: 'read ca_summary: the reviewer asked for changes, or the checks could not run (unverified)',
   5: 'paused at LANE_TIMEOUT: ca_resume the lane to continue where it stopped',
   10: 'a step was committed: look at it now (screenshot the ui files), steer the lane if it went wrong, then call ca_wait again with steps: true and after set to the commits value',
+  11: 'a lane is blocked: read its question or no-progress note, answer with ca_steer (that clears it) or dismiss it with ca_ack, then call ca_wait again',
   124: 'still running: call ca_wait again',
 };
 // ca wait --after takes a plain count or a lane=count list; an MCP after may be a number or {lane: count}.
@@ -532,7 +533,7 @@ async function waitResult(a) {
   const afterArg = afterFlag(a.after);
   const r = await runCli(['wait', ...lanes, ...(any ? ['--any'] : []), ...stepsArg, ...afterArg, '--json', ...compactArg, '--quiet', '--timeout', String(timeoutS)], timeoutS * 1000 + 25000);
   const final = lastJsonObject(r.stdout);
-  if (![0, 1, 3, 4, 5, 10, 124].includes(r.code) || !final) {
+  if (![0, 1, 3, 4, 5, 10, 11, 124].includes(r.code) || !final) {
     const raw = ((r.stderr ? r.stderr.trim() + '\n' : '') + r.stdout).trim();
     return { content: [{ type: 'text', text: `ca_wait exited ${r.code}${raw ? ':\n' + raw : ' with no output'}` }], isError: true };
   }
