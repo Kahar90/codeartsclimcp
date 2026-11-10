@@ -160,7 +160,7 @@ export function laneActions({ s, alive, health, canResume, handled }) {
     // A blocked lane is waiting on the lead: a steer answers the question or unsticks the silent run.
     if (s.blocker && s.blocker.text) {
       suggest = 'steer';
-      why = s.blocker.kind === 'question' ? `the worker asked the lead a question: ${s.blocker.text}; answer it with a steer` : `${s.blocker.text}; steer the lane or ack the blocker`;
+      why = s.blocker.kind === 'question' ? `the worker asked the lead a question: ${s.blocker.text}; answer it with a steer` : `${s.blocker.text}; the lead has not seen this yet: steer the lane or ack the blocker`;
     }
   } else if (!s.result && !alive) {
     acts.push('stop');
