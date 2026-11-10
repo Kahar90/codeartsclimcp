@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as Signals from '../runner/signals.mjs';
+import { laneOutcome, laneBucket } from '../runner/controls.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ca-guardorder-')));
@@ -95,6 +96,12 @@ try {
     check('repeatedly mutating check: the lane does not report done', r.status !== 0 && s?.result !== 'done', `exit ${r.status} ${JSON.stringify(s && { result: s.result, reason: s.reason })}`);
     check('repeatedly mutating check: it fails after the bounded fix rounds', r.status === 1, `exit ${r.status} ${s && s.reason}`);
     check('repeatedly mutating check: the reason names the changed work', !!s && /checks changed the work/.test(s.reason || ''), s && s.reason);
+    // The finish must read as a problem a human acts on, the same defect pattern fixed for incomplete
+    // steps: a canonical result the dashboard classifies as attention, never an idle "unknown" result.
+    const outcome = s ? laneOutcome({ s, health: '' }) : null;
+    check('repeatedly mutating check: the finish is canonical and needs attention', outcome?.key === 'checks failing' && outcome?.attention === true && !!outcome?.glyph, JSON.stringify(outcome && { key: outcome.key, attention: outcome.attention, glyph: outcome.glyph }));
+    const bucket = s ? laneBucket({ s, alive: false, health: '' }) : null;
+    check('repeatedly mutating check: it lands in the attention bucket', bucket?.bucket === 'attention', JSON.stringify(bucket));
   }
   // ---------- strict guard: positional fallback is never read as completing a step ----------
   check('strict guard: an unrelated wip commit does not complete a step', JSON.stringify(Signals.uncommittedSteps([{ n: 1 }, { n: 2 }], [{ subject: 'wip: scratch work' }])) === '[1,2]');

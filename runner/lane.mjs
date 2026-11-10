@@ -1531,7 +1531,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         if (dirtyAfterChecks.length || headAfterChecks !== headBeforeChecks) {
           if (fr) { await discardFinalReview(fr); if (fr.spec) specReview = null; }
           const what = dirtyAfterChecks.length ? `${dirtyAfterChecks.length} uncommitted change${dirtyAfterChecks.length === 1 ? '' : 's'} left by the checks` : 'the checks moved HEAD';
-          if (++S.fixes > CFG.fixes) { reason = `the checks changed the work after they passed, unresolved after ${CFG.fixes} fix round${CFG.fixes === 1 ? '' : 's'}: ${what}`; forcedResult = 'checks changed the work'; exitCode = 1; break; }
+          // Same result family as a failing check (exit 1, "checks failing"): a non-canonical result
+          // would render as an idle lane with no attention flag and no resume, hiding it from the human.
+          if (++S.fixes > CFG.fixes) { reason = `the checks changed the work after they passed, unresolved after ${CFG.fixes} fix round${CFG.fixes === 1 ? '' : 's'}: ${what}`; forcedResult = 'checks failing'; exitCode = 1; break; }
           say(`checks changed the work after they passed (${what}); fix round ${S.fixes}/${CFG.fixes}`);
           phase('fix', `fix round ${S.fixes}`);
           await send(sid, (dirtyAfterChecks.length
