@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 200) : ''}`);
@@ -66,7 +67,7 @@ const txt = spawnSync(process.execPath, [CA, 'status'], { env, encoding: 'utf8',
 check('plain ca status shows the thinking health', /demo-repo--ponder\s+attention\s+thinking \(25m/.test(txt), txt.split('\n').find((l) => l.includes('ponder')));
 
 // ---- 3. wiring in the runner ----
-const src = fs.readFileSync(CA, 'utf8');
+const src = runnerSource();
 check('ca.mjs imports watchdog.mjs', /from ['"]\.\/watchdog\.mjs['"]/.test(src));
 check('ca.mjs reads THINK_S with default 480', /THINK_S['"]\s*,\s*480/.test(src));
 check('ca.mjs records the think stall as an interruption kind "think"', /kind:\s*['"]think['"]|['"]think['"]/.test(src) && /thinkStall\(/.test(src));

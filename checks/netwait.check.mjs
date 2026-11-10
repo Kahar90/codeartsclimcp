@@ -6,6 +6,7 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 220) : ''}`);
 let m = null; try { m = await import(pathToFileURL(path.join(ROOT, 'runner', 'netwait.mjs')).href); } catch (e) { check('runner/netwait.mjs imports', false, e.message); }
@@ -80,7 +81,7 @@ if (fn('parseLimits') && fn('laneSlots')) {
 }
 
 // wiring in the runner
-const src = fs.readFileSync(path.join(ROOT, 'runner', 'ca.mjs'), 'utf8');
+const src = runnerSource();
 check('ca.mjs imports netwait.mjs', /from '\.\/netwait\.mjs'/.test(src));
 check('network errors wait for the network instead of using up retries (waitOnline in the interruption path)', /isNetworkError\(/.test(src) && /waitOnline\(/.test(src));
 check('the watchdog tick calls detectSleep and resets stall timers after a sleep', /detectSleep\(/.test(src));

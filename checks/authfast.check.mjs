@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readCredsAt } from '../runner/auth.mjs';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-authfast-'));
@@ -36,7 +37,7 @@ if (typeof ap === 'function') {
 }
 
 // ---- 2. runner wiring (static): the lane uses the classifier and ends with exit 3 at once ----
-const src = fs.readFileSync(CA, 'utf8');
+const src = runnerSource();
 check('ca.mjs imports authsignal.mjs', /from '\.\/authsignal\.mjs'/.test(src));
 check('ca.mjs reads the lane server log for the classifier', /authProblem\([^)]*server/i.test(src) || /serverLog/.test(src));
 

@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { guard, settle } from './lib/exit.mjs';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-runnerwave-'));
@@ -106,7 +107,7 @@ try {
 } finally { await settle({ children: [dash], code: 0 }); }
 
 // ---- 5. Open TUI: the attach spawn survives an exe path with spaces (static) ----
-const src = fs.readFileSync(CA, 'utf8');
+const src = runnerSource();
 const att = src.slice(src.indexOf("m[2] === 'attach'"), src.indexOf("m[2] === 'attach'") + 900);
 check('attach spawn quotes the exe path or drops windowsVerbatimArguments', !/windowsVerbatimArguments:\s*true/.test(att) || /`"\$\{EXE\}"`|'"' \+ EXE \+ '"'|quote\(EXE\)/.test(att), att.slice(0, 200));
 

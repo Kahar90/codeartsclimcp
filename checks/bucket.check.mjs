@@ -9,6 +9,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { guard, settle } from './lib/exit.mjs';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-bucket-'));
@@ -72,7 +73,7 @@ const row = (t) => st.find((x) => x.task === t) || {};
 check('status --json has tokensByModel with a total per model', row('demo').tokensByModel?.['maas/glm-5.3']?.total === 5090 && row('demo').tokensByModel?.['huaweicloud-maas/GLM-5.1']?.total === 150, JSON.stringify(row('demo').tokensByModel));
 r = ca(['summary', 'main-repo--paused', '--json']); let sm = {}; try { sm = JSON.parse(r.out); } catch {}
 check('summary --json has tokensByModel', sm.tokensByModel?.['maas/glm-5.3']?.total === 600, JSON.stringify(sm.tokensByModel));
-check('the lane summary line breaks tokens down by model', /by model: \$\{/.test(fs.readFileSync(CA, 'utf8')));
+check('the lane summary line breaks tokens down by model', /by model: \$\{/.test(runnerSource()));
 const plan = path.join(main, 'tasks', 'plan.json');
 fs.writeFileSync(plan, JSON.stringify({ title: 'models', lanes: [{ task: 'demo', repo: path.basename(wt) }, { task: 'paused' }], waves: [{ name: 'W1', lanes: ['demo', 'paused'] }] }));
 ca(['plan', plan]);

@@ -9,6 +9,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { guard, settle } from './lib/exit.mjs';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-resume-'));
@@ -38,7 +39,7 @@ let r = ca(['wait', 'demo-repo--paused', '--quiet']); check('ca wait on a paused
 r = ca(['wait', 'demo-repo--broken', 'demo-repo--paused', '--quiet']); check('failed outranks paused in ca wait', r.code === 1, `exit ${r.code}`);
 r = ca(['help']); check('help documents --resume and exit 5', /--resume/.test(r.out) && /5 paused/.test(r.out));
 r = ca(['lane', repo, 'donelane', '--resume']); check('--resume refuses a done lane', r.code === 2 && /nothing to resume/.test(r.err + r.out), (r.err + r.out).slice(0, 160));
-const src = fs.readFileSync(CA, 'utf8');
+const src = runnerSource();
 check('timeout ends as paused in the runner', /reason === 'timeout' \? 'paused'/.test(src));
 check('resume keeps the base commit', /resumed && resumed\.start/.test(src));
 

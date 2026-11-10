@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findChrome, chromeProfileDir, chromeFlags } from './lib/chrome.mjs';
 import { guard, settle } from './lib/exit.mjs';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 240) : ''}`);
@@ -105,7 +106,7 @@ check('onboard runs its smoke lane with CA_NO_PLAN=1', /CA_NO_PLAN/.test(fs.read
 
 // ---- 6b. the plan never appears before its lane is visible as running ----
 {
-  const src = fs.readFileSync(CA, 'utf8');
+  const src = runnerSource();
   const iSave = src.search(/ {2}save\(true\);\r?\n {2}if \(!\(opts\.resume && laneAlreadyPlanned\(repo, task\)\)\) \{/);
   const iReg = src.indexOf('fs.writeFileSync(path.join(REG, `${id}.json`)');
   check('runLane binds the plan only after the lane is registered and its first state is saved', iSave > 0 && iReg > 0 && iReg < iSave, `reg ${iReg} save+bind ${iSave}`);

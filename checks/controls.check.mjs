@@ -8,6 +8,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { guard, settle } from './lib/exit.mjs';
+import { runnerSource } from './lib/runner-src.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-controls-'));
@@ -164,7 +165,7 @@ try {
 } finally { await settle({ children: [dash, sleeper], code: 0 }); }
 
 // ---------- runner wiring (source level; a real lane proves the rest) ----------
-const src = fs.readFileSync(CA, 'utf8');
+const src = runnerSource();
 check('runner imports tokens.mjs and controls.mjs', /from '\.\/tokens\.mjs'/.test(src) && /from '\.\/controls\.mjs'/.test(src));
 check('runner consumes the KICK file in the supervisor', /'KICK'/.test(src) && /kick/i.test(src));
 // Found on a real lane: resume after a stop ended at once because the old STOP file was still there.
