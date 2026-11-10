@@ -351,6 +351,9 @@ button.btn.tiny { padding: 5px 10px; font-size: 12px }
 .crumb-sep { color: var(--faint) }
 .lane-bucket { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px }
 .lane-bucket .cr-why-big { color: var(--muted); font-size: 14px; overflow-wrap: anywhere }
+/* A worker blocker (a question or a silent run) shown above the lane pipeline, in the attention tone. */
+.lane-blocked { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; padding: 6px 10px; border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 12%, var(--panel)); border-radius: var(--radius-sm); font-size: 13.5px; overflow-wrap: anywhere }
+.lane-blocked .lb-glyph { color: var(--amber); font-weight: 700; flex: none }
 /* four tiles need about 640 px of main column: below that (tablet with the rail, phone) they go 2 x 2 */
 @media (max-width: 1100px) { .crtiles { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 759px) and (min-width: 641px) { .crtiles { grid-template-columns: repeat(4, minmax(0, 1fr)) } }
@@ -1538,6 +1541,7 @@ function renderLane(d, keep) {
     ${metrics}
     ${contLine(d.continues ? d : wl)}
     <div class="wt">${esc(d.repo)}</div>
+    ${d.blocked ? `<div class="lane-blocked" role="status"><span class="lb-glyph" aria-hidden="true">!</span><span>${d.blocked.kind === 'question' ? 'Asked the lead: ' : 'No progress: '}${esc(d.blocked.text || '')}</span></div>` : ''}
     ${pipeline(d)}
     <div class="nowband"><span class="lb">${d.running ? 'Now' : 'Result'}</span><div class="bd">${nowInner}${tools}</div></div>
     <div class="box tokbox"><h4>Tokens by agent</h4>${tokRows}</div>
