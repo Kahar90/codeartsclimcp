@@ -39,7 +39,8 @@ function prepare(i) {
 }
 const lane = (dir, task) => new Promise((res) => {
   const t0 = Date.now();
-  const ch = spawn(caCmd[0], [...caCmd.slice(1), 'lane', dir, task], { cwd: dir, env: { ...process.env, CA_DASH: '0', ...extraEnv }, shell: win && !caPath, windowsHide: true });
+  // A private registry: bench lanes and their auto-created plans never reach the user's dashboard.
+  const ch = spawn(caCmd[0], [...caCmd.slice(1), 'lane', dir, task], { cwd: dir, env: { ...process.env, CA_DASH: '0', CA_REGISTRY: path.join(base, '.registry'), ...extraEnv }, shell: win && !caPath, windowsHide: true });
   ch.stdout.on('data', (d) => fs.appendFileSync(`${dir}.log`, d)); ch.stderr.on('data', (d) => fs.appendFileSync(`${dir}.log`, d));
   ch.on('close', (code) => {
     let st = {}; try { st = JSON.parse(fs.readFileSync(path.join(dir, 'tasks', `${task}.lane`, 'state.json'), 'utf8')); } catch {}

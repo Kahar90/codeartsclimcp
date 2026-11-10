@@ -2,9 +2,9 @@
   "title": "Faster lanes, same quality (2x goal)",
   "goal": "Make a lane at least 2x faster than 0.5.4 on a fixed benchmark (bench/fixture notes API, 3 steps, loopback contract check), with the same quality gate: lane done, VERDICT ready, contract check green when rerun outside the lane.",
   "lead": "Claude Opus 5.5",
-  "status": "running",
-  "now": "Wave 2 running: checksvc + reviewfix lanes in parallel. Baseline 0.5.4 = 19.7 min median to a ready verdict (target <= 9.9 min).",
-  "startedAt": "2026-11-10T00:00:00.000Z",
+  "status": "done",
+  "now": "Closed: Goal met: 0.6.0 median 6.9 min vs 0.5.4 16.0 min in the same benchmark rounds; released and installed",
+  "startedAt": "2026-11-09T17:15:00.000Z",
   "waves": [
     {
       "name": "Wave 1: overlap reviews, wake the lead on steps",
@@ -130,10 +130,15 @@
     {
       "at": "2026-11-09T22:07:52.388Z",
       "text": "Lane specreview added by the runner (it was not in the plan)"
+    },
+    {
+      "at": "2026-11-09T23:59:56.678Z",
+      "text": "Plan closed: Goal met: 0.6.0 median 6.9 min vs 0.5.4 16.0 min in the same benchmark rounds; released and installed."
     }
   ],
   "risks": [
     "Thinking off may cost quality: only switch the default if bench quality holds",
     "Model latency varies by hour: compare runs taken close together, 2 runs each"
-  ]
+  ],
+  "closedAt": "2026-11-09T23:59:56.678Z"
 }
