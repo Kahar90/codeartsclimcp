@@ -32,7 +32,6 @@
     "scripts",
     "CHANGELOG.md",
     "!docs/images",
-    "!docs/design",
     "!docs/contracts"
   ],
   "engines": {
@@ -41,7 +40,6 @@
   "scripts": {
     "test": "node tools/run-checks.mjs",
     "check": "node tools/run-checks.mjs",
-    "check:full": "node tools/run-checks.mjs --full",
-    "sync": "node tools/sync-skill.mjs"
+    "check:full": "node tools/run-checks.mjs --full"
   }
 }

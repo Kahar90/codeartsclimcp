@@ -1,4 +1,4 @@
-# ca-office
+# codearts-lanes (contributor notes for coding agents; humans: CONTRIBUTING.md)
 
 Source of codearts-lanes: the lane runner (`runner/ca.mjs`), the MCP server (`runner/mcp.mjs`), the
 dashboards (`runner/dash.html`, Office view `runner/office.html` with Pixel Workshop assets in
@@ -36,4 +36,4 @@ Checks (the runner prints per-check times; slow ones are listed in checks/out/ti
 
 Manual: `node runner/ca.mjs dash 4790`, then http://127.0.0.1:4790/office (`?demo=1`, `?demo=done`,
 `?demo=needs`, `?demo=failed`, `?demo=quiet`, `?demo=big`); Lanes: http://127.0.0.1:4790/?demo=1
-(`&glance=done|failed|quiet`). Design specs: `docs/design/`; status contracts: `docs/contracts/`.
+(`&glance=done|failed|quiet`). Status contracts: `docs/contracts/`.

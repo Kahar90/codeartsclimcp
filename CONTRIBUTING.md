@@ -14,9 +14,11 @@ dependency needs a strong reason in the pull request.
 | `runner/dash.html`, `runner/office.html`, `runner/assets/` | the Lanes dashboard and the Office view |
 | `templates/` | brief, review and skill templates shipped to users |
 | `checks/` | contract checks (`*.check.mjs`), helpers in `checks/lib/` |
-| `tools/` | check runner, release, ship, bench, skill sync |
-| `bench/` | the fixed benchmark fixture and its results |
-| `docs/` | user docs; `docs/design/` UI specs, `docs/contracts/` status contracts |
+| `tools/` | check runner, release, ship, bench |
+| `bin/` | `ca` shims for sh and cmd |
+| `scripts/` | `install-local.mjs` (install this checkout globally), `trust.mjs` (CodeArts folder trust) |
+| `bench/` | the benchmark fixture (`node tools/bench.mjs`; results go to the gitignored `bench/results.jsonl`) |
+| `docs/` | user docs; `docs/contracts/` status contracts the checks enforce |
 
 `tasks/` is the lead's working folder (briefs, plans, lane logs) and is not tracked.
 

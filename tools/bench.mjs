@@ -2,15 +2,16 @@
 // tools/bench.mjs: time the lead's real loop on a fixed task, so speed claims are measured, not guessed.
 //   node tools/bench.mjs --label <name> [--runs 2] [--ca <path to ca.mjs>] [--fixes 2] [--env K=V ...]
 // Copies bench/fixture (a notes API with a loopback contract check and a 4-step brief) into
-// D:/Coding/ca-bench/<label>-<i>-<stamp> (or $CA_BENCH_DIR), makes it a git repo and runs `ca lane <dir> notes`
+// <tmp>/ca-bench/<label>-<i>-<stamp> (or $CA_BENCH_DIR), makes it a git repo and runs `ca lane <dir> notes`
 // for every run at once (parallel, like real lanes). Then it does what the lead does: while the lane ends
 // without VERDICT ready or the contract check fails, it writes tasks/notes-fix<k>.md with the reviewer's
 // findings (or the failing check) and runs that as a new lane, up to --fixes times. A run passes when the
 // last lane ends done with VERDICT ready AND the contract check passes when rerun here, outside the lanes.
-// The time is the whole loop. Each run appends a row to bench/results.jsonl; the summary prints the median
+// The time is the whole loop. Each run appends a row to bench/results.jsonl (gitignored); the summary prints the median
 // time of the passing runs. Lane logs go next to the run folder (<dir>.log), never into the repo.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,7 +23,7 @@ const runs = Number(opt('--runs', '2'));
 const maxFixes = Number(opt('--fixes', '2'));
 const caPath = opt('--ca', '');
 const extraEnv = Object.fromEntries(argv.flatMap((a, i) => (a === '--env' ? [argv[i + 1]] : [])).map((kv) => [kv.split('=')[0], kv.split('=').slice(1).join('=')]));
-const base = process.env.CA_BENCH_DIR || 'D:/Coding/ca-bench';
+const base = process.env.CA_BENCH_DIR || path.join(os.tmpdir(), 'ca-bench');
 const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
 const win = process.platform === 'win32';
 const caCmd = caPath ? [process.execPath, path.resolve(caPath)] : [win ? 'ca.cmd' : 'ca'];

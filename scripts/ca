@@ -1,3 +1,0 @@
-#!/bin/bash
-# ca: CodeArts lane runner and control CLI. See runner/ca.mjs for commands.
-exec node "$(dirname "$0")/../runner/ca.mjs" "$@"

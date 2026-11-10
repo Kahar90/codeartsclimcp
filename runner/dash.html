@@ -660,7 +660,7 @@ const DEMO_T0 = Date.now();
 const dIso = (m) => new Date(DEMO_T0 - m * 60000).toISOString();
 const dAdv = () => DEMO_ADV && Date.now() - DEMO_T0 > 6000;
 const dClock = (i) => { const t = new Date(DEMO_T0 + i * 1500); return [t.getHours(), t.getMinutes(), t.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); };
-const D_REPO = 'D:\\Coding\\demo-repo';
+const D_REPO = 'C:\\work\\demo-repo';
 const D_HASHES = ['e3f1c2a', 'b7d94ce', 'c5a83f1', 'd9274ab', 'a6b5e90'];
 // token fixture helpers: one record per role, summed up so lane/plan totals always match the by-agent rows.
 function dTok(input, output, extra) { const t = Object.assign({ input: input || 0, output: output || 0, reasoning: 0, cacheRead: 0, steps: 1 }, extra || {}); t.total = t.input + t.output + t.reasoning + t.cacheRead; return t; }
@@ -779,7 +779,7 @@ function demoPlans() {
   const by = Object.fromEntries(demoLanes().map((l) => [l.id, l]));
   const wp = (id, plan) => (by[id] ? { ...by[id], plan } : null);
   const list = [
-    { id: 'office-polish', file: 'D:/Coding/demo-repo/tasks/plan.json', updatedAt: dIso(4), title: 'Office view polish: sprites and layout',
+    { id: 'office-polish', file: 'C:/work/demo-repo/tasks/plan.json', updatedAt: dIso(4), title: 'Office view polish: sprites and layout',
       goal: 'Polish the Office view: sprite-driven layout, tight spacing and a check harness that screenshots both routes without real lanes.',
       lead: 'Claude Opus 5.5', status: 'running', glance: { state: 'working', word: 'Working', detail: 'Wave 1 building, step 1/7', at: dIso(3) },
       now: 'Wave 1 is laying out the stage; the fixture lane renders the new home for the check.',
@@ -793,7 +793,7 @@ function demoPlans() {
       ...planTokSum([by['demo-repo--office-layout']]),
       time: dTime({ startMin: 130, total: 130, segments: [10, 95, 20, 5], work: 118, byPhase: { wait: 3, build: 88, checks: 2, fix: 15, review: 10 }, lanes: [['office-layout', 95]] }),
       waves: [{ name: 'Wave 1 · Layout', note: 'Stage geometry and the check hook', status: 'running', lanes: [wp('demo-repo--office-layout', { model: 'maas/glm-5.3', why: 'Owns the layout rework end to end', files: ['runner/dash.html', 'checks/lanes.check.mjs'], briefExists: true })] }] },
-    { id: 'string-utils', file: 'D:/Coding/demo-repo/tasks/strings.json', updatedAt: dIso(2), title: 'String utils for sandbox',
+    { id: 'string-utils', file: 'C:/work/demo-repo/tasks/strings.json', updatedAt: dIso(2), title: 'String utils for sandbox',
       goal: 'Give the sandbox string helpers: formatting, path joins and escaping, each covered by a check.',
       lead: 'Claude Opus 5.5', status: 'running', glance: { state: 'needs-you', word: 'Needs you', detail: 'Claude is asking: keep the stuck lane or drop it?', at: dIso(1) },
       now: 'The first lane is in review-ready shape; the second is still building.',
@@ -810,7 +810,7 @@ function demoPlans() {
   ];
   // The closed plan "Glance status" (check hook ?demo=1&closed=1): every lane settled, so nothing needs
   // the human; the plan badge reads Done and each lane keeps its own steps mode (complete or hide).
-  if (DEMO_CLOSED) list.push({ id: 'glance-status', file: 'D:/Coding/demo-repo/tasks/glance.json', updatedAt: dIso(6), title: 'Glance status',
+  if (DEMO_CLOSED) list.push({ id: 'glance-status', file: 'C:/work/demo-repo/tasks/glance.json', updatedAt: dIso(6), title: 'Glance status',
     goal: 'Show one truthful status per plan and lane, so a glance never disagrees.',
     lead: 'Claude Opus 5.5', status: 'done', closed: true, glance: { state: 'done', word: 'Done', detail: 'the lead closed the plan after every lane settled', at: dIso(5) },
     now: 'Every lane settled; the lead closed the plan.',
