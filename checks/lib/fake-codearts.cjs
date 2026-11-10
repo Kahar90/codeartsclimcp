@@ -62,6 +62,9 @@ async function playChain(sid, kind) {
     else if (verb === 'noise') { fs.writeFileSync(`noise${arg}.txt`, `noise ${arg}\n`); git('add', '-A'); git('commit', '-qm', `wip: noise ${arg}`); }
     else if (verb === 'write') { const [rel, ...rest] = arg.split('='); fs.mkdirSync(require('node:path').dirname(rel), { recursive: true }); fs.writeFileSync(rel, rest.join('=') || 'written by the worker\n'); }
     else if (verb === 'ask')emit('question.asked', { id: `que_fake${++n}`, sessionID: sid, questions: [{ header: 'Choice', question: arg, options: [{ label: 'A' }, { label: 'B' }] }] });
+    else if (verb === 'decide') answer(sid, arg); // a finished reply text part (a request for the lead)
+    else if (verb === 'toolerr') emit('message.part.updated', { part: { id: `p${++n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: `c${n}`, tool: 'bash', state: { status: 'error', input: { command: 'git commit' }, error: arg } } });
+    else if (verb === 'bash') { const cid = `c${++n}`; emit('message.part.updated', { part: { id: `p${n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: cid, tool: 'bash', state: { status: 'running', input: { command: arg } } } }); emit('message.part.updated', { part: { id: `p${n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: cid, tool: 'bash', state: { status: 'completed', input: { command: arg }, output: 'ok' } } }); }
     else if (verb === 'run') {
       const lane = (fs.readdirSync('tasks').find((d) => d.endsWith('.lane') && fs.existsSync(`tasks/${d}/check.mjs`)));
       const helper = lane ? `tasks/${lane}/check.mjs` : 'tasks/missing-helper.mjs';
@@ -79,7 +82,7 @@ async function playChain(sid, kind) {
 function playBuild(sid) {
   const kind = String(script[Math.min(turn, script.length - 1)]); turn++;
   fs.appendFileSync('fake-turns.log', `${kind}\n`);
-  if (/^(commit|run|wait):/.test(kind) || kind.includes('+')) { playChain(sid, kind); return; }
+  if (/^(commit|run|wait|decide|toolerr|bash):/.test(kind) || kind.includes('+')) { playChain(sid, kind); return; }
   if (kind === 'ok') { later(sid, 300, () => answer(sid, 'done')); later(sid, 600, () => finish(sid)); return; }
   if (kind.startsWith('steps:')) {
     const ns = kind.slice(6).split(',').map((x) => x.trim()).filter(Boolean);

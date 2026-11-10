@@ -6,6 +6,7 @@ import path from 'node:path';
 import { authProblem } from './authsignal.mjs';
 import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarningsFor, dashUrl, die, dur, ensureDash, git, health, hhmmss, killTree, laneId, lanes, now, oneLine, readJSON, resultOf, sleep, splitModel, stepProgress, workerShell, writeAtomic, writeProbe } from './common.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
+import { classifySignal, directCheckInvocation, noteFailure, toolKey, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { Server } from './server.mjs';
@@ -221,6 +222,18 @@ export async function runLane(repoArg, task, opts = {}) {
     L(`blocker cleared (${why})`); save(true);
     return true;
   };
+  // A worker decision or environment failure the lead must see now: record it as the lane blocker so
+  // ca wait (exit 11), ca status --json and the dashboard surface it in seconds. A repeated sighting of
+  // the same signal does not churn the state; a steer or an ack clears it, never an unrelated commit.
+  const raiseSignal = (sig) => {
+    if (!sig) return false;
+    if (S.blocker && S.blocker.kind === sig.kind && S.blocker.text === sig.text) return false;
+    S.blocker = { kind: sig.kind, text: sig.text, at: now() };
+    (S.signals ||= []).push({ at: now(), kind: sig.kind, text: sig.text });
+    L(`  ! blocked (${sig.kind}): ${sig.text}`);
+    save(true);
+    return true;
+  };
   const syncCommits = () => {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
@@ -246,7 +259,9 @@ export async function runLane(repoArg, task, opts = {}) {
       if (newStep || S.phase === 'fix') {
         const ct = git(repo, 'log', '-1', '--format=%ct', 'HEAD').trim();
         S.lastCommitAt = ct ? Number(ct) * 1000 : now();
-        if (S.blocker && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
+        // Only the no-progress alarm is answered by progress. A recorded decision or environment
+        // failure waits for the lead: an unrelated commit must not silently clear it (steer/ack clears).
+        if (S.blocker && S.blocker.kind === 'no-progress' && S.lastCommitAt > S.blocker.at) clearBlocker('a new commit landed');
       }
     }
   };
@@ -294,6 +309,10 @@ export async function runLane(repoArg, task, opts = {}) {
   // permission for it and queue at most one steer per lane telling the worker to run the check in
   // the foreground instead. Every sighting is recorded as an interruption.
   let sleepPollSteered = false;
+  // The direct-check guidance is queued at most once per lane, and per tool-command failure counts feed
+  // the repeated-failure signal. Both are supervisor-local; a resume starts them clean.
+  let directCheckAlerted = false;
+  const toolFails = new Map(); // toolKey -> { n, commits } (commits = lane commit count at first failure)
   const flagSleepPoll = (where) => {
     S.interruptions.push({ at: now(), phase: S.phase, kind: 'sleep-poll', what: where });
     save(true);
@@ -302,6 +321,14 @@ export async function runLane(repoArg, task, opts = {}) {
     if (sleepPollSteered) return; sleepPollSteered = true;
     try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-sleep.txt`), 'Do not sleep-poll: run the check in the foreground with a timeout and read its output once.'); } catch {}
     save(true);
+  };
+  // Tell the worker, like a steer, to run the CHECK line through the helper instead of its sandbox.
+  const queueHelperGuidance = () => {
+    try {
+      fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'inbox', `${now()}-helper-direct.txt`),
+        `Do not run a CHECK line directly: your sandbox blocks the loopback network, so a check that starts a local server hangs. Run it with \`node tasks/${task}.lane/check.mjs <N>\` (no argument lists them); the runner runs it outside the sandbox and prints the output and the exit code.`);
+    } catch {}
   };
   const flushPart = (pid) => {
     const p = parts.get(pid); if (!p || p.logged) return; p.logged = true;
@@ -357,6 +384,8 @@ export async function runLane(repoArg, task, opts = {}) {
           parts.set(part.id, p); if (part.time?.end) flushPart(part.id);
           if (sid === S.activeSession && !sx(sid).tools.size) S.activity = part.type === 'reasoning' ? 'thinking' : 'writing reply';
           if (sid === S.activeSession && part.type === 'text') S.lastTextAt = now();
+          // A finished builder reply may ask the lead to decide or grant permission: surface it at once.
+          if (part.type === 'text' && part.time?.end && roleOf(sid) === 'build') raiseSignal(classifySignal({ text: p.text, agentRole: 'build' }));
         } else if (part.type === 'tool') {
           const s = sid ? sx(sid) : null; const st = part.state || {}; const key = part.callID || part.id;
           if (st.status === 'running' && s && !s.tools.has(key)) {
@@ -364,6 +393,18 @@ export async function runLane(repoArg, task, opts = {}) {
             s.tools.set(key, { tool: part.tool, since: now(), input: toolInput(part.tool, st.input) });
             L(`  > ${part.tool}  ${toolInput(part.tool, st.input)}`);
             { const n = sleepPoll(st.input?.command); if (n) { L(`  ! sleep-poll: ${part.tool} waits sleep ${n}`); flagSleepPoll(`${part.tool}: sleep ${n}`); queueSleepSteer(); } }
+            // The lane's CHECK lines must run through the helper (outside the sandbox). A bash command
+            // that runs one directly hangs the worker on the blocked loopback network: alert the lead
+            // once and queue the helper guidance; a command that uses the helper is left alone.
+            if (roleOf(sid) === 'build') {
+              const bad = directCheckInvocation(st.input?.command, { checks, helper: `tasks/${task}.lane/check.mjs` });
+              if (bad && !directCheckAlerted) {
+                directCheckAlerted = true;
+                L(`  ! check run directly in the sandbox: ${oneLine(bad, 160)}; steering to the helper`);
+                raiseSignal({ kind: SANDBOX_CHECK, text: `ran this lane's check directly in the sandbox: ${oneLine(bad, 140)}`, why: 'the sandbox blocks the check' });
+                queueHelperGuidance();
+              }
+            }
             // Global CodeArts permissions may allow external reads/writes; at least make them visible.
             const fp = st.input?.filePath ?? st.input?.path;
             if (typeof fp === 'string' && path.isAbsolute(fp) && !insideRepo(fp)) {
@@ -377,6 +418,19 @@ export async function runLane(repoArg, task, opts = {}) {
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
             if (sid === S.activeSession) S.lastToolAt = now();
+            // A failed builder tool may carry an actionable environment error (commit refused, missing
+            // dependency, permission error): surface it at once, the worker cannot fix it alone. When it
+            // is not an environment error, the same command failing repeatedly with no progress is a signal.
+            if (st.status === 'error' && roleOf(sid) === 'build') {
+              const esig = classifySignal({ text: String(st.error || ''), agentRole: 'build' });
+              if (esig) raiseSignal(esig);
+              else {
+                const key = toolKey(part.tool, st.input);
+                const { state: nf, repeat } = noteFailure(toolFails.get(key), { commits: S.commits });
+                toolFails.set(key, nf);
+                if (repeat) raiseSignal({ kind: REPEAT_FAIL, text: `the same tool keeps failing with no progress: ${part.tool} ${oneLine(st.input?.command ?? st.input?.filePath ?? '', 120)}`, why: 'the same tool keeps failing' });
+              }
+            }
           }
           if (sid === S.activeSession && s) { const t = [...s.tools.values()][0]; S.activity = t ? `tool ${t.tool}: ${oneLine(t.input, 80)}` : 'thinking'; S.tools = [...s.tools.values()].map((x) => ({ tool: x.tool, input: oneLine(x.input, 120), since: x.since })); }
         } else if (part.type === 'step-finish') {
