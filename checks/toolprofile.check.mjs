@@ -108,6 +108,7 @@ try {
   for (const [name, opts] of [
     ['non-array metadata', { idsBody: '{"ids":["bash","task"]}' }],
     ['array with a non-string id', { idsBody: JSON.stringify(['bash', 42, 'task']) }],
+    ['empty id list (version skew, would silently deny nothing)', { idsBody: '[]' }],
     ['endpoint unavailable (500)', { idsStatus: 500 }],
   ]) {
     const s = server(); const und = setProfile('core'); const calls = mock(opts);
@@ -139,7 +140,7 @@ try {
   check('profileMode: unset/blank/full mean no profile, core opts in, anything else is unknown',
     profileMode(undefined) === 'full' && profileMode('') === 'full' && profileMode('  FULL ') === 'full' && profileMode('full') === 'full' && profileMode('core') === 'core' && profileMode('weird') === 'unknown');
   check('parseToolIds: accepts a list of ids', deepEq(parseToolIds(['bash', 'task']), ['bash', 'task']));
-  const bad = [{ ids: [] }, ['bash', 1], ['bash', ''], 'bash', null, undefined];
+  const bad = [[], { ids: [] }, ['bash', 1], ['bash', ''], 'bash', null, undefined];
   const badThrows = bad.every((v) => { try { parseToolIds(v); return false; } catch { return true; } });
   check('parseToolIds: rejects malformed metadata', badThrows);
   {

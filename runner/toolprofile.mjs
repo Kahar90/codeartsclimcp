@@ -17,10 +17,13 @@ export function profileMode(value) {
   return 'unknown';
 }
 
-// /experimental/tool/ids must answer with a JSON array of non-empty strings. Any other shape is
-// malformed metadata: throw, so an explicit profile is never silently bypassed.
+// /experimental/tool/ids must answer with a non-empty JSON array of non-empty strings. Any other
+// shape is malformed metadata: throw, so an explicit profile is never silently bypassed. An empty
+// list is rejected too: on this experimental endpoint a version skew could answer [] and, taken
+// literally, the core profile would deny nothing and inherit the full schema while still labelling
+// the request as profiled.
 export function parseToolIds(raw) {
-  if (!Array.isArray(raw) || raw.some((id) => typeof id !== 'string' || id === '')) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.some((id) => typeof id !== 'string' || id === '')) {
     throw new Error('tool profile: /experimental/tool/ids returned malformed metadata');
   }
   return raw;
