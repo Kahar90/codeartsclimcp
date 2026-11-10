@@ -11,10 +11,10 @@ no goal, ask for one in a single question, then start.
 
 ## Tools
 
-Use the `codearts` MCP server tools: `mcp__codearts__ca_doctor`, `ca_init`, `ca_workspace`,
-`ca_lane_start`, `ca_status`, `ca_wait`, `ca_summary`, `ca_tail`, `ca_steer`, `ca_stop`, `ca_plan`,
-`ca_plan_update`, `ca_note` (all prefixed `mcp__codearts__`). Below they are named without the
-prefix.
+Use the `codearts` MCP server tools: `mcp__codearts__ca_doctor`, `ca_init`, `ca_brief_check`,
+`ca_workspace`, `ca_lane_start`, `ca_status`, `ca_wait`, `ca_summary`, `ca_tail`, `ca_steer`,
+`ca_stop`, `ca_plan`, `ca_plan_update`, `ca_note` (all prefixed `mcp__codearts__`). Below they are
+named without the prefix.
 
 Register the plan you are working to with `ca_plan` as soon as you start, and keep it current:
 `ca_plan_update` for a changed goal, next tasks or lanes, and `ca_note` (now true, with phase
@@ -39,14 +39,19 @@ A running lane that is blocked (a worker question, or no new commit for `NO_COMM
 answer with `ca_steer` (that clears it) or dismiss it with `ca_ack`, then call `ca_wait` again.
 
 Speed without losing quality: two or three small parallel lanes beat one long lane; write the
-contract check first and run the brief's existing CHECK lines on main before starting; do your own
-share (docs, the next brief) while lanes run; verify once after the merge, not per step.
+contract check first and run the brief's existing CHECK lines on main before starting; run
+`ca_brief_check {repo, task}` on each brief and fix real warnings (it never blocks a lane); do your
+own share (docs, the next brief) while lanes run; verify once after the merge, not per step.
 
 Parallel lanes: give each its own clone with `ca_workspace {repo, task, from}` (CLI
 `ca workspace <repo> <task> [--from <branch>]`), which makes `../<repo>-wt-<task>` on branch
 `lane/<task>`, then start the lane in that folder. Never use `git worktree add` for a lane: a
 worktree keeps its git dir in the main repo, outside the lane folder, so the CodeArts sandbox
 refuses every commit ("Permission denied"). Merge a clone back with `ca_workspace --land {repo, task}`.
+
+The runner guards itself each tick: the helper guard restores `tasks/<task>.lane/check.mjs` if the
+worker overwrites it, and the orphan guard stops the lane and its own server when the repo's `.git`
+is deleted.
 
 If those tools are missing, the server is not connected: tell the user to run
 `ca onboard --yes --harness claude` once and restart Claude Code (or `/mcp` to reconnect). Until
