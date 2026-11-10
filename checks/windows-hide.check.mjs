@@ -10,7 +10,7 @@ import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
-const src = fs.readFileSync(CA, 'utf8');
+const src = [CA, ...['common', 'server', 'lane', 'commands', 'engineer', 'plan', 'dash-server'].map((m) => path.join(ROOT, 'runner', `${m}.mjs`)).filter((f) => fs.existsSync(f))].map((f) => fs.readFileSync(f, 'utf8')).join('\n');
 const results = [];
 const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 240) : ''}`);
 
