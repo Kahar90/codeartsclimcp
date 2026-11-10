@@ -1,7 +1,8 @@
 // A fake `codearts serve` for runner checks: node runs this file as `<node> serve --port N ...`
 // (copy it into the lane repo as `serve` and set CODEARTS_EXE to node). It speaks the small part of
 // the opencode server API the runner uses and plays one scenario per prompt from fake-script.json
-// in its cwd: ["rate", "net", "ok", ...]; the last entry repeats.
+// in its cwd: ["rate", "net", "ok", ...]; the last entry repeats. It also answers the core-profile
+// tool metadata at GET /experimental/tool/ids (runner/toolprofile.mjs).
 //   ok         busy, an answer text, idle
 //   rate       busy, 3 rate-limit retries, MessageAbortedError (what CodeArts does on a 429), idle
 //   net        busy, session error "TypeError: fetch failed", idle
@@ -155,6 +156,10 @@ http.createServer((req, res) => {
   req.on('end', () => {
     const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
     if (u.pathname === '/global/health') return json({ healthy: true, version: 'fake-1' });
+    // Tool metadata for the opt-in core profile (runner/toolprofile.mjs): a realistic non-empty list
+    // of backend tool ids, the core coding tools plus a few unrelated ones the profile must deny. A
+    // lane whose brief selects the core profile fetches this before its first prompt_async.
+    if (u.pathname === '/experimental/tool/ids') return json(['bash', 'read', 'glob', 'grep', 'edit', 'write', 'apply_patch', 'question', 'task', 'skill', 'webfetch']);
     if (u.pathname === '/event') {
       res.writeHead(200, { 'content-type': 'text/event-stream' }); clients.add(res);
       res.write(`data: ${JSON.stringify({ type: 'server.connected', properties: {} })}\n\n`);

@@ -5,12 +5,34 @@ tool schema. A coding lane only needs a handful of them. `CA_TOOL_PROFILE=core` 
 down on the private lane server, cutting the irrelevant tool/context overhead the model has to
 carry on each request.
 
-This is **opt-in and off by default**. With the variable unset (or set to `full`) the lane behaves
-exactly as before: the request is sent unchanged and nothing extra is fetched.
+This is **opt-in and off by default**. A brief with no `TOOL_PROFILE:` header and no environment
+value behaves exactly as before: the request is sent unchanged and nothing extra is fetched.
 
-## Enable it
+## Select it per lane (brief header)
 
-Set the variable for the lane process (it is read from the environment, per lane):
+`ca init` writes coding briefs from `templates/brief.md`, which carries the header
+
+```
+TOOL_PROFILE: core
+```
+
+so a newly scaffolded coding lane opts into the core profile with no environment change. The lane
+selects the mode **once**, before its private server starts, and records it in the lane state
+(`toolProfile`). Precedence, highest first:
+
+1. `CA_TOOL_PROFILE` in the environment, including an explicit empty value (which means `full`).
+2. `TOOL_PROFILE:` in the brief (`core` or `full`).
+3. Neither present (a legacy brief and no variable): `full`, exactly as before.
+
+So old briefs and direct Server callers keep the previous unprofiled behaviour, newly scaffolded
+coding briefs opt into `core`, and `CA_TOOL_PROFILE=full` is the escape hatch for a broader task
+that needs more than the coding tools. The lane reads this from its brief and environment only: it
+never writes `process.env` or user config, so a per-lane choice cannot leak into another lane or the
+global config.
+
+## Enable it by environment
+
+Set the variable for the lane process (it also overrides any brief header, per lane):
 
 ```sh
 # one lane
@@ -20,7 +42,7 @@ CA_TOOL_PROFILE=core ca lane <repo> <task>
 export CA_TOOL_PROFILE=core
 ```
 
-Revert by unsetting it or setting `CA_TOOL_PROFILE=full`.
+Revert by unsetting it (the brief header then decides) or setting `CA_TOOL_PROFILE=full`.
 
 ## What it does
 
@@ -63,7 +85,8 @@ Properties of the change:
 
 | Value | Effect |
 |---|---|
-| unset / `full` | Off: request unchanged, no metadata fetch |
+| unset | Use the brief's `TOOL_PROFILE:` header; a brief without one stays `full` |
+| `full` | Off: request unchanged, no metadata fetch |
 | `core` | Deny every non-core tool id on `prompt_async` requests |
 | anything else | Error (the request fails visibly) |
 
@@ -72,3 +95,8 @@ Properties of the change:
 `node checks/toolprofile.check.mjs` covers the profile off/on paths, explicit caller denies, the
 per-server cache and its reset on restart, malformed/unavailable metadata, the `prompt_async`-only
 scope, and that neither the outgoing request nor the caller's body is mutated.
+
+`node checks/briefprofile.check.mjs` covers the per-lane selection: the `TOOL_PROFILE:` header that
+`ca init` writes, the environment override (including an empty value), legacy briefs, the prompt
+denies a `core` brief produces, and that selecting a profile mutates neither `process.env` nor
+another lane's server.

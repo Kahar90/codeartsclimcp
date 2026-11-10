@@ -14,6 +14,7 @@ import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from 
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { shouldDeferStepReview, stepReviewBlockers } from './reviewbudget.mjs';
 import { Server } from './server.mjs';
+import { selectToolProfile } from './toolprofile.mjs';
 import { addStepTokens, emptyTokens, tokenTotal } from './tokens.mjs';
 import { thinkStall } from './watchdog.mjs';
 
@@ -180,6 +181,11 @@ export async function runLane(repoArg, task, opts = {}) {
   const reviewFixesEnv = process.env.REVIEW_FIXES;
   const REVIEW_FIXES = reviewFixesLine !== undefined ? Math.max(0, Number(reviewFixesLine))
     : (reviewFixesEnv !== undefined && reviewFixesEnv !== '' && Number.isFinite(Number(reviewFixesEnv)) ? Math.max(0, Number(reviewFixesEnv)) : 1);
+  // The tool profile for this lane: selected once from the brief header and the environment (an
+  // explicit CA_TOOL_PROFILE wins, so a lead can force full for a broader task). It is handed to this
+  // lane's private server only; the lane never writes process.env or user config, so the choice
+  // cannot leak to another lane or the global config. Unknown values throw here, visibly.
+  const TOOL_PROFILE_MODE = selectToolProfile(brief, process.env.CA_TOOL_PROFILE);
   const START = (resumed && resumed.start) || git(repo, 'rev-parse', 'HEAD');
   const dirtyAll = () => git(repo, 'status', '--porcelain').split(/\r?\n/).filter((l) => l && !/^.. "?(tasks\/|\.codeartsdoer)/.test(l));
   const PRE_DIRTY = new Set(dirtyAll());
@@ -188,7 +194,7 @@ export async function runLane(repoArg, task, opts = {}) {
   const S = {
     v: 1, id, task, repo, dir, pid: process.pid, startedAt: T0, updatedAt: T0, phase: 'starting', attempt: 0, fixes: 0,
     server: null, buildSession: null, reviewSession: null, activeSession: null, busy: false, sse: false,
-    lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
+    lastEventAt: T0, turnStartAt: 0, lastToolAt: 0, lastTextAt: 0, activity: 'starting server', models: { build: BUILD, review: REVIEW }, toolProfile: TOOL_PROFILE_MODE, stepList, commitLog: [], todos: [], files: [], phases: [{ phase: 'starting', at: T0 }], start: START,
     config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes, noCommit: CFG.noCommitS },
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
@@ -286,7 +292,7 @@ export async function runLane(repoArg, task, opts = {}) {
   // Called when a turn ends in an error: null (keep the old behaviour) or a plain-words key problem.
   const keyProblem = (model, error) => authProblem({ model, error, serverLog: serverLogTail() });
 
-  const server = new Server(repo, path.join(dir, 'server.log'));
+  const server = new Server(repo, path.join(dir, 'server.log'), TOOL_PROFILE_MODE);
   let finished = false;
   const cleanup = () => { if (!finished) { finished = true; server.stop(); } };
   process.on('exit', cleanup);

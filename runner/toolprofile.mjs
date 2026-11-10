@@ -17,6 +17,25 @@ export function profileMode(value) {
   return 'unknown';
 }
 
+// The profile for one lane, chosen once before its private server starts. An explicit environment
+// value (including the empty string) wins over the brief, so a lead can force `full` for a broader
+// task or keep `core` explicitly; `undefined`/`null` means "not set". With no environment value a
+// brief carrying a `TOOL_PROFILE:` header opts in, and a legacy brief with no header keeps the
+// previous behaviour (`full`). Normalizes core/full and rejects anything else visibly, so a typo in
+// either the environment or the brief never becomes a silent "off" or an unprofiled request.
+export function selectToolProfile(brief, envValue) {
+  if (envValue !== undefined && envValue !== null) {
+    const mode = profileMode(envValue);
+    if (mode === 'unknown') throw new Error(`tool profile: unknown CA_TOOL_PROFILE "${envValue}" (expected "core", "full" or unset)`);
+    return mode;
+  }
+  const header = (String(brief ?? '').match(/^\s*TOOL_PROFILE:\s*(\S+)/m) || [])[1];
+  if (header === undefined) return 'full';
+  const mode = profileMode(header);
+  if (mode === 'unknown') throw new Error(`tool profile: unknown TOOL_PROFILE "${header}" (expected "core", "full" or unset)`);
+  return mode;
+}
+
 // /experimental/tool/ids must answer with a non-empty JSON array of non-empty strings. Any other
 // shape is malformed metadata: throw, so an explicit profile is never silently bypassed. An empty
 // list is rejected too: on this experimental endpoint a version skew could answer [] and, taken
