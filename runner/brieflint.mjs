@@ -63,7 +63,8 @@ export function lintBrief({ repo, briefText, listFiles, readFile } = {}) {
     const sm = cmd.match(SCRIPT_RE);
     if (!sm) return;
     const p = norm(sm[1] || sm[2] || sm[3] || '');
-    if (!p || !/[\\/]/.test(p) || /^[\\/]/.test(p) || files.has(p)) return;
+    // Only a relative path is checked: skip a root-level or Windows-drive absolute path.
+    if (!p || /^([\\/]|[A-Za-z]:[\\/])/.test(p) || files.has(p)) return;
     warnings.push({ kind: 'missing-check-file', file: p, line: i + 1 });
   });
 
