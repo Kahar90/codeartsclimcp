@@ -559,6 +559,19 @@ export async function runLane(repoArg, task, opts = {}) {
     const last = [...msgs].reverse().find((m) => m.info?.role === 'assistant' && (m.parts || []).some((p) => p.type === 'text' && p.text?.trim()));
     return last ? last.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim() : '';
   };
+  // Read a session's messages (fail closed: null on any error, so a caller can never mistake an
+  // unreadable session for an empty, safe one). The message id is the proof of a fresh turn.
+  const assistantMessages = async (sid) => {
+    try { const msgs = await server.api('GET', `/session/${sid}/message`); return Array.isArray(msgs) ? msgs : null; }
+    catch { return null; }
+  };
+  const lastAssistant = (msgs) => {
+    if (!Array.isArray(msgs)) return null;
+    for (let i = msgs.length - 1; i >= 0; i--) { const m = msgs[i]; if (m && m.info && m.info.role === 'assistant' && (m.parts || []).some((p) => p.type === 'text' && p.text && p.text.trim())) return m; }
+    return null;
+  };
+  const msgText = (m) => (m && m.parts ? m.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim() : '');
+  const msgIdOf = (m) => (m && m.info && (m.info.id || m.info.messageID)) || null;
   const writeStepReviewInbox = (steps, hash, text) => {
     const body = `Reviewer on ${steps.map((k) => `step ${k}`).join(', ')} (commit ${hash}):\n${text}\n`
       + `Fix the real bugs in a commit "fix: ${steps.map((k) => `step ${k}`).join(', ')} review" and keep going with the brief; ignore a finding that contradicts the brief or the lead's steering.`;
@@ -1128,25 +1141,63 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     });
     return `\n\nStep reviews already done:\n${lines.join('\n')}`;
   };
+  // A reused review session already holds an earlier turn's reply. Only a NEW assistant message id
+  // proves this turn produced a fresh verdict; a brand-new session has no prior message to confuse.
+  // A missing id on a reused session (or the same id as before) is never accepted: fail closed.
+  const freshReviewReply = async (sid, baseline) => {
+    const msgs = await assistantMessages(sid);
+    if (msgs === null) return { ok: false, reason: 'read-failed', text: '' };
+    const last = lastAssistant(msgs);
+    if (!last) return { ok: false, reason: 'empty', text: '' };
+    const id = msgIdOf(last); const text = msgText(last);
+    if (baseline) {
+      if (!id) return { ok: false, reason: 'no-id', text };
+      if (id === baseline) return { ok: false, reason: 'stale', text };
+    }
+    return { ok: true, text, msgId: id || null };
+  };
+  // Pick the last healthy completed final-review session to reuse for a focused fix round. Reuse only
+  // when the recorded round used the same reviewer model, its assistant id is still the session's last
+  // assistant message (no intervening turn) and the session exists and is idle. Any doubt -> fresh.
+  const reusableReviewSession = async (prev) => {
+    if (!prev) return null;
+    if (prev.model !== REVIEW) return null;                    // model changed -> fresh
+    if (!prev.sid || !prev.msgId) return null;                 // missing ids -> fresh
+    if (builderSessions.has(prev.sid) || prev.sid === S.buildSession) return null; // never a builder session
+    let statuses; try { statuses = await server.api('GET', '/session/status', null, 10000); } catch { return null; }
+    const st = statuses && statuses[prev.sid] ? statuses[prev.sid].type : undefined;
+    if (st !== 'idle') return null;                            // busy/retry/error/missing session -> fresh
+    const s = sess[prev.sid];
+    if (s && s.error) return null;                             // a session that errored -> fresh
+    const msgs = await assistantMessages(prev.sid);
+    if (msgs === null) return null;                            // unreadable/missing -> fresh
+    const last = lastAssistant(msgs);
+    if (!last || msgIdOf(last) !== prev.msgId) return null;    // an intervening message -> fresh
+    return prev.sid;
+  };
+  let reviewInvalidated = ''; // set when the acceptance revalidation finds the reviewed content changed
   const applyFinalReview = async (rsid, rres, head0, from, at) => {
-    let text = '';
-    try {
-      const msgs = await server.api('GET', `/session/${rsid}/message`);
-      const last = [...msgs].reverse().find((m) => m.info.role === 'assistant' && m.parts.some((p) => p.type === 'text' && p.text?.trim()));
-      text = last ? last.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n').trim() : '';
-    } catch (err) { L(`! could not read review: ${err.message}`); }
-    const body = text || `(no review text: ${rres.reason || 'empty'})`;
+    const text = String(rres.text || '').trim();
+    let body = text || `(no review text: ${rres.reason || 'empty'})`;
     const vm = text.match(/VERDICT:\s*(ready|needs fixes)/i);
     S.verdict = vm ? vm[1].toLowerCase() : `missing${rres.ok ? '' : ' (' + rres.reason + ')'}`;
+    // Acceptance revalidation: the reviewer is read-only. If HEAD moved or the work tree is dirty after
+    // its turn, the verdict describes content that no longer exists, so it can never be accepted: end
+    // needs review with an actionable reason and never auto-commit these changes.
     const warn = [];
-    if (git(repo, 'rev-parse', 'HEAD') !== head0) warn.push('reviewer committed changes');
-    if (dirty().length) warn.push('reviewer left changes in the work tree');
-    if (warn.length) { S.errors.push({ at: now(), msg: warn.join('; ') }); L(`! ${warn.join('; ')}`); }
+    if (git(repo, 'rev-parse', 'HEAD') !== head0) warn.push('the reviewer moved HEAD');
+    if (dirty().length) warn.push('the reviewer left uncommitted changes in the work tree');
+    if (warn.length) {
+      S.errors.push({ at: now(), msg: warn.join('; ') }); L(`! ${warn.join('; ')}`);
+      S.verdict = 'needs fixes';
+      reviewInvalidated = `the reviewer changed the reviewed content (${warn.join('; ')}); re-run the lane on the current commit`;
+      body += `\n\nRunner acceptance revalidation failed: ${warn.join('; ')}. The reviewer must be read-only and the reviewed commit unchanged, so this verdict does not apply. The changes are left for a human to inspect (never auto-committed); re-run the lane on the current commit.`;
+    }
     // review.md holds the latest review; the earlier rounds are kept below it under a heading.
     const earlier = S.reviewRounds.map((x) => x.text).filter(Boolean);
     fs.writeFileSync(path.join(dir, 'review.md'), earlier.length ? `${body}\n\n## Earlier review\n\n${earlier.join('\n\n---\n\n')}` : body);
     const t = Number.isFinite(at) ? at : now();
-    S.reviewRounds.push({ round: S.reviewRounds.length + 1, verdict: S.verdict, at: t, ms: now() - t, from, to: head0, text: body });
+    S.reviewRounds.push({ round: S.reviewRounds.length + 1, verdict: S.verdict, at: t, ms: now() - t, from, to: head0, sid: rsid, model: REVIEW, msgId: rres.msgId || null, text: body });
     save(true);
     review = text; finalReviewed = true;
   };
@@ -1204,16 +1255,23 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     rb += reviewContext(prev && prev.to ? prev.to : START);
     return rb;
   };
-  const startFinalReview = async (prev) => {
+  const startFinalReview = async (prev, forceFresh) => {
     const head0 = git(repo, 'rev-parse', 'HEAD');
     const rb = finalReviewPrompt(prev);
-    const rsid = await newSession(`${task} review`); S.reviewSession = rsid; reviewSessions.add(rsid);
-    L(`== review (${REVIEW}, read-only plan agent) session ${rsid}${prev ? `; fix round ${prev.round}` : ''}`);
+    // A focused fix round reuses the previous healthy reviewer session (its context is already warm),
+    // unless it is missing, busy, errored, changed model or has an intervening turn: then a fresh one.
+    const reused = forceFresh ? null : await reusableReviewSession(prev);
+    let rsid, baseline = null;
+    if (reused) { rsid = reused; baseline = prev.msgId; }
+    else { rsid = await newSession(`${task} review`); }
+    S.reviewSession = rsid; reviewSessions.add(rsid);
+    L(`== review (${REVIEW}, read-only plan agent) session ${rsid}${reused ? ' (reused healthy reviewer context)' : ''}${prev ? `; fix round ${prev.round}` : ''}`);
     await send(rsid, rb, REVIEW, 'plan');
     S.reviewStartedAt = now();
     const promise = drive(rsid, REVIEW, 'plan', 'review', () => 'Your previous turn was interrupted. Finish the review: the numbered item list and the final VERDICT line.');
-    return { sid: rsid, head0, from: prev && prev.to ? prev.to : START, at: S.reviewStartedAt, promise };
+    return { sid: rsid, head0, from: prev && prev.to ? prev.to : START, at: S.reviewStartedAt, baseline, reused: !!reused, prev, promise };
   };
+  const asNormalFr = (fr2) => ({ sid: fr2.sid, head: fr2.head0, from: fr2.from, at: fr2.at, promise: fr2.promise, spec: false, baseline: fr2.baseline, reused: fr2.reused, prev: fr2.prev });
   const discardFinalReview = async (fr) => {
     if (!fr) return;
     const s = sx(fr.sid);
@@ -1243,43 +1301,55 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     const head = git(repo, 'rev-parse', 'HEAD');
     const at = now();
     const rb = finalReviewPrompt(prev);
-    const rec = { sid: null, sidP: null, head, from: prev && prev.to ? prev.to : START, at, used: false, promise: null };
+    const rec = { sid: null, sidP: null, head, from: prev && prev.to ? prev.to : START, at, used: false, promise: null, prev, baseline: null, reused: false };
     S.specReview = { head, at, used: false };
     S.reviewStartedAt = at;
     save(true);
     specReviewCancel = false;
     // Create the session up front and keep the id promise: beginFinalReview and discardSpecReview need the
     // session even before the review promise finishes, so it can never be read as a not-yet-assigned null.
-    rec.sidP = newSession(`${task} review (speculative)`);
+    // The selection is shared with the normal final review: a healthy completed reviewer session is reused
+    // for a focused fix round, otherwise a fresh session is created.
+    rec.sidP = (async () => {
+      const reuse = await reusableReviewSession(prev);
+      if (reuse) { rec.reused = true; rec.baseline = prev.msgId; return reuse; }
+      return await newSession(`${task} review (speculative)`);
+    })();
     rec.promise = (async () => {
       try {
         rec.sid = await rec.sidP;
         reviewSessions.add(rec.sid);
         sent.add(rb.trim()); // the runner's own prompt: never list it as a TUI steer
         await server.api('POST', `/session/${rec.sid}/prompt_async`, { model: splitModel(REVIEW), agent: 'plan', parts: [{ type: 'text', text: rb }] });
-        L(`== speculative review (${REVIEW}, plan agent) session ${rec.sid} on ${head.slice(0, 8)}: starts while the builder wraps up`);
-        const deadline = at + CFG.stepReviewTimeout * 1000; let sawBusy = false, done = false, text = '';
-        while (!done) {
-          if (specReviewCancel) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'cancelled', text }; }
+        L(`== speculative review (${REVIEW}, plan agent) session ${rec.sid}${rec.reused ? ' (reused healthy reviewer context)' : ''} on ${head.slice(0, 8)}: starts while the builder wraps up`);
+        const deadline = at + CFG.stepReviewTimeout * 1000; let sawBusy = false, text = '';
+        for (;;) {
+          if (specReviewCancel) { try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {} return { sid: rec.sid, ok: false, reason: 'cancelled', text, reused: rec.reused }; }
           if (now() > deadline) {
             // The polling budget is spent. If the session is alive and progressing, do NOT abort it: hand it
             // to the normal final review, which drives the SAME session with the normal watchdog and the
             // overall lane deadline, instead of discarding it and replaying the whole review. Only a session
             // that never went busy is treated as missing and aborted here.
-            if (sawBusy) return { sid: rec.sid, ok: false, reason: 'busy-timeout', text };
+            if (sawBusy) return { sid: rec.sid, ok: false, reason: 'busy-timeout', text, reused: rec.reused };
             try { await server.api('POST', `/session/${rec.sid}/abort`, {}); } catch {}
-            return { sid: rec.sid, ok: false, reason: 'timeout', text };
+            return { sid: rec.sid, ok: false, reason: 'timeout', text, reused: rec.reused };
           }
           await sleep(3000);
           let st; try { st = (await server.api('GET', '/session/status', null, 10000))[rec.sid]?.type; } catch { st = undefined; }
           if (st === 'busy' || st === 'retry') { sawBusy = true; continue; }
-          try { text = lastAssistantText(await server.api('GET', `/session/${rec.sid}/message`)); } catch {}
-          if (sawBusy || text) done = true;
-          else if (now() - at > 60000) return { sid: rec.sid, ok: false, reason: 'missing', text };
+          // Read only through the freshness proof: a reused session's cached reply (same id as before)
+          // must never be accepted as this turn's verdict.
+          const fresh = await freshReviewReply(rec.sid, rec.baseline);
+          text = fresh.text;
+          if (sawBusy || fresh.ok) {
+            return fresh.ok
+              ? { sid: rec.sid, ok: true, reason: '', text: fresh.text, msgId: fresh.msgId, reused: rec.reused }
+              : { sid: rec.sid, ok: false, reason: fresh.reason || 'empty', text: fresh.text, reused: rec.reused };
+          }
+          if (now() - at > 60000) return { sid: rec.sid, ok: false, reason: 'missing', text: '', reused: rec.reused };
         }
-        return { sid: rec.sid, ok: true, reason: '', text };
-      } catch (err) { L(`! speculative review error: ${oneLine(String((err && err.message) || err), 200)}`); return { sid: rec.sid, ok: false, reason: 'error', text: '' }; }
-    })().catch(() => ({ sid: rec.sid, ok: false, reason: 'error', text: '' }));
+      } catch (err) { L(`! speculative review error: ${oneLine(String((err && err.message) || err), 200)}`); return { sid: rec.sid, ok: false, reason: 'error', text: '', reused: rec.reused }; }
+    })().catch(() => ({ sid: rec.sid, ok: false, reason: 'error', text: '', reused: false }));
     specReview = rec;
     return rec;
   };
@@ -1338,11 +1408,11 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       save(true);
       L(`== final review: using the speculative review on ${head.slice(0, 8)}`);
       const sid = specReview.sid || (specReview.sidP ? await specReview.sidP.catch(() => null) : null);
-      return { sid, head, from: specReview.from, at: specReview.at, promise: specReview.promise, spec: true };
+      return { sid, head, from: specReview.from, at: specReview.at, promise: specReview.promise, spec: true, baseline: specReview.baseline, reused: specReview.reused, prev: specReview.prev };
     }
     if (specReview) await discardSpecReview(); // stale: HEAD moved after it started, so abort and review again now
     const fr = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
-    return { sid: fr.sid, head: fr.head0, from: fr.from, at: fr.at, promise: fr.promise, spec: false };
+    return asNormalFr(fr);
   };
   // Await the overlapped final review and record it. A speculative review that did not finish (a transient
   // error, a review past the timeout, or a credentials error its poller cannot report) falls back to the
@@ -1361,9 +1431,27 @@ Message from the lead: ${rk.text}` : ''), model, agent);
       L(`== speculative review did not finish (${rr.reason}); running the normal final review`);
       await discardSpecReview();
       if (S.specReview) { S.specReview.used = false; save(true); }
-      const fr2 = await startFinalReview(S.reviewRounds[S.reviewRounds.length - 1]);
-      fr = { sid: fr2.sid, head: fr2.head0, from: fr2.from, at: fr2.at, promise: fr2.promise, spec: false };
+      // A reused session that produced no accepted fresh verdict (a cached id, a missing id, an
+      // unreadable reply) must not be reused again: force a fresh session so the same stale answer
+      // cannot be replayed. A non-reused failure may retry the normal path unchanged.
+      const fr2 = await startFinalReview(fr.prev, fr.reused || rr.reason === 'stale');
+      fr = asNormalFr(fr2);
       rr = await fr2.promise;
+    }
+    // Freshness: a reused session may reply with its cached verdict (no new turn). Accept only a NEW
+    // assistant message id after the prompt; otherwise the old verdict is never applied and a fresh
+    // session re-reviews instead.
+    if (rr.ok) {
+      let fresh = await freshReviewReply(fr.sid, fr.baseline);
+      if (!fresh.ok && fr.reused) {
+        L(`== reused review session ${fr.sid} gave no fresh verdict (${fresh.reason}); running a fresh review session`);
+        const fr2 = await startFinalReview(fr.prev, true);
+        fr = asNormalFr(fr2);
+        rr = await fr2.promise;
+        if (rr.ok) fresh = await freshReviewReply(fr.sid, fr.baseline);
+      }
+      if (rr.ok && fresh.ok) rr = { ...rr, ok: true, text: fresh.text, msgId: fresh.msgId || null };
+      else if (rr.ok) rr = { sid: fr.sid, ok: false, reason: fresh.reason || 'empty', text: fresh.text || '' };
     }
     if (!rr.ok && rr.reason === 'auth') { reason = 'auth'; exitCode = 3; forcedResult = ''; if (rr.keys) S.keysMessage = rr.keys; }
     await applyFinalReview(fr.sid, rr, fr.head, fr.from, fr.at);
@@ -1554,6 +1642,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           await finishFinalReview(fr);
           if (exitCode === 3) break;
         }
+        // Acceptance revalidation: the reviewed commit must still be HEAD and the tree clean after the
+        // review. The reviewer is read-only, so a moved HEAD or a dirty tree means its verdict no longer
+        // describes the content: end needs review with an actionable reason instead of accepting done.
+        if (reviewInvalidated) { reason = reviewInvalidated; exitCode = 4; forcedResult = 'needs review'; cleanEnd = false; say(`acceptance revalidation failed: ${reason}`); break; }
         reason = ''; exitCode = 0; cleanEnd = true; break;
       }
       syncCommits();
@@ -1565,6 +1657,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         const fr = await beginFinalReview();
         phase('review', 'reviewing');
         await finishFinalReview(fr);
+        if (reviewInvalidated) { reason = reviewInvalidated; exitCode = 4; forcedResult = 'needs review'; cleanEnd = false; }
       }
 
       if (!cleanEnd) break; // a stop, timeout, auth, infra/unverified or write failure ends the lane
