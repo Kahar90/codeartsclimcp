@@ -495,7 +495,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [] });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [], blocker: resumed.blocker || null });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -511,12 +511,19 @@ async function runLane(repoArg, task, opts = {}) {
     catch (e) { process.stderr.write(`[${task}] plan warning: ${oneLine(String((e && e.message) || e), 200)}\n`); }
   }
   const phase = (p, activity) => { if (S.phase !== p) S.phases.push({ phase: p, at: now() }); S.phase = p; if (activity) S.activity = activity; save(true); };
+  // Clear an open blocker and restart the no-progress clock: a steer, a new commit or an ack answered the lead.
+  const clearBlocker = (why) => {
+    if (!S.blocker) return false;
+    S.blocker = null; S.blockerClearedAt = now();
+    L(`blocker cleared (${why})`); save(true);
+    return true;
+  };
   const syncCommits = () => {
     const out = git(repo, 'log', '--reverse', '--format=%h%x09%s', `${START}..HEAD`);
     S.commitLog = out ? out.split(/\r?\n/).map((l) => { const [hash, ...r] = l.split('\t'); return { hash, subject: oneLine(r.join(' '), 160) }; }) : [];
     S.commits = S.commitLog.length;
     // The no-progress clock: a new commit (or the first sync after a resume) resets it.
-    if (S.commits > (S.commitsSeen || 0)) { S.commitsSeen = S.commits; S.lastCommitAt = now(); }
+    if (S.commits > (S.commitsSeen || 0)) { S.commitsSeen = S.commits; S.lastCommitAt = now(); if (S.blocker) clearBlocker('a new commit landed'); }
   };
 
   // The codearts server writes sign-in failures to server.log right at start. Read only its tail:
@@ -715,6 +722,8 @@ async function runLane(repoArg, task, opts = {}) {
     s.tools.clear(); s.busy = false; s.aborting = false;
   };
   const stopFile = path.join(dir, 'STOP');
+  // ca ack writes this on a running blocked lane: the supervisor clears the blocker and deletes the file.
+  const blockerAckFile = path.join(dir, 'BLOCKER_ACK');
   // A kick is a human decision delivered by file: {at, mode: turn|fresh|server|now, text, by}.
   // The supervisor consumes it at the next poll (2 s) or during a backoff wait.
   const kickFile = path.join(dir, 'KICK');
@@ -734,8 +743,10 @@ async function runLane(repoArg, task, opts = {}) {
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      const by = /stepreview/i.test(f) ? 'step review' : 'ca steer';
+      const by = /stepreview/i.test(f) ? 'step review' : /question/i.test(f) ? 'runner notice' : 'ca steer';
       if (by === 'step review') lastPumpHadStepReview = true;
+      // A lead steer queued after the blocker clears it: the person answered the worker's question.
+      if (S.blocker && by === 'ca steer') { const at = Number((f.match(/^(\d+)/) || [])[1]) || 0; if (at > S.blocker.at) clearBlocker('steer delivered'); }
       L('>> steer:'); block('» ', text); S.steers.push({ at: now(), by, phase: S.phase, text: oneLine(text, 500) });
       process.stdout.write(`[${task} ${hhmmss()}] steer received: ${oneLine(text, 100)}\n`);
       await send(sid, `Message from the lead (steering, applies on top of the brief): ${text}`, curModel, curAgent);
@@ -837,6 +848,7 @@ async function runLane(repoArg, task, opts = {}) {
       }
       prevTick = tickMs;
       if (fs.existsSync(stopFile)) { L('== stop requested'); await abort(sid); return { kind: 'stopped' }; }
+      if (fs.existsSync(blockerAckFile)) { try { fs.rmSync(blockerAckFile, { force: true }); } catch {} clearBlocker('ack'); }
       const k = takeKick();
       if (k) {
         L(`== kick (${k.mode}) from ${k.by}${k.text ? ': ' + oneLine(k.text, 160) : ''}`);
