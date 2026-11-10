@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.0 (2026-11-10)
+
+Updates
+- A blocked worker reaches the lead in seconds instead of looping unseen. A worker question no longer just
+  disappears: the lane moves to Needs you with the question ("asked the lead: ..."), the worker is told to
+  continue with its best option, and `ca wait` / MCP `ca_wait` return at once with exit 11 and a `CA_BLOCKED`
+  line. A steer, a new commit or `ca ack` clears it. The plan glance and the Office sign say Needs you too.
+- No-progress alarm: no commit for a new step in `NO_COMMIT_S` seconds (default 900, 0 disables) raises the same
+  alert with the step it is stuck before. Busywork commits ("wip: ...") do not reset it; fix rounds count any commit.
+- `ca brief-check <repo> <task>` (MCP `ca_brief_check`, also run at lane start and listed in the summary) warns
+  when a "do not edit X" rule protects files that name files the brief changes, and when a CHECK line runs a
+  missing file. Warnings never block a lane.
+- Lane control never guesses: `stop`, `rm`, `kick`, `resume`, `ack` and `steer` need a lane name, and a lane can
+  never control itself (`CA_IN_LANE`), so a worker testing the CLI cannot stop its own lane.
+- Guards: the runner restores its check helper if a worker overwrites it and tells the worker; a supervisor whose
+  repo was deleted stops itself and its CodeArts server.
+- Any OpenAI-compatible API for a lane: a `maas/<model>` named in BUILD_MODEL, REVIEW_MODEL, STEP_REVIEW_MODEL or
+  THINK_FALLBACK_MODEL that is not built in is declared on the fly, so `MAAS_BASE_URL` + `MAAS_API_KEY` point a
+  lane at another region or another vendor's API.
+- `ca doctor` no longer reports a repo under a Windows 8.3 short path as a git worktree.
+- Internals: `runner/ca.mjs` (3,430 lines) is split into `common`, `server`, `lane`, `commands`, `engineer`, `plan`
+  and `dash-server` modules (pure move, every check unchanged). Repo cleanup: owner-specific files removed,
+  CONTRIBUTING.md, SECURITY.md, .editorconfig, CI on Node 20 and 22, a faster onboard check (no real download).
+
+
 ## 0.6.0 (2026-11-10)
 
 Updates
