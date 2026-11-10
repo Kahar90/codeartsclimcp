@@ -1506,7 +1506,9 @@ Message from the lead: ${rk.text}` : ''), model, agent);
         // Git clean and the strict step proof both passed: start the final review now (when review is on)
         // and run the CHECK lines while it reviews. A speculative review that is still valid is awaited in
         // place of a new one; a stale one is aborted and replaced. A CHECK that fails or cannot run aborts
-        // and discards this review.
+        // and discards this review. Record HEAD first: a CHECK that moves it or writes the tree makes this
+        // review stale, and that must be caught before the lane can be accepted as done.
+        const headBeforeChecks = git(repo, 'rev-parse', 'HEAD');
         const fr = await beginFinalReview();
         g = await runChecks();
         if (!g.ok) {
@@ -1519,7 +1521,26 @@ Message from the lead: ${rk.text}` : ''), model, agent);
           phase('fix', `fix round ${S.fixes}`); await send(sid, g.message, buildModel);
           continue;
         }
-        // The checks passed: wait for the overlapped review to end and record its verdict.
+        // The checks were green, but a CHECK line can write the working tree or move HEAD (a stray test,
+        // a formatter, a check that commits). The green checks and the review describe the content as it
+        // was before the CHECK ran, so that proof is stale the moment the tree or HEAD moved. Never mark a
+        // tree the checks changed as done: discard the stale review and require a commit through the same
+        // bounded fix path, then run the gates and the review again on the new HEAD.
+        const dirtyAfterChecks = dirty();
+        const headAfterChecks = git(repo, 'rev-parse', 'HEAD');
+        if (dirtyAfterChecks.length || headAfterChecks !== headBeforeChecks) {
+          if (fr) { await discardFinalReview(fr); if (fr.spec) specReview = null; }
+          const what = dirtyAfterChecks.length ? `${dirtyAfterChecks.length} uncommitted change${dirtyAfterChecks.length === 1 ? '' : 's'} left by the checks` : 'the checks moved HEAD';
+          if (++S.fixes > CFG.fixes) { reason = `the checks changed the work after they passed, unresolved after ${CFG.fixes} fix round${CFG.fixes === 1 ? '' : 's'}: ${what}`; forcedResult = 'checks changed the work'; exitCode = 1; break; }
+          say(`checks changed the work after they passed (${what}); fix round ${S.fixes}/${CFG.fixes}`);
+          phase('fix', `fix round ${S.fixes}`);
+          await send(sid, (dirtyAfterChecks.length
+            ? `Runner check passed but left uncommitted changes, so the reviewed content is stale. Commit the intended result (a "step N:" or "fix:" subject) and leave the working tree clean; remove any change that is not part of the step. Changed paths:\n${dirtyAfterChecks.slice(0, 20).join('\n')}`
+            : `The CHECK lines moved HEAD after the content was reviewed, so that review is stale. Run \`git log --oneline\` and \`git status\`, keep the working tree clean, and commit anything still uncommitted.`) + CHECK_HELP, buildModel);
+          continue;
+        }
+        // The checks passed on content that is still the reviewed HEAD and clean: wait for the
+        // overlapped review to end and record its verdict.
         if (fr) {
           phase('review', 'reviewing');
           await finishFinalReview(fr);
