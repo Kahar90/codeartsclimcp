@@ -6,7 +6,7 @@ import path from 'node:path';
 import { authProblem } from './authsignal.mjs';
 import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarningsFor, dashUrl, die, dur, ensureDash, git, health, hhmmss, killTree, laneId, lanes, now, oneLine, readJSON, resultOf, sleep, splitModel, stepProgress, workerShell, writeAtomic, writeProbe } from './common.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
-import { classifySignal, directCheckInvocation, noteFailure, toolKey, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
+import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { Server } from './server.mjs';
@@ -333,6 +333,9 @@ export async function runLane(repoArg, task, opts = {}) {
   const flushPart = (pid) => {
     const p = parts.get(pid); if (!p || p.logged) return; p.logged = true;
     const t = (p.text || '').trim(); if (!t) return;
+    // A finished builder reply (or, when real SSE sends no time.end, the idle sweep over every part)
+    // may ask the lead to decide or grant permission: surface it once per part.
+    if (p.type === 'text' && roleOf(p.sid) === 'build') raiseSignal(classifySignal({ text: t, agentRole: 'build' }));
     if (p.type === 'reasoning') L(`  ~ think: ${oneLine(t, 300)}`); else { lastWorkerReply = t; L('  assistant:'); block('│ ', t); }
   };
   const toolInput = (tool, inp = {}) => oneLine(inp.command ?? inp.filePath ?? inp.path ?? inp.pattern ?? inp.url ?? inp.description ?? JSON.stringify(inp), 200);
@@ -381,11 +384,9 @@ export async function runLane(repoArg, task, opts = {}) {
         }
         if (part.type === 'text' || part.type === 'reasoning') {
           const p = parts.get(part.id) || { type: part.type, text: '' }; p.type = part.type; if (typeof part.text === 'string' && part.text.length >= (p.text || '').length) p.text = part.text;
-          parts.set(part.id, p); if (part.time?.end) flushPart(part.id);
+          p.sid = sid; parts.set(part.id, p); if (part.time?.end) flushPart(part.id);
           if (sid === S.activeSession && !sx(sid).tools.size) S.activity = part.type === 'reasoning' ? 'thinking' : 'writing reply';
           if (sid === S.activeSession && part.type === 'text') S.lastTextAt = now();
-          // A finished builder reply may ask the lead to decide or grant permission: surface it at once.
-          if (part.type === 'text' && part.time?.end && roleOf(sid) === 'build') raiseSignal(classifySignal({ text: p.text, agentRole: 'build' }));
         } else if (part.type === 'tool') {
           const s = sid ? sx(sid) : null; const st = part.state || {}; const key = part.callID || part.id;
           if (st.status === 'running' && s && !s.tools.has(key)) {
@@ -418,11 +419,13 @@ export async function runLane(repoArg, task, opts = {}) {
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
             if (sid === S.activeSession) S.lastToolAt = now();
-            // A failed builder tool may carry an actionable environment error (commit refused, missing
-            // dependency, permission error): surface it at once, the worker cannot fix it alone. When it
-            // is not an environment error, the same command failing repeatedly with no progress is a signal.
-            if (st.status === 'error' && roleOf(sid) === 'build') {
-              const esig = classifySignal({ text: String(st.error || ''), agentRole: 'build' });
+            // A failed builder tool is either status 'error' or a real CodeArts 'completed' with a nonzero
+            // exit code. A passing command (exit 0) is never classified, so output that merely quotes an
+            // error inside a green run does not raise a false blocker. Surface an environment failure at
+            // once; otherwise the same command failing repeatedly with no progress is its own signal.
+            const ft = roleOf(sid) === 'build' ? toolFailureText(st) : '';
+            if (ft) {
+              const esig = classifySignal({ text: ft, agentRole: 'build' });
               if (esig) raiseSignal(esig);
               else {
                 const key = toolKey(part.tool, st.input);

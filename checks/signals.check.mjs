@@ -158,6 +158,48 @@ check('the acked repeat-fail blocker is cleared while the lane keeps running', !
 r = run(fRepo, ['wait', fId, '--timeout', '90', '--quiet']);
 check('the repeat-fail lane still finishes normally', r.status === 0 && /CA_RESULT/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 300)}`);
 
+// ---------- pure: completed tools and nonzero exit (real CodeArts tool shape) ----------
+check('pure toolFailureText: status error returns the error text', S.toolFailureText({ status: 'error', error: 'boom' }) === 'boom');
+check('pure toolFailureText: a completed exit 0 is not a failure (green output is not classified)', S.toolFailureText({ status: 'completed', metadata: { exit: 0 }, output: 'fatal: Permission denied (quoted by a passing test)' }) === '');
+check('pure toolFailureText: a completed nonzero exit returns the output', /index\.lock/.test(S.toolFailureText({ status: 'completed', metadata: { exit: 1 }, output: 'fatal: Unable to create .git/index.lock' })));
+check('pure toolFailureText: a completed part without any exit code is not a failure', S.toolFailureText({ status: 'completed', output: 'fatal: Permission denied' }) === '');
+check('pure toolFailureText: exitCode at the top level is honored', S.toolFailureText({ status: 'completed', exitCode: 2, output: 'Cannot find module x' }).includes('Cannot find module'));
+
+// ---------- completed tool with a nonzero exit end to end ----------
+const xRepo = makeRepo('exitfail', ['shfail:fatal: Unable to create .git/index.lock: Permission denied+commit:1+wait:15000', 'ok']);
+const xId = 'exitfail--work';
+r = run(xRepo, ['lane', xRepo, 'work', '--detach']);
+check('exit-fail lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+const xsig = await waitBlocker(xRepo, 'env', 20000);
+check('a completed tool with a nonzero exit and error output raises an env blocker', !!xsig && /index\.lock|Permission denied/.test(xsig.blocker.text || ''), JSON.stringify(xsig && xsig.blocker));
+r = run(xRepo, ['wait', xId, '--timeout', '24', '--quiet']);
+bl = lines(r.stdout, 'CA_BLOCKED');
+check('ca wait returns exit 11 with CA_BLOCKED kind env for the nonzero-exit tool', r.status === 11 && bl.length === 1 && bl[0].kind === 'env', `exit ${r.status}: ${r.stdout.slice(0, 300)}`);
+r = run(xRepo, ['ack', xId]);
+check('ca ack clears the nonzero-exit env blocker', r.status === 0, `${r.status} ${r.stdout.slice(0, 200)}`);
+await until(() => { const x = row(xRepo, xId); return x && !x.blocked ? x : null; }, 10000);
+r = run(xRepo, ['wait', xId, '--timeout', '90', '--quiet']);
+check('the exit-fail lane still finishes normally', r.status === 0 && /CA_RESULT/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 300)}`);
+
+// ---------- passing tool that quotes an error is NOT a false positive ----------
+const oRepo = makeRepo('exitok', ['shok:fatal: Permission denied was hit earlier but every test passes now+commit:1+wait:1000', 'ok']);
+const oId = 'exitok--work';
+r = run(oRepo, ['lane', oRepo, 'work', '--detach']);
+check('exit-ok lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+r = run(oRepo, ['wait', oId, '--timeout', '90', '--quiet']);
+const ostate = state(oRepo);
+check('a passing (exit 0) tool whose output quotes an error does NOT raise a blocker', r.status === 0 && !/CA_BLOCKED/.test(r.stdout) && (!ostate || !ostate.blocker), `${r.status} ${r.stdout.slice(0, 200)}`);
+
+// ---------- a question in a text part with no time.end is caught at idle ----------
+const pRepo = makeRepo('openreply', ['decideopen:Should I use SQLite or Postgres for storage?+commit:1', 'ok']);
+const pId = 'openreply--work';
+r = run(pRepo, ['lane', pRepo, 'work', '--detach']);
+check('open-reply lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+r = run(pRepo, ['wait', pId, '--timeout', '60', '--quiet']);
+if (r.status === 11) r = run(pRepo, ['wait', pId, '--timeout', '60', '--quiet']);
+const pstate = state(pRepo);
+check('a builder question in a text part with no time.end is detected by the idle flush', !!pstate && pstate.blocker && pstate.blocker.kind === 'decision' && /SQLite/.test(pstate.blocker.text || ''), JSON.stringify(pstate && pstate.blocker));
+
 for (const l of results) console.log(l);
 const fails = results.filter((l) => l.startsWith('FAIL')).length;
 console.log(`\n${results.length - fails}/${results.length} passed`);

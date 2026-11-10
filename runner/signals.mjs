@@ -44,6 +44,20 @@ export function toolKey(tool, input) {
   return `${String(tool || 'tool')}:${String(cmd == null ? '' : cmd).replace(/\s+/g, ' ').trim().slice(0, 120)}`;
 }
 
+// The output text of a failed tool, or '' when the call did not fail. Real CodeArts often reports a
+// shell failure as status 'completed' with a nonzero exit code, not status 'error'; a passing command
+// (exit 0, or no exit code at all) is never a failure, so output that merely quotes an error inside a
+// green test run is not classified.
+export function toolFailureText(st) {
+  if (!st || typeof st !== 'object') return '';
+  if (st.status === 'error') return String(st.error || st.output || '').trim();
+  if (st.status === 'completed') {
+    const code = st.metadata?.exit ?? st.metadata?.exitCode ?? st.exitCode ?? st.exit;
+    if (typeof code === 'number' && code !== 0) return String(st.output || st.error || '').trim();
+  }
+  return '';
+}
+
 // Explicit first/second-person requests for a lead decision or permission. The strong phrases need
 // no question mark; the weak ones only count inside a real question.
 const STRONG = [
