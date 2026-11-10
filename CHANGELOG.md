@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 (2026-11-10)
+
+Updates
+- macOS: output printed right before ca exits (CA_RESULT, error messages) is no longer lost when an agent or the MCP server reads ca through a pipe.
+- Phones: the top bar fits a 390 px screen with Linux and macOS fonts (the Needs you pill stuck out by up to 25 px).
+- CI is green on Linux (Node 20 and 22), macOS and Windows: check fixes for zombie processes, animation timing and font metrics.
+
 ## 0.7.0 (2026-11-10)
 
 Updates
