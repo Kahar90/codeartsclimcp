@@ -99,7 +99,7 @@ const TRANSIENT_RX = [
   /\bECONNRESET\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|\bENOTFOUND\b/i,
   /fetch failed|socket hang ?up|Cannot connect/i,
   // Git transport fatals: a transient clone/fetch/push network error (not an actionable env failure).
-  /fatal:\s*unable to access/i,
+  /Connection reset/i,
   /Failed to connect|Could not resolve host/i,
   /\bnetwork\b/i,
   /\b429\b|rate.?limit|too many requests|quota|Queuing/i,

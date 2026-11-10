@@ -60,6 +60,8 @@ check('pure ignore: rate limit already retried', sig('Too many requests, the rat
 check('pure ignore: a 5xx transport error', sig('Error: 503 Service Unavailable\nCannot connect to host') === null);
 check('pure ignore: git transient network fatal (unable to access / Failed to connect)', sig("fatal: unable to access 'https://example.com/x.git/': Failed to connect to example.com port 443") === null);
 check('pure ignore: git transient network fatal (Could not resolve host)', sig('fatal: unable to access ...: Could not resolve host: github.com') === null);
+check('pure env: git authentication failure needs the lead', sig("fatal: unable to access 'https://example.com/x.git/': The requested URL returned error: 403")?.kind === 'env');
+check('pure env: git certificate failure needs the lead', sig("fatal: unable to access 'https://example.com/x.git/': SSL certificate problem: unable to get local issuer certificate")?.kind === 'env');
 check('pure env still: a non-network git fatal is actionable', sig("fatal: not a git repository (or any of the parent directories): .git")?.kind === 'env');
 check('pure ignore: inline-backtick quoted error in prose', sig('I hit `Permission denied` while running it, then chmodded the file and fixed it.') === null);
 check('pure ignore: inline-code error in prose is stripped, real unquoted env still fires', sig('Note `leftover` then fatal: Unable to create .git/index.lock: Permission denied')?.kind === 'env');
