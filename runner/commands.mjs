@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { CA_ENTRY, EXE, HERE, PLANS, REG, ackNote, alive, caEnv, compact, dashUrl, die, dur, findLane, health, killTree, laneAlive, laneId, laneIndex, laneMemoFor, laneSeen, lanes, now, oneLine, planClosed, plans, plansSnapshot, readAcks, readJSON, readJSONCached, resultOf, setAck, sleep, stepProgress, writeAcks } from './common.mjs';
+import { CA_ENTRY, EXE, HERE, PLANS, REG, ackNote, alive, caEnv, compact, controlTarget, dashUrl, die, dur, findLane, health, killTree, laneAlive, laneId, laneIndex, laneMemoFor, laneSeen, lanes, now, oneLine, planClosed, plans, plansSnapshot, readAcks, readJSON, readJSONCached, resultOf, setAck, sleep, stepProgress, writeAcks } from './common.mjs';
 import { laneActions, laneBucket, laneKind, laneOutcome } from './controls.mjs';
 import { tokenTotal, withTotal } from './tokens.mjs';
 
@@ -170,7 +170,7 @@ export function steer(l, text) {
 }
 export function cmdSteer(args) {
   const [q, ...rest] = args; if (!q || !rest.length) die('usage: ca steer <lane> <message>', 2);
-  const l = findLane(q); const r = steer(l, rest.join(' '));
+  const l = controlTarget(q, 'steer'); const r = steer(l, rest.join(' '));
   if (r.error) die(r.error, 2);
   console.log(`queued for ${l.id}; it goes into the session within 2 s (phase ${l.s.phase}). Follow: ca tail ${l.id} -f`);
 }
@@ -213,8 +213,7 @@ export function cmdAck(args) {
   if (args.includes('--stale')) return ackStale(args);
   const ni = args.indexOf('--note'); const note = ni >= 0 ? args.slice(ni + 1).join(' ').trim() : '';
   const q = args.slice(0, ni >= 0 ? ni : undefined).find((a) => !a.startsWith('--'));
-  if (!q) die('usage: ca ack <lane> [--note "text"] [--undo]', 2);
-  const l = findLane(q);
+  const l = controlTarget(q, 'ack', 'usage: ca ack <lane> [--note "text"] [--undo]');
   if (!l.s.result) {
     // A running lane with an open blocker: acknowledge it by file, the supervisor clears it on the next tick.
     if (l.s.blocker && alive(l.s.pid)) { fs.writeFileSync(path.join(l.dir, 'BLOCKER_ACK'), String(now())); console.log(`${l.id}: blocker acknowledged (${l.s.blocker.kind})`); return; }
@@ -225,7 +224,7 @@ export function cmdAck(args) {
   console.log(`${l.id}: ${undo ? 'unseen again' : 'acknowledged'}; bucket ${b.bucket} (${b.reason})`);
 }
 export function cmdStop(args) {
-  const l = findLane(args[0]);
+  const l = controlTarget(args.find((a) => !a.startsWith('--')), 'stop');
   fs.writeFileSync(path.join(l.dir, 'STOP'), String(now()));
   if (!alive(l.s.pid)) { killTree(l.s.server?.pid); const s = l.s; s.result = s.result || 'stopped'; s.phase = 'finished'; s.finishedAt = s.finishedAt || now(); s.activity = 'stopped (supervisor had died)'; fs.writeFileSync(path.join(l.dir, 'state.json'), JSON.stringify(s, null, 2)); console.log(`supervisor was gone; killed its server and marked ${l.id} stopped`); return; }
   console.log(`stop requested for ${l.id}; the supervisor aborts the session and writes the summary within a few seconds`);
@@ -271,7 +270,7 @@ export function cmdResume(args) {
   const q = args.slice(0, ni >= 0 ? ni : args.length).find((a) => !a.startsWith('--'));
   if (!q) die('usage: ca resume <lane> [--note "<text>"] [--dry-run]', 2);
   if (args.includes('--dry-run')) process.env.CA_RESUME_DRY = '1';
-  const l = findLane(q);
+  const l = controlTarget(q, 'resume');
   const r = resumeLane(l, { note, by: 'ca resume' });
   if (r.error) die(r.error, 2);
   console.log(`CA_RESUME ${JSON.stringify({ lane: l.id, ok: true, dry: !!r.dry, argv: r.argv, message: r.message })}`);
@@ -298,7 +297,7 @@ export function cmdKick(args) {
   for (const a of args) { if (flags[a]) mode = flags[a]; else rest.push(a); }
   const [q, ...msg] = rest;
   if (!q) die('usage: ca kick <lane> [--fresh|--server|--now] [message]', 2);
-  const l = findLane(q);
+  const l = controlTarget(q, 'kick');
   const r = kickLane(l, { mode, text: msg.join(' ').trim(), by: 'ca kick' });
   if (r.error) die(r.error, 2);
   console.log(`CA_KICK ${JSON.stringify({ lane: l.id, ok: true, mode, file: r.file })}`);
@@ -379,7 +378,7 @@ export async function removePlan(r, { by = 'ca plan rm' } = {}) {
 export async function cmdRm(args) {
   const keep = args.includes('--keep-logs');
   const q = args.filter((a) => !a.startsWith('--'))[0];
-  const l = findLane(q);
+  const l = controlTarget(q, 'rm', 'usage: ca rm <lane> [--keep-logs]');
   const r = await removeLane(l, { purge: !keep, by: 'ca rm' });
   if (r.error) die(r.error, r.code || 1);
   console.log(`removed ${r.id}; killed [${r.killed.join(', ') || '-'}]; deleted [${r.removed.join(', ') || '(none)'}]`);

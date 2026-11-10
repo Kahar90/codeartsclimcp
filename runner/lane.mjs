@@ -26,6 +26,7 @@ export async function runLane(repoArg, task, opts = {}) {
   if (badCheck) die(`tasks/${task}.md still has a template placeholder CHECK line: "${badCheck}". Replace it with a real command or delete it.`, 2);
   if (!git(repo, 'rev-parse', '--git-dir')) die(`${repo} is not a git repo`, 2);
   const id = `${path.basename(repo)}--${task}`.replace(/[^\w.-]+/g, '_');
+  process.env.CA_IN_LANE = id; // inherited by the codearts server and its worker: the lane never controls itself
   const dir = path.join(repo, 'tasks', `${task}.lane`);
   const prev = readJSON(path.join(dir, 'state.json'));
   if (prev && alive(prev.pid) && prev.pid !== process.pid && !prev.result) die(`lane ${id} is already running (pid ${prev.pid})`, 2);

@@ -273,6 +273,15 @@ export function pickOne(items, q, idOf, taskOf) {
   if (subs.length > 1) return { hit: null, matches: subs.map(idOf) };
   return { hit: null };
 }
+// Lane control (stop, rm, kick, resume, ack, steer) always names its lane: no "the only running lane"
+// guess, which once let a worker smoke-testing `ca stop` stop its own lane. A lane also never controls
+// itself: the supervisor sets CA_IN_LANE for everything it starts, so a worker cannot stop or steer it.
+export function controlTarget(q, verb, usage) {
+  if (!q) die(usage || `usage: ca ${verb} <lane>`, 2);
+  const l = findLane(q);
+  if (process.env.CA_IN_LANE && process.env.CA_IN_LANE === l.id) die(`refused: lane ${l.id} cannot ${verb} itself; lane control is for the lead`, 2);
+  return l;
+}
 export function findLane(q) {
   const all = lanes();
   if (!q) { const runningLanes = all.filter((l) => !l.s.result); if (runningLanes.length === 1) return runningLanes[0]; die('which lane? ' + all.map((l) => l.id).join(', '), 2); }
