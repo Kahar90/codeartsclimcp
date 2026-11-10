@@ -762,7 +762,7 @@ export async function runLane(repoArg, task, opts = {}) {
       // ack mutes it until a new commit lands, so the lead is not nagged about a gap it already saw.
       const ackMuted = S.noCommitAckAt && !(S.lastCommitAt > S.noCommitAckAt);
       if (CFG.noCommitS > 0 && !ackMuted && !S.blocker && (S.phase === 'build' || S.phase === 'fix')) {
-        const base = Math.max(S.runStartedAt || S.startedAt || T0, S.lastCommitAt || 0, S.blockerClearedAt || 0);
+        const base = Math.max(S.runStartedAt || S.startedAt || T0, S.lastCommitAt || 0, S.blockerClearedAt || 0, S.phases.at(-1)?.at || 0);
         if (now() - base > CFG.noCommitS * 1000) {
           const cur = stepProgress(S).current;
           const text = `no commit in ${dur(now() - base)} for a new step${cur ? ` (stuck before step ${cur.n})` : ''}`;
