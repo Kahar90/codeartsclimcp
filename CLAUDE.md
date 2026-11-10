@@ -36,4 +36,4 @@ Checks (the runner prints per-check times; slow ones are listed in checks/out/ti
 
 Manual: `node runner/ca.mjs dash 4790`, then http://127.0.0.1:4790/office (`?demo=1`, `?demo=done`,
 `?demo=needs`, `?demo=failed`, `?demo=quiet`, `?demo=big`); Lanes: http://127.0.0.1:4790/?demo=1
-(`&glance=done|failed|quiet`). Design kit: `design/`.
+(`&glance=done|failed|quiet`). Design specs: `docs/design/`; status contracts: `docs/contracts/`.

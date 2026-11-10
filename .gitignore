@@ -1,7 +1,17 @@
+# dependencies and check output
 node_modules/
 checks/out/
 checks/profile-*/
+*.tgz
+
+# CodeArts workspace state
 .codeartsdoer/
-tasks/*.lane/
-tasks/*.out
-tasks/*.lane.log
+
+# the lead's working folder: briefs, plans, lane logs and state
+tasks/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

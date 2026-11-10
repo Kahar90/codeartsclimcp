@@ -535,7 +535,7 @@ function tokLabel(tokens) { return `${tokens && tokens.complete === false ? 'Kno
 function tokTitle(tokens) { const miss = (tokens && tokens.missing) || []; return miss.length ? `not reported by ${miss.map(short).join(', ')}` : ''; }
 
 // ---------- glance: one state per plan, shown at a glance ----------
-// Contract (tasks/glance-contract.txt): plan.glance = { state, word, detail, at }. Colours, glyphs
+// Contract (docs/contracts/glance.txt): plan.glance = { state, word, detail, at }. Colours, glyphs
 // (written as JS unicode escapes) and the worst-first priority live here so the banner, the rail dot,
 // the tab title, the favicon and the notifications all read the same state. If plan.glance is missing
 // (or its state is unknown) every glance surface stays hidden.

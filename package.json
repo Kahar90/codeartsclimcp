@@ -1,8 +1,26 @@
 {
   "name": "codearts-lanes",
   "version": "0.6.0",
-  "type": "module",
   "description": "CodeArts lanes runner: supervise private CodeArts coding lanes from any agent harness",
+  "keywords": [
+    "codearts",
+    "huawei-cloud",
+    "coding-agent",
+    "mcp",
+    "cli",
+    "agent-orchestration"
+  ],
+  "homepage": "https://github.com/Kahar90/codeartsclimcp#readme",
+  "bugs": {
+    "url": "https://github.com/Kahar90/codeartsclimcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kahar90/codeartsclimcp.git"
+  },
+  "license": "MIT",
+  "author": "Nabil Alkahar",
+  "type": "module",
   "bin": {
     "ca": "runner/ca.mjs"
   },
@@ -13,19 +31,17 @@
     "bin",
     "scripts",
     "CHANGELOG.md",
-    "!docs/images"
+    "!docs/images",
+    "!docs/design",
+    "!docs/contracts"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
+    "test": "node tools/run-checks.mjs",
     "check": "node tools/run-checks.mjs",
-    "sync": "node tools/sync-skill.mjs",
-    "check:full": "node tools/run-checks.mjs --full"
-  },
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Kahar90/codeartsclimcp.git"
+    "check:full": "node tools/run-checks.mjs --full",
+    "sync": "node tools/sync-skill.mjs"
   }
 }

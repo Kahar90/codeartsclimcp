@@ -1,4 +1,4 @@
-// Contract check for the shared status truth (tasks/status-contract.txt): every lane status carries
+// Contract check for the shared status truth (docs/contracts/status.txt): every lane status carries
 // attention/steps/glyph, an acked stopped lane reads "Handled by lead", a closed plan's lanes are not
 // attention and its badge is the glance word, the close-reason prefixes are stripped, and the plan
 // patch can come from a file or stdin. Unit-tests laneOutcome, then drives the real CLI against fake

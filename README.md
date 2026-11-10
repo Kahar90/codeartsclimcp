@@ -137,5 +137,4 @@ written to the repo or shown to the agent.
 - [Screenshot sources](docs/images/README.md): how the images above were captured.
 - [AGENTS.md](AGENTS.md) and [INSTALL.md](INSTALL.md): instructions written for coding agents.
 
-Contributing: `npm run check` runs every contract check in `checks/` (fake lanes, no paid model
-calls; the Office checks need Chrome). Node ESM, no dependencies.
+Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).

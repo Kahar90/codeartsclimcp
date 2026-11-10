@@ -1,4 +1,4 @@
-// Contract check for the per-plan glance (runner/ca.mjs glanceOf): every rule of tasks/glance-contract.txt,
+// Contract check for the per-plan glance (runner/ca.mjs glanceOf): every rule of docs/contracts/glance.txt,
 // plus ca note --phase asking accepted and an unknown phase refused. ca.mjs exposes nothing importable,
 // so this drives the real CLI against temp plan.json and lane files in a temp CA registry, like
 // checks/planstate.check.mjs does, and reads the glance off `ca plan list --json`.

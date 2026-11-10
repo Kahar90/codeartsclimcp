@@ -130,10 +130,4 @@ loopback: its steer box drives the lane.
 
 ## 6. Working on this repo
 
-- Layout: `runner/` (`ca.mjs` CLI and supervisor, `mcp.mjs`, `setup.mjs`, `onboard.mjs`,
-  `dash.html`, `office.html`, `assets/`), `templates/` (brief and review), `docs/workflow.md`
-  (lead workflow), `checks/` (contract checks), `design/` (Office art direction), `tasks/`
-  (briefs used to build this repo).
-- Checks: `npm run check` (all of `checks/*.check.mjs`; fake lanes, no paid model calls; the
-  UI checks need Chrome). Quick: `node --check runner/ca.mjs`.
-- Style: Node ESM, no dependencies, no em dashes in code, docs or commits.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the layout, the checks and the release steps.

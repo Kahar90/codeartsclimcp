@@ -1,24 +1,45 @@
 name: check
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
+        exclude:
+          - os: macos-latest
+            node: 20
+          - os: windows-latest
+            node: 20
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       CA_DASH: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: git identity
         run: |
           git config --global user.email ci@example.com
           git config --global user.name ci
+      - name: syntax
+        run: node -e "const fs=require('fs');const {execFileSync}=require('child_process');for(const d of ['runner','checks','checks/lib','tools','bench'])for(const f of fs.readdirSync(d))if(/\.(mjs|cjs|js)$/.test(f))execFileSync(process.execPath,['--check',d+'/'+f],{stdio:'inherit'})"
+      - name: package contents
+        run: npm pack --dry-run
       - name: checks
         run: npm run check:full
