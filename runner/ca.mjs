@@ -413,7 +413,7 @@ async function runLane(repoArg, task, opts = {}) {
   const stepCount = stepList.length;
   // Warn (never block) about a brief that protects a file it also changes or runs a missing CHECK file.
   const briefWarnings = briefWarningsFor(repo, task) || [];
-  for (const w of briefWarnings) say(`brief warning: ${briefWarningText(w)}`);
+  for (const t of briefWarningLines(briefWarnings)) say(`brief warning: ${t}`);
   // The worker's bash tool runs inside a sandbox that blocks the loopback network, so a check that
   // starts a local server hangs or fails there. Write a helper that asks this runner (outside the
   // sandbox) to run a CHECK line. Listing embeds the commands, so it needs no runner. Written now,
@@ -1675,7 +1675,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     `=== lane ${id}: ${S.result.toUpperCase()}${reason ? ' (' + reason + ')' : ''} in ${dur(now() - T0)} ===`,
     `models: build ${buildModel}, review ${REVIEW} | tokens in ${S.tokens.input} out ${S.tokens.output} (cache read ${S.tokens.cacheRead}) over ${S.tokens.steps} steps | total ${tokenTotal(S.tokens)} | by agent: build ${tokenTotal(S.tokensBy.build)}, review ${tokenTotal(S.tokensBy.review)}, other ${tokenTotal(S.tokensBy.other)}${byModel}`,
     `commits ${S.commits} (brief has ${stepCount} numbered lines):`, log || '(none)',
-    ...(S.briefWarnings?.length ? [`brief warnings: ${S.briefWarnings.map((w) => briefWarningText(w)).join(' | ')}`] : []),
+    ...(S.briefWarnings?.length ? [`brief warnings: ${briefWarningLines(S.briefWarnings).join(' | ')}`] : []),
     left.length ? `UNCOMMITTED: ${left.slice(0, 8).join(', ')}` : 'work tree: clean',
     ...(PRE_DIRTY.size ? [`already dirty before the lane (ignored): ${[...PRE_DIRTY].slice(0, 8).join(', ')}`] : []),
     `gates: ${S.gates.length ? S.gates.map((g) => `${g.gate} ${g.ok ? 'ok' : 'FAIL'}`).join(' | ') : '(none ran)'} | fix rounds ${S.fixes}`,
@@ -1712,7 +1712,7 @@ function cmdDetach(repoArg, task) {
   const briefFile = path.join(repo, 'tasks', `${task}.md`);
   if (!task || !fs.existsSync(briefFile)) die(`usage: ca lane <repo> <task>   (needs ${briefFile})`, 2);
   // Print the same brief warnings the foreground lane does, before the child starts.
-  for (const w of (briefWarningsFor(repo, task) || [])) console.log(`brief warning: ${briefWarningText(w)}`);
+  for (const t of briefWarningLines(briefWarningsFor(repo, task) || [])) console.log(`brief warning: ${t}`);
   const id = laneId(repo, task);
   const logFile = path.join(repo, 'tasks', `${task}.lane.log`);
   const out = fs.openSync(logFile, 'a');
@@ -2400,6 +2400,22 @@ function briefWarningText(w) {
   if (w.kind === 'missing-check-file') return `a CHECK line runs ${w.file}, which is not a file in the repo`;
   return `${w.kind}: ${w.file}`;
 }
+// Readable warning lines: more than 3 protected files under the same rule naming the same changed files
+// become one line (a check suite names the runner in every file), so the real warning is not buried.
+function briefWarningLines(warnings) {
+  const groups = new Map(); const order = [];
+  for (const w of warnings || []) {
+    const key = w.kind === 'protected-dependent' ? `${w.rule}\u0000${(w.references || []).join(',')}` : `\u0001${order.length}`;
+    if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+    groups.get(key).push(w);
+  }
+  return order.map((k) => {
+    const g = groups.get(k);
+    if (g.length <= 3) return g.map(briefWarningText);
+    const w = g[0];
+    return [`${g.length} protected files are named by a rule ("${w.rule}") but the brief changes ${(w.references || []).join(', ')}, which they name (e.g. ${g.slice(0, 3).map((x) => x.file).join(', ')}): say in the brief how they may change`];
+  }).flat();
+}
 // `ca brief-check <repo> <task> [--json]`: print the brief warnings a lead should fix before a lane
 // starts. Warnings never block a lane; the command always exits 0, so a missing brief just has none.
 function cmdBriefCheck(args) {
@@ -2410,7 +2426,7 @@ function cmdBriefCheck(args) {
   const warnings = briefWarningsFor(repo, task) || [];
   if (asJson) { console.log(JSON.stringify({ warnings }, null, 2)); return; }
   if (!warnings.length) console.log('brief: no warnings');
-  else for (const w of warnings) console.log(`brief warning: ${briefWarningText(w)}`);
+  else for (const t of briefWarningLines(warnings)) console.log(`brief warning: ${t}`);
 }
 // `ca workspace <repo> <task>`: prepare a parallel lane workspace as a LOCAL CLONE
 // (../<repo-name>-wt-<task>) on a new branch lane/<task>, from --from (default: the repo's current
