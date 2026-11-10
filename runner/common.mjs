@@ -338,11 +338,12 @@ export const CA_ENTRY = path.join(HERE, 'ca.mjs');
 
 export const dashUrl = () => `http://127.0.0.1:${Number(process.env.CA_DASH_PORT || 4777)}`;
 
-// Lint a brief the way `ca brief-check` and the start of `ca lane` do (tracked files from git ls-files).
+// Include existing untracked contracts: the lead may write one before the lane's first commit.
 export function briefWarningsFor(repo, task) {
   const file = path.join(repo, 'tasks', `${task}.md`);
   let briefText = null; try { briefText = fs.readFileSync(file, 'utf8'); } catch { return null; }
-  const tracked = git(repo, 'ls-files').split(/\r?\n/).filter(Boolean);
+  const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: repo, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  const tracked = listed.status === 0 ? listed.stdout.split('\0').filter(Boolean) : [];
   return lintBrief({ repo, briefText, listFiles: () => tracked, readFile: (rel) => { try { return fs.readFileSync(path.join(repo, rel), 'utf8'); } catch { return ''; } } });
 }
 
