@@ -65,11 +65,13 @@ try {
     `wc ${JSON.stringify(r.workerChecks.map((x) => [x.n, x.code]))} count1 ${r.runs(1)} gates ${JSON.stringify(r.gates.map((x) => [!!x.reused, x.ok]))}`);
 
   // S4: check 1 has no cached result and, when it runs, mutates the content under test. The cached check 2
-  // was fingerprinted before that change, so it must not be reused: it reruns against the new content.
+  // was fingerprinted before that change, so it must not be reused. A fix turn commits the new file,
+  // then the final gate rechecks the resulting clean tree.
   r = lane('mutate', ['commit:1+run:2+ok'], [mutate, counter(2)]);
   check('S4 lane DONE', r.code === 0 && r.st?.result === 'done', `${r.code} ${r.st?.result}`);
-  check('S4 a check that mutates the tree invalidates the later cached line, which reruns', r.runs(1) === 1 && r.runs(2) === 2 && !r.gates[1].reused && r.gates[1].ok,
+  check('S4 a mutation invalidates the later cached line and the committed result is rechecked', r.runs(1) === 2 && r.runs(2) === 3 && !r.gates[1].reused && r.gates[1].ok,
     `count1 ${r.runs(1)} count2 ${r.runs(2)} gates ${JSON.stringify(r.gates.map((x) => [!!x.reused, x.ok]))}`);
+  check('S4 completion leaves the working tree clean', !r.status.trim(), r.status);
 
   // S5: check 1 runs first and fails; the sequential gate stops. Check 2 (cached green) must not be
   // accepted as reused and check 3 (never cached) must not run: neither may appear as a gate row.
