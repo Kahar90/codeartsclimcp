@@ -484,7 +484,7 @@ async function runLane(repoArg, task, opts = {}) {
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
     interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
-    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [],
+    stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null,
   };
   if (resumed) {
     const runs = [...(resumed.runs || []), { startedAt: resumed.runStartedAt || resumed.startedAt, finishedAt: resumed.finishedAt, result: resultOf(resumed), reason: resumed.reason || '' }];
@@ -494,7 +494,7 @@ async function runLane(repoArg, task, opts = {}) {
       tokensBy: { build: by('build'), review: by('review'), other: by('other') }, tokensByModel: byModel,
       interruptions: resumed.interruptions || [], steers: resumed.steers || [], permissions: resumed.permissions || [], errors: resumed.errors || [],
       outside: resumed.outside || [], files: resumed.files || [], todos: resumed.todos || [], phases: [...(resumed.phases || []), { phase: 'starting', at: T0 }],
-      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [] });
+      stepReviews: resumed.stepReviews || [], stepReviewContinues: resumed.stepReviewContinues || 0, workerChecks: resumed.workerChecks || [], reviewRounds: resumed.reviewRounds || [], questions: resumed.questions || [] });
   }
   const insideRepo = (f) => { const a = path.resolve(repo, String(f).replace(/[\\/]\*+$/, '')).toLowerCase(); return [repo, os.tmpdir()].some((r) => a === r.toLowerCase() || a.startsWith(r.toLowerCase() + path.sep)); };
   let lastWrite = 0;
@@ -658,7 +658,15 @@ async function runLane(repoArg, task, opts = {}) {
       }
       case 'permission.asked': case 'permission.updated': handlePermission(pr); break;
       case 'question.asked': {
-        L(`  ? question asked: ${oneLine(pr.questions?.[0]?.question || JSON.stringify(pr), 200)} -> rejected (headless, no questions)`);
+        const q = oneLine(pr.questions?.[0]?.question || JSON.stringify(pr), 300);
+        L(`  ? question asked: ${q} -> rejected (headless, no questions)`);
+        // The lead watches ca wait / status / the bucket, so record the question as a blocker and tell the
+        // worker to carry on with its best option instead of waiting (the question is still rejected).
+        S.blocker = { kind: 'question', text: q, at: now() };
+        (S.questions ||= []).push({ text: q, at: now() });
+        L(`  ! blocked: asked the lead: ${q}`);
+        try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-question.txt`), `Message from the runner: your question was sent to the lead: ${q}. Do not wait for an answer. Pick the option that best fits the brief, say which in one line, and continue. The lead will steer you if it disagrees.`); } catch {}
+        save(true);
         server.api('POST', `/question/${pr.id}/reject`, {}).catch((err) => L(`  ! question reject failed: ${err.message}`)); break;
       }
       case 'todo.updated': if (Array.isArray(pr.todos) && (!sid || sid === S.buildSession || sid === S.activeSession)) S.todos = pr.todos.map((t) => ({ text: oneLine(t.content, 200), status: t.status })); break;
@@ -1565,6 +1573,7 @@ Message from the lead: ${rk.text}` : ''), model, agent);
     ...(S.keysMessage ? [`keys: ${S.keysMessage}`] : []),
     ...(S.modelSwitches?.length ? [`model switch: ${S.modelSwitches.map((x) => `${x.from} -> ${x.to} (${x.why})`).join('; ')}`] : []),
     `steering: ${S.steers.length ? S.steers.map((x) => `[${x.by}] ${oneLine(x.text, 160)}`).join(' / ') : 'none'}`,
+    `questions: ${S.questions?.length ? S.questions.map((x) => oneLine(x.text, 200)).join(' / ') : 'none'}`,
     `outside-repo file access: ${S.outside.length ? S.outside.slice(0, 5).map((x) => `${x.tool} ${x.path}`).join(', ') : 'none'}`,
     `permissions: ${S.permissions.length ? S.permissions.map((x) => `${x.kind}->${x.reply}`).join(', ') : 'none asked'}`,
     ...(S.errors.length ? [`errors: ${S.errors.slice(-3).map((x) => x.msg).join(' / ')}`] : []),
