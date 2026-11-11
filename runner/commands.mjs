@@ -10,6 +10,13 @@ import { tokenTotal, withTotal } from './tokens.mjs';
 
 // ---------- control commands ----------
 export function laneHealthOf(l) { const m = laneMemoFor(l); if (m.health === undefined) m.health = health(l.s); return m.health; }
+// A lane can be resumed only while its repo folder and brief still exist; cached with the classify pass
+// so a poll stats each lane once. Mirrors the canResume laneView passes to laneActions.
+function laneCanResume(l) {
+  const m = laneMemoFor(l);
+  if (m.canResume === undefined) m.canResume = fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`));
+  return m.canResume;
+}
 // The one classify pass for a lane, memoized on the lane object so a poll reuses it across laneRow,
 // laneStatusOf and bucketFor. The handled (ack) and closed-plan overlays are computed here and handed
 // to classify; nothing is read by classify itself.
@@ -18,7 +25,7 @@ function classifyLane(l, s = l.s) {
   if (s === l.s && m.classified) return m.classified;
   const handled = !!(s.result && laneSeen(l.id, s.finishedAt));
   const closed = !!s.result && closedPlanLanes().has(l.id);
-  const c = classify({ s, alive: laneAlive(l), health: s === l.s ? laneHealthOf(l) : health(s), handled, note: handled ? ackNote(l.id) : '', closed, progress: stepProgress(s) });
+  const c = classify({ s, alive: laneAlive(l), health: s === l.s ? laneHealthOf(l) : health(s), handled, note: handled ? ackNote(l.id) : '', closed, progress: stepProgress(s), canResume: laneCanResume(l) });
   if (s === l.s) m.classified = c;
   return c;
 }

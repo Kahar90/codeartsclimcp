@@ -287,7 +287,10 @@ export function classify({ s, alive, health, handled, note, closed, progress, ca
   const res = end ? end.result : null;
   const cause = end ? end.cause : null;
   const status = statusOf({ s: st, res, cause, end, hk: h.kind, ht: h.text, handled: !!handled, note: note || '', closed: !!closed, progress });
-  const b = bucketOf({ s: st, live, hk: h.kind, ht: h.text, res, cause, status, NOW });
+  // The bucket is decided from the plain status, never the handled/closed overlay: a handled lane still
+  // reports "(was <the real reason>)" (e.g. "checks failing: npm test (exit 1)"), exactly as bucketFor did.
+  const rawStatus = handled && st.result ? statusOf({ s: st, res, cause, end, hk: h.kind, ht: h.text, progress }) : status;
+  const b = bucketOf({ s: st, live, hk: h.kind, ht: h.text, res, cause, status: rawStatus, NOW });
   let bucket = b.bucket; let bucketReason = b.reason;
   if (handled && st.result) {
     if (bucket === 'attention') bucket = 'ended';
