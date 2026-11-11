@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { run, pool } from './lib/pool.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ca-blocked-')));
@@ -21,6 +22,7 @@ const results = []; const check = (name, ok, info = '') => results.push(`${ok ? 
 const env = { ...process.env, CA_REGISTRY: reg, CA_SETTINGS: settings, CA_DASH: '0', CA_NO_UPDATE_CHECK: '1', CODEARTS_EXE: process.execPath, NO_REVIEW: '1',
   CODEARTS_CLI_AK: 'fake-ak', CODEARTS_CLI_SK: 'fake-sk', STALL_S: '600', THINK_S: '0', LANE_TIMEOUT: '240', CA_MCP_WAIT_CAP_S: '20' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const makeChk = () => { const list = []; const chk = (name, ok, info = '') => list.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 300) : ''}`); return { list, chk }; };
 
 function makeRepo(name, script) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
@@ -32,10 +34,10 @@ function makeRepo(name, script) {
   g('init', '-q'); g('add', '-A'); g('-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'init');
   return repo;
 }
-const run = (cwd, args, ms = 120000, extra = {}) => spawnSync(process.execPath, [CA, ...args], { cwd, env: { ...env, ...extra }, encoding: 'utf8', timeout: ms });
+const ca = (cwd, args, ms = 120000, extra = {}) => run(process.execPath, [CA, ...args], { cwd, env: { ...env, ...extra }, timeout: ms });
 const lines = (out, tag) => String(out || '').split(/\r?\n/).filter((l) => l.startsWith(tag + ' ')).map((l) => { try { return JSON.parse(l.slice(tag.length + 1)); } catch { return null; } }).filter(Boolean);
-const row = (cwd, id) => { const r = run(cwd, ['status', '--json', '--all'], 30000); try { const j = JSON.parse(r.stdout); return (Array.isArray(j) ? j : j.lanes || []).find((x) => x.id === id) || null; } catch { return null; } };
-const until = async (f, ms) => { const end = Date.now() + ms; for (;;) { const v = f(); if (v || Date.now() > end) return v; await sleep(500); } };
+const row = async (cwd, id) => { const r = await ca(cwd, ['status', '--json', '--all'], 30000); try { const j = JSON.parse(r.stdout); return (Array.isArray(j) ? j : j.lanes || []).find((x) => x.id === id) || null; } catch { return null; } };
+const until = async (f, ms) => { const end = Date.now() + ms; for (;;) { const v = await f(); if (v || Date.now() > end) return v; await sleep(500); } };
 
 // ---------- pure: laneBucket and laneActions read the blocker ----------
 const C = await import(pathToFileURL(path.join(ROOT, 'runner', 'controls.mjs')).href);
@@ -50,67 +52,85 @@ const a = C.laneActions({ s: { ...live, blocker: { kind: 'question', text: 'Whic
 check('laneActions: a blocked lane suggests steer', a && a.suggest === 'steer' && /question|lead/i.test(a.why || ''), JSON.stringify(a));
 
 // ---------- question ----------
-const qRepo = makeRepo('qa', ['commit:1+ask:Which database should I use, SQLite or Postgres?+wait:45000', 'ok']);
-const qId = 'qa--work';
-let r = run(qRepo, ['lane', qRepo, 'work', '--detach']);
-check('question lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
-const t0 = Date.now();
-r = run(qRepo, ['wait', qId, '--timeout', '40', '--quiet']);
-const waitedS = (Date.now() - t0) / 1000;
-let bl = lines(r.stdout, 'CA_BLOCKED');
-check('ca wait returns exit 11 with a CA_BLOCKED line for the question, long before the lane ends', r.status === 11 && bl.length === 1 && bl[0].lane === qId && bl[0].kind === 'question' && /SQLite or Postgres/.test(bl[0].text || '') && waitedS < 20, `exit ${r.status} after ${waitedS.toFixed(1)}s: ${r.stdout.slice(0, 300)} ${r.stderr.slice(0, 200)}`);
-let q = row(qRepo, qId);
-check('status --json shows the open question as blocked {kind, text, at} on a lane that is still running', q && !q.result && q.blocked && q.blocked.kind === 'question' && /SQLite/.test(q.blocked.text || '') && Number.isFinite(q.blocked.at), JSON.stringify(q && q.blocked));
-const prompts = () => { try { return fs.readFileSync(path.join(qRepo, 'fake-prompts.log'), 'utf8').split('\n').filter(Boolean).map((x) => JSON.parse(x)); } catch { return []; } };
-const told = await until(() => prompts().slice(1).find((p) => /lead/i.test(p.text) && /continue/i.test(p.text) && p.agent !== 'plan'), 8000);
-check('the worker is told its question went to the lead and to continue with its best option', !!told, JSON.stringify(prompts().map((p) => p.text.slice(0, 80))));
-check('the question itself is still rejected (headless: nothing waits on a human)', fs.existsSync(path.join(qRepo, 'fake-questions.log')));
-r = run(qRepo, ['wait', qId, '--timeout', '5', '--quiet', '--json']);
-check('an open blocker keeps answering exit 11 until the lead handles it', r.status === 11 && /CA_BLOCKED/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 200)}`);
+async function scenQuestion() {
+  const { list, chk } = makeChk();
+  const qRepo = makeRepo('qa', ['commit:1+ask:Which database should I use, SQLite or Postgres?+wait:45000', 'ok']);
+  const qId = 'qa--work';
+  let r = await ca(qRepo, ['lane', qRepo, 'work', '--detach']);
+  chk('question lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+  const t0 = Date.now();
+  r = await ca(qRepo, ['wait', qId, '--timeout', '40', '--quiet']);
+  const waitedS = (Date.now() - t0) / 1000;
+  let bl = lines(r.stdout, 'CA_BLOCKED');
+  chk('ca wait returns exit 11 with a CA_BLOCKED line for the question, long before the lane ends', r.status === 11 && bl.length === 1 && bl[0].lane === qId && bl[0].kind === 'question' && /SQLite or Postgres/.test(bl[0].text || '') && waitedS < 20, `exit ${r.status} after ${waitedS.toFixed(1)}s: ${r.stdout.slice(0, 300)} ${r.stderr.slice(0, 200)}`);
+  let q = await row(qRepo, qId);
+  chk('status --json shows the open question as blocked {kind, text, at} on a lane that is still running', q && !q.result && q.blocked && q.blocked.kind === 'question' && /SQLite/.test(q.blocked.text || '') && Number.isFinite(q.blocked.at), JSON.stringify(q && q.blocked));
+  const prompts = () => { try { return fs.readFileSync(path.join(qRepo, 'fake-prompts.log'), 'utf8').split('\n').filter(Boolean).map((x) => JSON.parse(x)); } catch { return []; } };
+  const told = await until(() => prompts().slice(1).find((p) => /lead/i.test(p.text) && /continue/i.test(p.text) && p.agent !== 'plan'), 8000);
+  chk('the worker is told its question went to the lead and to continue with its best option', !!told, JSON.stringify(prompts().map((p) => p.text.slice(0, 80))));
+  chk('the question itself is still rejected (headless: nothing waits on a human)', fs.existsSync(path.join(qRepo, 'fake-questions.log')));
+  r = await ca(qRepo, ['wait', qId, '--timeout', '5', '--quiet', '--json']);
+  chk('an open blocker keeps answering exit 11 until the lead handles it', r.status === 11 && /CA_BLOCKED/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 200)}`);
 
-// MCP: ca_wait answers the blocker as a result with a next hint naming ca_steer
-const srv = spawn(process.execPath, [CA, 'mcp'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-let buf = ''; const waiters = new Map(); let nid = 0;
-srv.stdout.on('data', (x) => { buf += x; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue; let m; try { m = JSON.parse(line); } catch { continue; } if (m.id != null && waiters.has(m.id)) { waiters.get(m.id)(m); waiters.delete(m.id); } } });
-const rpc = (method, params, ms = 40000) => new Promise((res) => { const i = ++nid; const to = setTimeout(() => { waiters.delete(i); res({ timeout: true }); }, ms); waiters.set(i, (m) => { clearTimeout(to); res(m); }); srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: i, method, params }) + '\n'); });
-try {
-  await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'check', version: '1' } });
-  srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  const m = await rpc('tools/call', { name: 'ca_wait', arguments: { lanes: [qId] } });
-  const t = (m.result?.content || []).map((c) => c.text || '').join('\n');
-  check('MCP ca_wait returns the blocker (not an error) with the question and a next hint naming ca_steer', m.result && !m.result.isError && /SQLite or Postgres/.test(t) && /ca_steer/.test(t), t.slice(0, 400));
-} finally { srv.kill(); }
+  // MCP: ca_wait answers the blocker as a result with a next hint naming ca_steer
+  const srv = spawn(process.execPath, [CA, 'mcp'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let buf = ''; const waiters = new Map(); let nid = 0;
+  srv.stdout.on('data', (x) => { buf += x; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue; let m; try { m = JSON.parse(line); } catch { continue; } if (m.id != null && waiters.has(m.id)) { waiters.get(m.id)(m); waiters.delete(m.id); } } });
+  const rpc = (method, params, ms = 40000) => new Promise((res) => { const i = ++nid; const to = setTimeout(() => { waiters.delete(i); res({ timeout: true }); }, ms); waiters.set(i, (m) => { clearTimeout(to); res(m); }); srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: i, method, params }) + '\n'); });
+  try {
+    await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'check', version: '1' } });
+    srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+    const m = await rpc('tools/call', { name: 'ca_wait', arguments: { lanes: [qId] } });
+    const t = (m.result?.content || []).map((c) => c.text || '').join('\n');
+    chk('MCP ca_wait returns the blocker (not an error) with the question and a next hint naming ca_steer', m.result && !m.result.isError && /SQLite or Postgres/.test(t) && /ca_steer/.test(t), t.slice(0, 400));
+  } finally { srv.kill(); }
 
-r = run(qRepo, ['steer', qId, 'Use SQLite.']);
-check('ca steer is accepted on the blocked lane', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
-q = await until(() => { const x = row(qRepo, qId); return x && !x.blocked ? x : null; }, 10000);
-check('a delivered steer clears the blocker while the lane keeps running', !!q && !q.result, JSON.stringify(row(qRepo, qId)?.blocked));
-r = run(qRepo, ['wait', qId, '--timeout', '90', '--quiet']);
-check('after the steer, ca wait runs to the lane result (exit 0, no CA_BLOCKED)', r.status === 0 && /CA_RESULT/.test(r.stdout) && !/CA_BLOCKED/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 300)}`);
-const sum = (() => { try { return fs.readFileSync(path.join(qRepo, 'tasks', 'work.lane', 'summary.md'), 'utf8'); } catch { return ''; } })();
-check('the summary lists the question the worker asked', /SQLite or Postgres/.test(sum), sum.slice(0, 300));
+  r = await ca(qRepo, ['steer', qId, 'Use SQLite.']);
+  chk('ca steer is accepted on the blocked lane', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+  q = await until(async () => { const x = await row(qRepo, qId); return x && !x.blocked ? x : null; }, 10000);
+  chk('a delivered steer clears the blocker while the lane keeps running', !!q && !q.result, JSON.stringify((await row(qRepo, qId))?.blocked));
+  r = await ca(qRepo, ['wait', qId, '--timeout', '90', '--quiet']);
+  chk('after the steer, ca wait runs to the lane result (exit 0, no CA_BLOCKED)', r.status === 0 && /CA_RESULT/.test(r.stdout) && !/CA_BLOCKED/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 300)}`);
+  const sum = (() => { try { return fs.readFileSync(path.join(qRepo, 'tasks', 'work.lane', 'summary.md'), 'utf8'); } catch { return ''; } })();
+  chk('the summary lists the question the worker asked', /SQLite or Postgres/.test(sum), sum.slice(0, 300));
+  return list;
+}
 
 // ---------- no progress ----------
-const nRepo = makeRepo('np', ['wait:30000', 'commit:1', 'ok']);
-const nId = 'np--work';
-r = run(nRepo, ['lane', nRepo, 'work', '--detach'], 60000, { NO_COMMIT_S: '6' });
-check('no-progress lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
-r = run(nRepo, ['wait', nId, '--timeout', '40', '--quiet']);
-bl = lines(r.stdout, 'CA_BLOCKED');
-check('ca wait returns exit 11 with CA_BLOCKED kind no-progress when no commit lands for NO_COMMIT_S', r.status === 11 && bl[0]?.kind === 'no-progress' && /no commit in/.test(bl[0]?.text || ''), `${r.status} ${r.stdout.slice(0, 300)}`);
-let n = row(nRepo, nId);
-check('status --json shows blocked kind no-progress', n && n.blocked && n.blocked.kind === 'no-progress', JSON.stringify(n && n.blocked));
-r = run(nRepo, ['ack', nId]);
-check('ca ack on a running blocked lane is accepted (clears the blocker, does not finish the lane)', r.status === 0 && !/handled|was done/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 200)} ${r.stderr.slice(0, 200)}`);
-n = await until(() => { const x = row(nRepo, nId); return x && !x.blocked ? x : null; }, 10000);
-check('the acked blocker is cleared while the lane keeps running', !!n && !n.result, JSON.stringify(row(nRepo, nId)));
-r = run(nRepo, ['wait', nId, '--timeout', '90', '--quiet']);
-check('the no-progress lane still finishes normally', r.status === 0 && /CA_RESULT/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 200)}`);
+async function scenNoProgress() {
+  const { list, chk } = makeChk();
+  const nRepo = makeRepo('np', ['wait:30000', 'commit:1', 'ok']);
+  const nId = 'np--work';
+  let r = await ca(nRepo, ['lane', nRepo, 'work', '--detach'], 60000, { NO_COMMIT_S: '6' });
+  chk('no-progress lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
+  r = await ca(nRepo, ['wait', nId, '--timeout', '40', '--quiet']);
+  const bl = lines(r.stdout, 'CA_BLOCKED');
+  chk('ca wait returns exit 11 with CA_BLOCKED kind no-progress when no commit lands for NO_COMMIT_S', r.status === 11 && bl[0]?.kind === 'no-progress' && /no commit in/.test(bl[0]?.text || ''), `${r.status} ${r.stdout.slice(0, 300)}`);
+  let n = await row(nRepo, nId);
+  chk('status --json shows blocked kind no-progress', n && n.blocked && n.blocked.kind === 'no-progress', JSON.stringify(n && n.blocked));
+  r = await ca(nRepo, ['ack', nId]);
+  chk('ca ack on a running blocked lane is accepted (clears the blocker, does not finish the lane)', r.status === 0 && !/handled|was done/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 200)} ${r.stderr.slice(0, 200)}`);
+  n = await until(async () => { const x = await row(nRepo, nId); return x && !x.blocked ? x : null; }, 10000);
+  chk('the acked blocker is cleared while the lane keeps running', !!n && !n.result, JSON.stringify(await row(nRepo, nId)));
+  r = await ca(nRepo, ['wait', nId, '--timeout', '90', '--quiet']);
+  chk('the no-progress lane still finishes normally', r.status === 0 && /CA_RESULT/.test(r.stdout), `${r.status} ${r.stdout.slice(0, 200)}`);
+  return list;
+}
 
-r = run(tmp, ['help'], 10000);
-check('ca help documents exit 11 and NO_COMMIT_S', /\b11\b/.test(r.stdout) && /NO_COMMIT_S/.test(r.stdout), '');
-const docs = ['docs/workflow.md', 'docs/reference.md', 'templates/claude-skill.md'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
-check('workflow, reference and the skill template document exit 11 / CA_BLOCKED', /CA_BLOCKED|exit 11|\b11\b.*block/i.test(docs) && /NO_COMMIT_S/.test(docs));
+// The two end-to-end scenarios are independent (own repo, shared registry), so overlap them.
+const [qL, npL] = await pool(4, [scenQuestion, scenNoProgress]);
+
+// ---------- help and docs ----------
+const helpPure = [];
+{
+  const chk = (name, ok, info = '') => helpPure.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 300) : ''}`);
+  const r = await ca(tmp, ['help'], 10000);
+  chk('ca help documents exit 11 and NO_COMMIT_S', /\b11\b/.test(r.stdout) && /NO_COMMIT_S/.test(r.stdout), '');
+  const docs = ['docs/workflow.md', 'docs/reference.md', 'templates/claude-skill.md'].map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+  chk('workflow, reference and the skill template document exit 11 / CA_BLOCKED', /CA_BLOCKED|exit 11|\b11\b.*block/i.test(docs) && /NO_COMMIT_S/.test(docs));
+}
+
+results.push(...qL, ...npL, ...helpPure);
 
 for (const l of results) console.log(l);
 const fails = results.filter((l) => l.startsWith('FAIL')).length;
