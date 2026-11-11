@@ -72,7 +72,10 @@ const dashPipeline = fn(dash, 'pipeline', { esc: (s) => String(s ?? '') });
 
 // The server sends bucket on every lane; the fallback must mirror runner/controls.mjs laneBucket.
 check('dash: an explicit bucket wins', dashBucket({ bucket: 'ended', result: 'failed' }) === 'ended');
-for (const r of ['done', 'continued']) check(`dash: result ${r} buckets done`, dashBucket({ result: r }) === 'done');
+check('dash: result done buckets done', dashBucket({ result: 'done' }) === 'done');
+check('dash: result continued buckets ended, as on the server', dashBucket({ result: 'continued' }) === 'ended');
+check('dash: a thinking lane without status buckets attention', dashBucket({ running: true, health: 'thinking (12m, no tool call)' }) === 'attention');
+check('dash: a lane with a worker question buckets attention', dashBucket({ running: true, health: 'running', blocker: { kind: 'question', text: 'which file?' } }) === 'attention');
 for (const r of ['stopped', 'killed', 'dropped']) check(`dash: result ${r} buckets ended`, dashBucket({ result: r }) === 'ended');
 for (const r of ['failed', 'paused', 'needs review', 'unverified', 'checks failing']) {
   check(`dash: result ${r} buckets attention`, dashBucket({ result: r }) === 'attention');

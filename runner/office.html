@@ -979,7 +979,7 @@ function laneBucket(l) {
   if (l.bucket) return l.bucket;
   if (isNeedsYou(l)) return "attention"; // payloads without bucket (older runner, demos) use the same rule as seating
   if (l.running) return "running";
-  if (l.result === "done" || l.result === "continued") return "done";
+  if (l.result === "done") return "done"; // continued lives on in its successor: ended, as on the server
   return "ended";
 }
 const BUCKET_WORD = { attention: "Needs you", running: "Running", done: "Done", ended: "Ended" };

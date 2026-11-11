@@ -1090,9 +1090,10 @@ function laneBucket(l) {
   if (l && l.bucket) return l.bucket;
   const x = l || {}, r = String(x.result || '');
   const h = String(x.health || '').toLowerCase();
-  if (r === 'done' || r === 'continued') return 'done';
-  if (r === 'stopped' || r === 'killed' || r === 'dropped') return 'ended';
+  if (r === 'done') return 'done';
+  if (r === 'continued' || r === 'stopped' || r === 'killed' || r === 'dropped') return 'ended';
   if (['failed', 'paused', 'needs review', 'unverified', 'checks failing'].includes(r) || /stall|dead/.test(h)) return 'attention';
+  if (!r && (/^thinking|no tool call/.test(h) || (x.blocker && x.blocker.text))) return 'attention';
   if (x.running) return 'running';
   return 'ended';
 }
