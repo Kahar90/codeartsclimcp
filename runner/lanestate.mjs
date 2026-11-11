@@ -12,12 +12,16 @@ export const CAUSES = ['ok', 'review', 'checks', 'infra', 'timeout', 'lead-stop'
 
 // Every phase but 'finished' is live, and a live phase may move to any other live phase: the loop
 // between build, gate, fix, review, backoff and restart is real (gates fail, reviews ask for
-// fixes, waits expire), and 'starting' hands over to whichever comes first. Any live phase may
-// finish. 'finished' is terminal, and a phase or target outside the declaration is illegal; the
-// caller records the anomaly and carries on, it never throws.
+// fixes, waits expire). 'starting' hands over to one of those five, never to 'fix': a fix round
+// follows a failed gate, it never opens a lane. Any live phase may finish. 'finished' is terminal,
+// and a phase or target outside the declaration is illegal; the caller records the anomaly and
+// carries on, it never throws.
+const STARTING_TARGETS = ['build', 'gate', 'review', 'backoff', 'restart'];
 export function canTransition(from, to) {
   if (!PHASES.includes(from) || !PHASES.includes(to)) return false;
   if (from === 'finished') return false;
+  if (to === 'finished') return true;
+  if (from === 'starting') return STARTING_TARGETS.includes(to);
   return true;
 }
 
@@ -45,15 +49,16 @@ export function decideEnd({ exitCode, forcedResult, reason, verdict, noReview } 
 }
 
 // The one reader: what ended this lane, as { result, cause, detail }. null while it still runs.
-// The recorded structured end wins when its cause is declared; the legacy rules follow only for
-// old states, so every free-text regex lives here, in one place. Never throws, never mutates.
+// The recorded structured end wins when its cause is a real classification; an 'unknown' cause
+// means the decision could not classify (a gates failure say), so the legacy rules follow and
+// every free-text regex lives here, in one place. Never throws, never mutates.
 export function endOf(s) {
   if (!s || !s.result) return null;
   const reason = String(s.reason || '');
   const activity = String(s.activity || '');
   const res = s.result === 'failed' && reason === 'timeout' ? 'paused' : s.result; // legacy pause
   const e = s.end;
-  if (e && typeof e === 'object' && CAUSES.includes(e.cause)) {
+  if (e && typeof e === 'object' && CAUSES.includes(e.cause) && e.cause !== 'unknown') {
     return { result: RESULTS.includes(e.result) ? e.result : res, cause: e.cause, detail: String(e.detail || '') };
   }
   if (res === 'done') return { result: 'done', cause: 'ok', detail: reason };

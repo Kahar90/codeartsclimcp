@@ -56,7 +56,7 @@ plan('running_plan', { title: 't', status: 'running', waves: [{ name: 'W', lanes
 plan('fresh_phase', { title: 't', status: 'running', phase: 'building', updatedAt: iso(t - 2 * 60e3), waves: [{ name: 'W', lanes: ['z'] }], lanes: [{ task: 'z' }] });
 // f. an attention lane: needs-you, then failed.
 plan('attn_you', { title: 't', status: 'running', waves: [{ name: 'W', lanes: ['st', 'pl'] }], lanes: [{ task: 'st' }, { task: 'pl' }] },
-  { st: { pid: 999999, startedAt: t - 2 * 3600e3, finishedAt: t - 3600e3, lastEventAt: t - 3600e3, phase: 'finished', result: 'stopped', exitCode: 0, activity: 'stopped by the lead' } });
+  { st: { pid: 999999, startedAt: t - 2 * 3600e3, finishedAt: t - 3600e3, lastEventAt: t - 3600e3, phase: 'finished', result: 'stopped', exitCode: 0, reason: 'stopped', activity: 'stopped by the lead' } });
 plan('attn_failed', { title: 't', status: 'running', waves: [{ name: 'W', lanes: ['k', 'pl2'] }], lanes: [{ task: 'k' }, { task: 'pl2' }] },
   { k: { pid: 999999, startedAt: t - 2 * 3600e3, finishedAt: t - 3600e3, lastEventAt: t - 3600e3, phase: 'finished', result: 'killed', exitCode: 1, activity: 'killed' } });
 // g. quiet: no timestamp, then a stale one.
