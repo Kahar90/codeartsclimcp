@@ -73,7 +73,6 @@ export function sleepPoll(text) {
 // (endOf in runner/lanestate.mjs), never from a regex on free text; legacy states without one are
 // classified there too, in one place.
 // Besides { key, label, tone, reason } it carries { attention, steps, glyph } (status contract part 1).
-// The one status a person sees for a lane, shown the same way everywhere (CLI, MCP, Lanes, Office).
 // The decision lives once in runner/lanestate.mjs classify: this is only its status projection, so
 // the key, label, tone, reason, attention, steps and glyph can never disagree with the bucket.
 export function laneOutcome({ s, health, handled, note, closed, progress }) {
