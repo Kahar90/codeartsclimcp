@@ -9,6 +9,7 @@ import { CA_ENTRY, CFG, EXE, REG, SKILL, alive, briefWarningLines, briefWarnings
 import { builderContext } from './context.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
 import { runOrdered } from './gate.mjs';
+import { canTransition, decideEnd, finishState } from './lanestate.mjs';
 import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, uncommittedSteps, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
@@ -160,8 +161,8 @@ export async function runLane(repoArg, task, opts = {}) {
     if (++repoGoneTicks < 2) return false;
     L('repo deleted: stopping');
     try { killTree(server?.child?.pid || S.server?.pid); } catch {}
-    S.result = 'stopped'; S.exitCode = 1;
-    S.phase = 'finished'; S.activity = 'repo deleted: stopping'; S.busy = false; S.finishedAt = now();
+    S.exitCode = 1;
+    finishState(S, { result: 'stopped', cause: 'repo-gone', detail: 'repo deleted', activity: 'repo deleted: stopping' });
     try { save(true); } catch {}
     try { fs.rmSync(path.join(REG, `${id}.json`), { force: true }); } catch {}
     process.exit(1);
@@ -198,7 +199,7 @@ export async function runLane(repoArg, task, opts = {}) {
     config: { stall: CFG.stall, toolStall: CFG.toolStall, think: CFG.think, retries: CFG.retries, fixes: CFG.fixes, noCommit: CFG.noCommitS },
     tokens: emptyTokens(), tokensBy: { build: emptyTokens(), review: emptyTokens(), other: emptyTokens() }, tokensByModel: {},
     commits: 0, steps: stepCount, checks,
-    interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], verdict: null, result: null, exitCode: null,
+    interruptions: [], steers: [], permissions: [], gates: [], errors: [], outside: [], anomalies: [], verdict: null, result: null, exitCode: null,
     stepReviews: [], stepReviewContinues: 0, workerChecks: [], reviewRounds: [], questions: [], blocker: null, blockerClearedAt: 0, lastCommitAt: 0, commitsSeen: 0, stepSeen: 0, noCommitAckAt: 0, briefWarnings,
   };
   if (resumed) {
@@ -224,7 +225,15 @@ export async function runLane(repoArg, task, opts = {}) {
     try { ensurePlan(repo, task, briefEarly); }
     catch (e) { process.stderr.write(`[${task}] plan warning: ${oneLine(String((e && e.message) || e), 200)}\n`); }
   }
-  const phase = (p, activity) => { if (S.phase !== p) S.phases.push({ phase: p, at: now() }); S.phase = p; if (activity) S.activity = activity; save(true); };
+  // A move outside the declared machine is recorded as an anomaly, never thrown: a live lane must
+  // not die on a bookkeeping rule. Legal moves append to the phase history as before.
+  const phase = (p, activity) => {
+    if (S.phase !== p) {
+      if (!canTransition(S.phase, p)) (S.anomalies ||= []).push({ at: now(), from: S.phase, to: p });
+      S.phases.push({ phase: p, at: now() });
+    }
+    S.phase = p; if (activity) S.activity = activity; save(true);
+  };
   // Clear an open blocker and restart the no-progress clock: a steer, a new commit or an ack answered the lead.
   const clearBlocker = (why) => {
     if (!S.blocker) return false;
@@ -1841,11 +1850,10 @@ Message from the lead: ${rk.text}` : ''), model, agent);
   // ---- summary ----
   syncCommits();
   // A lane that reaches LANE_TIMEOUT is paused, not failed: the safeguard worked and `--resume` continues it in place.
-  S.result = exitCode === 0 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'done')
-    : forcedResult === 'unverified' && exitCode === 4 ? (S.verdict && S.verdict !== 'ready' && !CFG.noReview ? 'needs review' : 'unverified')
-    : (forcedResult || (reason === 'stopped' ? 'stopped' : reason === 'timeout' ? 'paused' : 'failed'));
-  const finalExit = S.result === 'needs review' ? 4 : S.result === 'paused' ? 5 : S.result === 'unverified' ? 4 : S.result === 'checks failing' ? 1 : exitCode;
-  S.reason = reason; S.exitCode = finalExit; S.phase = 'finished'; S.activity = S.result; S.busy = false; S.finishedAt = now();
+  const end = decideEnd({ exitCode, forcedResult, reason, verdict: S.verdict, noReview: CFG.noReview });
+  S.result = end.result;
+  const finalExit = end.exitCode;
+  S.reason = reason; S.exitCode = finalExit; S.end = { result: end.result, cause: end.cause, detail: reason }; S.phase = 'finished'; S.activity = S.result; S.busy = false; S.finishedAt = now();
   const log = git(repo, 'log', '--oneline', `${START}..HEAD`);
   const left = dirty();
   const reviewBody = review ? (() => { const ls = review.split(/\r?\n/); const i = ls.findIndex((l) => /^\s*1\.\s/.test(l)); return ls.slice(i >= 0 ? i : Math.max(0, ls.length - 16)).filter((l) => l.trim() && !/^\s*VERDICT:/i.test(l)).slice(0, 24).join('\n'); })() : '';
