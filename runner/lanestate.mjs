@@ -22,7 +22,8 @@ export function canTransition(from, to) {
   if (from === 'finished') return false;
   if (to === 'finished') return true;
   if (from === 'starting') return STARTING_TARGETS.includes(to);
-  return true;
+  // A run begins at 'starting' exactly once (a resume starts a fresh run state): no live phase goes back.
+  return to !== 'starting';
 }
 
 // The one decision for a lane's final result and exit code, the old inline ternary in lane.mjs
