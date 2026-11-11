@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.8.0 (2026-11-11)
+
+Updates
+- Truthful progress: a step counts as done only with a `step N:` commit. Both views now show the real fraction
+  ("2/3") on a finished, merged or stopped lane with open steps (new `steps: "partial"` in the status
+  contract), never a forced "3/3" check mark.
+- The lead hears about trouble at once: a worker's plain-text question at the end of a turn, an environment
+  failure it cannot fix (a refused commit, a Git access or certificate error, a sandbox permission error) and
+  a check wrapper stuck after its check finished all become a blocker that wakes `ca wait` (exit 11)
+  immediately. Rhetorical questions, quoted code and retried network errors stay quiet.
+- A lane cannot end `done` with work missing: dirty work is recovered before the completion check, and the tree
+  and HEAD are checked again after the gates before done is accepted.
+- Reviewer: the final and step reviewers run in a scoped read-only role (edit, write and patch tools denied on
+  the lane's own server) and review the source, not their own runner logs. A healthy reviewer session is reused
+  for the fix re-review, and step reviews already covered by the final review are skipped.
+- Shared model quota: optional step reviews wait while other lanes' builders use the same model (flash
+  reasoning aliases count as one model), so early reviews no longer slow the builders down.
+- Gates: a CHECK line that already passed on the same source is not run again, also when another line must
+  run; `CHECK_PARALLEL: N` in a brief runs independent CHECK lines side by side (default stays sequential).
+- Builders start with the small source files the brief names quoted in the first prompt, bounded and filtered
+  (no secrets, config or binaries). Briefs can set `TOOL_PROFILE: core` to give the builder only the coding
+  tools; the brief template uses it.
+- `ca brief-check` sees untracked contract files the lead just wrote.
+- Speed: the 4-step benchmark is not faster yet (median 411 s on 0.7.1, 467 to 547 s on candidates of this
+  release, 3 runs each); see docs/benchmark-results.md. This release is about truth and lead control.
+
 ## 0.7.1 (2026-11-10)
 
 Updates
