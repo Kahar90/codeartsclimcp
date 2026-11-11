@@ -4,20 +4,35 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { CA_ENTRY, EXE, HERE, PLANS, REG, ackNote, alive, caEnv, compact, controlTarget, dashUrl, die, dur, findLane, health, killTree, laneAlive, laneId, laneIndex, laneMemoFor, laneSeen, lanes, now, oneLine, planClosed, plans, plansSnapshot, readAcks, readJSON, readJSONCached, resultOf, setAck, sleep, stepProgress, writeAcks } from './common.mjs';
-import { laneActions, laneBucket, laneKind, laneOutcome } from './controls.mjs';
-import { finishLaneFile } from './lanestate.mjs';
+import { laneActions, laneKind } from './controls.mjs';
+import { classify, finishLaneFile } from './lanestate.mjs';
 import { tokenTotal, withTotal } from './tokens.mjs';
 
 // ---------- control commands ----------
 export function laneHealthOf(l) { const m = laneMemoFor(l); if (m.health === undefined) m.health = health(l.s); return m.health; }
+// A lane can be resumed only while its repo folder and brief still exist; cached with the classify pass
+// so a poll stats each lane once. Mirrors the canResume laneView passes to laneActions.
+function laneCanResume(l) {
+  const m = laneMemoFor(l);
+  if (m.canResume === undefined) m.canResume = fs.existsSync(l.repo) && fs.existsSync(path.join(l.repo, 'tasks', `${l.task}.md`));
+  return m.canResume;
+}
+// The one classify pass for a lane, memoized on the lane object so a poll reuses it across laneRow,
+// laneStatusOf and bucketFor. The handled (ack) and closed-plan overlays are computed here and handed
+// to classify; nothing is read by classify itself.
+function classifyLane(l, s = l.s) {
+  const m = laneMemoFor(l);
+  if (s === l.s && m.classified) return m.classified;
+  const handled = !!(s.result && laneSeen(l.id, s.finishedAt));
+  const closed = !!s.result && closedPlanLanes().has(l.id);
+  const c = classify({ s, alive: laneAlive(l), health: s === l.s ? laneHealthOf(l) : health(s), handled, note: handled ? ackNote(l.id) : '', closed, progress: stepProgress(s), canResume: laneCanResume(l) });
+  if (s === l.s) m.classified = c;
+  return c;
+}
 export function bucketFor(l) {
   const m = laneMemoFor(l); if (m.bucket) return m.bucket;
-  const s = l.s; const r = laneBucket({ s, alive: laneAlive(l), health: laneHealthOf(l) });
-  let out;
-  if (s.result && laneSeen(l.id, s.finishedAt)) {
-    const note = ackNote(l.id); out = { bucket: r.bucket === 'attention' ? 'ended' : r.bucket, reason: `handled${note ? ': ' + note : ''} (was ${r.reason})`, handled: true };
-  } else if (r.bucket === 'attention' && s.result && closedPlanLanes().has(l.id)) out = { bucket: 'ended', reason: r.reason, handled: false };
-  else out = r;
+  const s = l.s; const c = classifyLane(l);
+  const out = { bucket: c.bucket, reason: c.bucketReason, handled: !!(s.result && laneSeen(l.id, s.finishedAt)) };
   m.bucket = out; return out;
 }
 export function bucketOf(l) { return bucketFor(l).bucket; }
@@ -42,9 +57,8 @@ export function closedPlanLanes() {
 // bucketFor already decides whether a finished lane was acknowledged (handled) and whether the lane is
 // an ended lane of a closed plan; pass both through so the label and the attention flag agree everywhere.
 export function laneStatusOf(l, s = l.s) {
-  const r = bucketFor(l);
-  const closed = !!s.result && closedPlanLanes().has(l.id);
-  return laneOutcome({ s, health: health(s), handled: !!r.handled, note: r.handled ? ackNote(l.id) : '', closed, progress: stepProgress(s) });
+  const c = classifyLane(l, s);
+  return { key: c.key, label: c.label, tone: c.tone, reason: c.reason, attention: c.attention, steps: c.steps, glyph: c.glyph };
 }
 // Lane kind for the Office characters; the brief is read once per change (mtime), not on every poll.
 export const kindCache = new Map();

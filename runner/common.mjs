@@ -4,10 +4,11 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
-import { progressAge } from './watchdog.mjs';
 import { readCreds } from './auth.mjs';
 import { gitDirInsideRepo } from './controls.mjs';
 import { lintBrief } from './brieflint.mjs';
+import { healthOf, LIVE_PHASES, resultOf } from './lanestate.mjs';
+export { resultOf };
 export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SKILL = path.resolve(HERE, '..');
 export const CA_HOME = path.join(os.homedir(), '.codeartsdoer');
@@ -243,24 +244,8 @@ export function lanes() {
   return files.map((f) => { const r = readJSONCached(path.join(REG, f)); if (!r || typeof r.dir !== 'string') return null; const s = readJSONCached(path.join(r.dir, 'state.json')) || readJSONCached(path.join(REG, 'final', f)); return s ? { ...r, s } : null; }).filter(Boolean)
     .sort((a, b) => (b.s.startedAt || 0) - (a.s.startedAt || 0));
 }
-// Lanes written before 'paused' existed recorded a timeout as failed (timeout).
-export function resultOf(s) { return s && s.result === 'failed' && s.reason === 'timeout' ? 'paused' : s && s.result; }
-export function health(s) {
-  if (s.result) return resultOf(s);
-  if (!alive(s.pid)) return 'DEAD (ca stop cleans up)';
-  const idle = now() - (s.lastEventAt || s.startedAt);
-  if (['gate', 'backoff', 'restart', 'starting'].includes(s.phase)) return 'running';
-  if (!s.busy) return 'running';
-  if (s.tools?.length) return 'running tool';
-  if (idle > (s.config?.stall || 240) * 1000) return 'STALLED';
-  if (s.turnStartAt || s.lastToolAt || s.lastTextAt) {
-    const thinkS = s.config?.think ?? 480;
-    const age = progressAge({ turnStartAt: s.turnStartAt, lastToolAt: s.lastToolAt, lastTextAt: s.lastTextAt, now: now() });
-    if (thinkS > 0 && age > thinkS * 1000) return `thinking (${dur(age)}, no tool call)`;
-  }
-  if (idle > 60000) return 'quiet';
-  return 'running';
-}
+// The lane health is decided once in runner/lanestate.mjs (healthOf); this is its text projection.
+export function health(s) { return healthOf(s, { alive: alive(s.pid), now: now() }).text; }
 // One lookup for lanes and plans: exact id, then exact task (lanes only), then a substring match.
 // Zero substring matches means "not found"; more than one is ambiguous and must be refused, never
 // guessed, so a short prefix can never steer, stop or close the wrong thing.
@@ -376,7 +361,7 @@ export function briefWarningLines(warnings) {
 export function stepProgress(s, steps = s.stepList || []) {
   const commits = s.commitLog || []; const done = new Map();
   for (const c of commits) { const m = String(c.subject || '').match(/^\s*step\s+(\d+)\s*:/i); if (m) done.set(Number(m[1]), c.hash); }
-  const building = !s.result && ['build', 'fix', 'starting', 'backoff', 'restart', 'gate'].includes(s.phase);
+  const building = !s.result && LIVE_PHASES.includes(s.phase);
   const cur = building ? steps.find((st) => !done.has(st.n))?.n : null;
   const list = steps.map((st) => ({ ...st, state: done.has(st.n) ? 'done' : st.n === cur ? 'current' : s.result ? 'open' : 'pending', commit: done.get(st.n) || '' }));
   return { list, done: list.filter((x) => x.state === 'done').length, total: list.length, current: list.find((x) => x.state === 'current') || null };
