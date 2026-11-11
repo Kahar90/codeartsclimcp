@@ -969,8 +969,8 @@ function planStatus(p, lanes) {
   if (p.state) return p.state; // derived on the server from real lane state
   if (lanes.some((l) => l.running)) return "running";
   if (p.status) return p.status;
-  if (lanes.some((l) => l.running)) return "running";
-  if (lanes.length && lanes.every((l) => l.result === "done" || l.result === "needs review")) return "done";
+  if (lanes.some(isNeedsYou)) return "attention"; // the same needs-you rule as seating
+  if (lanes.length && lanes.every((l) => l.result === "done")) return "done"; // needs review is never done
   return "planned";
 }
 
@@ -1741,11 +1741,19 @@ function assignStations() {
   prevRunning = new Map(lanes.map((l) => [l.id, !!l.running]));
 }
 function isNeedsYou(l) {
-  const h = String(l.health || "").toUpperCase();
-  if (h === "STALLED" || h === "DEAD") return true;
-  const low = String(l.health || "").toLowerCase();
-  if (low === "failed" || low === "paused" || low === "thinking" || low === "needs review") return true;
-  return l.bucket === "attention";
+  // One rule, the server's: a boolean l.status.attention wins; then a real bucket; then the same
+  // derivation runner/controls.mjs uses, so a handled lane (attention false, bucket ended) is not
+  // seated or ranked as needs-you just because its health still reads "failed".
+  const st = l.status;
+  if (st && typeof st.attention === "boolean") return st.attention;
+  if (l.bucket) return l.bucket === "attention";
+  const h = String(l.health || "");
+  const low = h.toLowerCase();
+  if (/^stalled/i.test(low) || /^dead/i.test(low)) return true;
+  if (/^thinking/i.test(low) || /no tool call/i.test(low)) return true;
+  if (l.blocker && l.blocker.text) return true;
+  const r = String(l.result || "").toLowerCase();
+  return r === "failed" || r === "paused" || r === "needs review" || r === "unverified" || r === "checks failing";
 }
 function isReleased(l) {
   const r = String(l.result || "").toLowerCase();
