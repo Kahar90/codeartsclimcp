@@ -1,0 +1,46 @@
+LANE STATE MACHINE CONTRACT (runner/lanestate.mjs; checked by checks/lanestate.check.mjs and
+checks/statemachine.check.mjs)
+
+A lane's lifecycle is declared in one module. Every reader and writer goes through it; nothing else
+decides what state a lane is in.
+
+1. Phases. starting, build, gate, fix, review, backoff, restart, finished.
+   - LIVE_PHASES: every phase but finished. WORK_PHASES: build, fix, review, restart (a model turn
+     runs, so kick is allowed).
+   - canTransition(from, to): starting goes to build, gate, review, backoff or restart; the live
+     phases reach each other (never back to starting); every live phase may finish; finished is
+     terminal. The supervisor records an illegal move in state.anomalies and carries on: a live lane
+     never crashes on a bookkeeping rule.
+
+2. The end. A finished lane carries end = { result, cause, detail }.
+   - result: done, needs review, unverified, checks failing, paused, stopped, failed, killed.
+   - cause: ok, review, checks, infra, timeout, lead-stop, supervisor-died, repo-gone, auth,
+     not-writable, runner-error, unknown.
+   - decideEnd({ exitCode, forcedResult, reason, verdict, noReview }) is the one decision for the
+     result, the exit code and the cause at the end of a run.
+   - endOf(s) is the one reader. It returns the recorded end; for states written before 0.9.0 (no
+     end, or cause unknown) it applies the legacy rules, and this is the only place they live: a
+     timeout recorded as failed is paused, reason exactly "auth" or exit 3 is auth (a reason that only
+     mentions "auth" is not), "gates still failing" splits into checks failing or unverified by the
+     last failed gate, "stopped (supervisor had died)" is supervisor-died.
+   - Labels and actions read the cause, never a regex on reason or activity: credentials only for
+     auth, "Stopped by lead" only for lead-stop, "Stopped (supervisor died)" for supervisor-died.
+
+3. One terminal writer. finishState / finishLaneFile record the end, close the run (phase finished,
+   busy false, finishedAt) and write state.json atomically. A lane that already has a result is never
+   rewritten, so a late `ca stop` cannot overwrite a finished lane.
+
+4. One classifier. classify({ s, alive, health, handled, note, closed, progress, canResume, now })
+   returns health { kind, text }, the status (key, label, tone, reason, attention, steps, glyph), the
+   bucket and its reason, and the actions (actions, suggest, why). laneOutcome, laneBucket,
+   laneActions, health() and bucketFor are projections of it. Invariants (checked over every phase x
+   result x liveness x blocker x handled x closed combination):
+   - attention is true exactly when the bucket is attention (status contract part 1);
+   - a handled lane and an ended lane of a closed plan never need the human;
+   - an attention lane shows "!" or the failed cross and offers an action or says why;
+   - a live lane can be steered and stopped; a DEAD lane needs the human and offers resume;
+   - a finished lane is never running.
+
+5. Plans read lane attention. A plan, a wave and the plan glance treat a lane as needing the human
+   exactly when its status.attention is true (plan.mjs laneSetState), so a lane the lead stopped never
+   makes the plan read Needs you, and a lane waiting on review always does.
