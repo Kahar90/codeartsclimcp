@@ -232,7 +232,6 @@ export const planClosed = (p) => !!(p && /^(done|closed|abandoned|cancell?ed)$/i
 // reqSnap at the start of a request and the snapshot goes stale on the next one; outside the dashboard it stays
 // null and every call reads live, so CLI commands behave exactly as before.
 let reqSnap = null;
-export function getReqSnap() { return reqSnap; }
 export function setReqSnap(v) { reqSnap = v; }
 export function lanesSnapshot() { if (!reqSnap) return lanes(); if (!reqSnap.lanes) reqSnap.lanes = lanes(); return reqSnap.lanes; }
 export function plansSnapshot() { if (!reqSnap) return plans(); if (!reqSnap.plans) reqSnap.plans = plans(); return reqSnap.plans; }
