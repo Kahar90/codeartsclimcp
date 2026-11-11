@@ -490,7 +490,8 @@ function laneSetState(lanes, { closed, phase, status } = {}) {
   const doneLane = (x) => settled(x) || x.result === 'done' || x.result === 'needs review';
   const attn = live.filter(laneNeedsHuman);
   if (live.some((x) => x.running)) return 'running';
-  if (closed) return live.length > 0 && live.every(doneLane) ? 'done' : 'closed';
+  // A closed plan with no live lane (all dropped, or none) reads done, as before: nothing was left open.
+  if (closed) return live.every(doneLane) ? 'done' : 'closed';
   if (attn.length) return attn.every((x) => statusKey(x) === 'paused') ? 'paused' : 'attention';
   if (live.length > 0 && live.every(settled)) {
     if (/^verifying$/i.test(status || '') || phase === 'verifying') return 'verifying';
