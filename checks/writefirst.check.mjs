@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { run, pool } from './lib/pool.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ca-writefirst-')));
@@ -39,31 +40,44 @@ function makeRepo(name, script, brief = 'Goal: one page.\n1. Write page1.html. C
   g('init', '-q'); g('add', '-A'); g('-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'init');
   return repo;
 }
-const lane = (repo, extra) => spawnSync(process.execPath, [CA, 'lane', repo, 'work'], { cwd: repo, env: { ...env, ...extra }, encoding: 'utf8', timeout: 150000 });
+const lane = (repo, extra) => run(process.execPath, [CA, 'lane', repo, 'work'], { cwd: repo, env: { ...env, ...extra }, timeout: 150000 });
 const prompts = (cwd) => { try { return fs.readFileSync(path.join(cwd, 'fake-prompts.log'), 'utf8').split('\n').filter(Boolean).map((x) => JSON.parse(x)); } catch { return []; } };
 const state = (cwd) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, 'tasks', 'work.lane', 'state.json'), 'utf8')); } catch { return null; } };
 const reads = (k) => Array.from({ length: k }, (_, i) => `read:src/f${i}.mjs`).join('+');
 
-// A builder that reads 8 files, then idles 5 s before committing: with READ_STREAK=5 it is nudged once.
-let repo = makeRepo('reader', [`${reads(8)}+wait:5000+commit:1`, 'ok']);
-let r = lane(repo, { READ_STREAK: '5', FIRST_WRITE_S: '0' });
-let ps = prompts(repo); let s = state(repo);
-check('the reading lane still finishes', r.status === 0 && s && s.result === 'done', `${r.status} ${(r.stderr || '').slice(-200)}`);
-check('a read streak sends the builder the write-first notice', ps.some((p) => /make the first change now/.test(p.text)), JSON.stringify(ps.map((p) => p.text.slice(0, 60))));
-check('the nudge is recorded as an interruption', !!s && (s.interruptions || []).some((x) => x.kind === 'write-nudge'), JSON.stringify(s && s.interruptions));
-check('the nudge is a runner notice, not a lead steer', !!s && !(s.steers || []).some((x) => /make the first change/.test(x.text) && x.by === 'ca steer'), JSON.stringify(s && s.steers));
-
-// A builder that edits between reads is never nudged.
-repo = makeRepo('writer', [`${reads(4)}+edit:src/a.mjs+${reads(4)}+edit:src/b.mjs+wait:5000+commit:1`, 'ok']);
-r = lane(repo, { READ_STREAK: '5', FIRST_WRITE_S: '0' });
-ps = prompts(repo); s = state(repo);
-check('a builder that writes between reads is not nudged', r.status === 0 && !ps.some((p) => /make the first change now/.test(p.text)) && !(s?.interruptions || []).some((x) => x.kind === 'write-nudge'), JSON.stringify(ps.map((p) => p.text.slice(0, 60))));
-
-// WRITE_FIRST: off in the brief turns it off.
-repo = makeRepo('off', [`${reads(8)}+wait:5000+commit:1`, 'ok'], 'Goal: one page.\nWRITE_FIRST: off\n1. Write page1.html. Commit.\nCHECK: node -e 0\n');
-r = lane(repo, { READ_STREAK: '5', FIRST_WRITE_S: '0' });
-ps = prompts(repo);
-check('WRITE_FIRST: off in the brief turns the nudge off', r.status === 0 && !ps.some((p) => /make the first change now/.test(p.text)), JSON.stringify(ps.map((p) => p.text.slice(0, 60))));
+const pooled = await pool(4, [
+  // A builder that reads 8 files, then idles 5 s before committing: with READ_STREAK=5 it is nudged once.
+  async () => {
+    const local = []; const chk = (name, ok, info = '') => local.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 300) : ''}`);
+    const repo = makeRepo('reader', [`${reads(8)}+wait:5000+commit:1`, 'ok']);
+    const r = await lane(repo, { READ_STREAK: '5', FIRST_WRITE_S: '0' });
+    const ps = prompts(repo); const s = state(repo);
+    chk('the reading lane still finishes', r.status === 0 && s && s.result === 'done', `${r.status} ${(r.stderr || '').slice(-200)}`);
+    chk('a read streak sends the builder the write-first notice', ps.some((p) => /make the first change now/.test(p.text)), JSON.stringify(ps.map((p) => p.text.slice(0, 60))));
+    chk('the nudge is recorded as an interruption', !!s && (s.interruptions || []).some((x) => x.kind === 'write-nudge'), JSON.stringify(s && s.interruptions));
+    chk('the nudge is a runner notice, not a lead steer', !!s && !(s.steers || []).some((x) => /make the first change/.test(x.text) && x.by === 'ca steer'), JSON.stringify(s && s.steers));
+    return local;
+  },
+  // A builder that edits between reads is never nudged.
+  async () => {
+    const local = []; const chk = (name, ok, info = '') => local.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 300) : ''}`);
+    const repo = makeRepo('writer', [`${reads(4)}+edit:src/a.mjs+${reads(4)}+edit:src/b.mjs+wait:5000+commit:1`, 'ok']);
+    const r = await lane(repo, { READ_STREAK: '5', FIRST_WRITE_S: '0' });
+    const ps = prompts(repo); const s = state(repo);
+    chk('a builder that writes between reads is not nudged', r.status === 0 && !ps.some((p) => /make the first change now/.test(p.text)) && !(s?.interruptions || []).some((x) => x.kind === 'write-nudge'), JSON.stringify(ps.map((p) => p.text.slice(0, 60))));
+    return local;
+  },
+  // WRITE_FIRST: off in the brief turns it off.
+  async () => {
+    const local = []; const chk = (name, ok, info = '') => local.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 300) : ''}`);
+    const repo = makeRepo('off', [`${reads(8)}+wait:5000+commit:1`, 'ok'], 'Goal: one page.\nWRITE_FIRST: off\n1. Write page1.html. Commit.\nCHECK: node -e 0\n');
+    const r = await lane(repo, { READ_STREAK: '5', FIRST_WRITE_S: '0' });
+    const ps = prompts(repo);
+    chk('WRITE_FIRST: off in the brief turns the nudge off', r.status === 0 && !ps.some((p) => /make the first change now/.test(p.text)), JSON.stringify(ps.map((p) => p.text.slice(0, 60))));
+    return local;
+  },
+]);
+for (const local of pooled) results.push(...local);
 
 console.log(results.join('\n'));
 const bad = results.filter((x) => x.startsWith('FAIL')).length;

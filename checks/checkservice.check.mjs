@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { run, pool } from './lib/pool.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CA = path.join(ROOT, 'runner', 'ca.mjs');
 const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ca-checksvc-')));
@@ -26,7 +27,7 @@ delete base.STEP_REVIEW;
 // CHECK 1 counts its runs and serves HTTP on loopback; CHECK 2 fails unless page2.html exists.
 const C1 = 'node -e "require(\'fs\').appendFileSync(\'tasks/work.lane/count1.txt\',\'x\');const s=require(\'http\').createServer((q,r)=>r.end(\'pong\')).listen(0,\'127.0.0.1\',async()=>{const t=await (await fetch(\'http://127.0.0.1:\'+s.address().port)).text();console.log(\'got \'+t);s.close()})"';
 const C2 = 'node -e "require(\'fs\').appendFileSync(\'tasks/work.lane/count2.txt\',\'x\');if(!require(\'fs\').existsSync(\'page2.html\')){console.log(\'boom: page2 missing\');process.exit(3)}console.log(\'page2 ok\')"';
-function lane(name, script) {
+async function lane(name, script) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
   fs.writeFileSync(path.join(repo, 'fake-script.json'), JSON.stringify(script));
@@ -34,7 +35,7 @@ function lane(name, script) {
   fs.writeFileSync(path.join(repo, 'tasks', 'work.md'), `Goal: two pages.\n1. Write page1.html. Commit.\n2. Write page2.html. Commit.\nCHECK: ${C1}\nCHECK: ${C2}\n`);
   const g = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' });
   g('init', '-q'); g('add', '-A'); g('-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'init');
-  const r = spawnSync(process.execPath, [CA, 'lane', repo, 'work'], { cwd: repo, env: base, encoding: 'utf8', timeout: 200000 });
+  const r = await run(process.execPath, [CA, 'lane', repo, 'work'], { cwd: repo, env: base, timeout: 200000 });
   const read = (f) => { try { return fs.readFileSync(path.join(repo, f), 'utf8'); } catch { return ''; } };
   const jsonl = (f) => read(f).trim().split(/\r?\n/).filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   let st = null; try { st = JSON.parse(read('tasks/work.lane/state.json')); } catch {}
@@ -43,7 +44,12 @@ function lane(name, script) {
 }
 
 // A: worker runs check 2 too early (fails), lists checks, asks for a bad N, then finishes and runs all green
-let r = lane('svc', ['commit:1+run:2+run:+run:9+commit:2+run:all+ok']);
+// B: worker runs all, then commits again: the gate must run the checks itself
+const [rA, rB] = await pool(4, [
+  () => lane('svc', ['commit:1+run:2+run:+run:9+commit:2+run:all+ok']),
+  () => lane('stale', ['commit:1+commit:2+run:all+commit:3+ok']),
+]);
+const r = rA;
 check('lane ends DONE', r.code === 0 && r.st?.result === 'done', `${r.code} ${r.st?.result} ${r.st?.reason || ''}`);
 check('the helper exists at tasks/work.lane/check.mjs', fs.existsSync(path.join(r.repo, 'tasks', 'work.lane', 'check.mjs')));
 check('the first build prompt tells the worker about the helper', /node tasks\/work\.lane\/check\.mjs/.test(r.prompts.find((p) => p.agent !== 'plan')?.text || ''), (r.prompts[0]?.text || '').slice(-400));
@@ -61,10 +67,8 @@ check('the gate reused the green results on the same HEAD (reused: true, no reru
   `count1 ${r.count1} count2 ${r.count2} gates ${JSON.stringify((r.st?.gates || []).map((x) => [x.gate.slice(0, 20), x.ok, x.reused]))}`);
 check('the request and result files leave the work tree clean', !/tasks\/work\.lane/.test(r.status) && !/check/.test(r.status), r.status);
 
-// B: worker runs all, then commits again: the gate must run the checks itself
-r = lane('stale', ['commit:1+commit:2+run:all+commit:3+ok']);
-check('a commit after the worker run: lane DONE and the gate ran both checks again (no reuse)', r.code === 0 && r.count1 === 2 && r.count2 === 2 && !(r.st?.gates || []).some((x) => x.reused),
-  `${r.code} count1 ${r.count1} count2 ${r.count2}`);
+check('a commit after the worker run: lane DONE and the gate ran both checks again (no reuse)', rB.code === 0 && rB.count1 === 2 && rB.count2 === 2 && !(rB.st?.gates || []).some((x) => x.reused),
+  `${rB.code} count1 ${rB.count1} count2 ${rB.count2}`);
 
 for (const l of results) console.log(l);
 const fails = results.filter((l) => l.startsWith('FAIL')).length;

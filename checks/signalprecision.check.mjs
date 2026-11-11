@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { run as runP, pool } from './lib/pool.mjs';
 import { classifySignal } from '../runner/signals.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -55,10 +56,10 @@ const settings = path.join(tmp, 'settings.json'); fs.writeFileSync(settings, JSO
 const env = { ...process.env, CA_REGISTRY: reg, CA_SETTINGS: settings, CA_DASH: '0', CA_NO_UPDATE_CHECK: '1', CODEARTS_EXE: process.execPath,
   NO_REVIEW: '1', STEP_REVIEW: '0', CODEARTS_CLI_AK: 'fake-ak', CODEARTS_CLI_SK: 'fake-sk', STALL_S: '600', THINK_S: '0', LANE_TIMEOUT: '240' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const run = (cwd, args, ms = 120000) => spawnSync(process.execPath, [CA, ...args], { cwd, env, encoding: 'utf8', timeout: ms });
+const run = (cwd, args, ms = 120000) => runP(process.execPath, [CA, ...args], { cwd, env, timeout: ms });
 const state = (cwd) => { try { return JSON.parse(fs.readFileSync(path.join(cwd, 'tasks', 'work.lane', 'state.json'), 'utf8')); } catch { return null; } };
-const row = (cwd, id) => { const r = run(cwd, ['status', '--json', '--all'], 30000); try { const j = JSON.parse(r.stdout); return (Array.isArray(j) ? j : j.lanes || []).find((x) => x.id === id) || null; } catch { return null; } };
-const until = async (f, ms) => { const end = Date.now() + ms; for (;;) { const v = f(); if (v || Date.now() > end) return v; await sleep(500); } };
+const row = async (cwd, id) => { const r = await run(cwd, ['status', '--json', '--all'], 30000); try { const j = JSON.parse(r.stdout); return (Array.isArray(j) ? j : j.lanes || []).find((x) => x.id === id) || null; } catch { return null; } };
+const until = async (f, ms) => { const end = Date.now() + ms; for (;;) { const v = await f(); if (v || Date.now() > end) return v; await sleep(500); } };
 function makeRepo(name, script) {
   const repo = path.join(tmp, name); fs.mkdirSync(path.join(repo, 'tasks'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'checks', 'lib', 'fake-codearts.cjs'), path.join(repo, 'serve'));
@@ -70,59 +71,80 @@ function makeRepo(name, script) {
   return repo;
 }
 
+const results = [];
+const chkOf = (local) => (name, ok, info = '') => local.push(`${ok ? 'PASS' : 'FAIL'} ${name}${info ? '  ' + String(info).slice(0, 300) : ''}`);
 try {
-  // A builder reply that narrates a resolved error must not raise a blocker: the assistant text path
-  // in lane.mjs must classify it with source 'assistant'.
-  const aRepo = makeRepo('narration', ['decide:Fixed persistence: loading now distinguishes missing optional data (ENOENT) from read errors.+commit:1+wait:1000', 'ok']);
-  const aId = 'narration--work';
-  let r = run(aRepo, ['lane', aRepo, 'work', '--detach']);
-  assert.equal(r.status, 0, `narration lane starts detached: ${r.stderr.slice(0, 200)}`);
-  r = run(aRepo, ['wait', aId, '--timeout', '120', '--quiet']);
-  assert.equal(r.status, 0, `narration lane finishes (exit ${r.status}): ${r.stdout.slice(0, 300)}`);
-  assert.equal(/CA_BLOCKED/.test(r.stdout), false, 'resolved-error narration must not raise a blocker');
-  assert.equal(state(aRepo)?.blocker ?? null, null, 'no blocker is recorded for a resolved-error summary');
-
-  // A failed tool whose output is an expected application assertion must not raise an env blocker: the
-  // failed tool path in lane.mjs must classify it with source 'tool'.
-  const nRepo = makeRepo('assertnoise', ['toolerr:FAIL generated data is saved: ENOENT: no such file or directory, open /tmp/generated.json+commit:1+wait:1000', 'ok']);
-  const nId = 'assertnoise--work';
-  r = run(nRepo, ['lane', nRepo, 'work', '--detach']);
-  assert.equal(r.status, 0, `assertion-noise lane starts detached: ${r.stderr.slice(0, 200)}`);
-  r = run(nRepo, ['wait', nId, '--timeout', '120', '--quiet']);
-  assert.equal(r.status, 0, `assertion-noise lane finishes (exit ${r.status}): ${r.stdout.slice(0, 300)}`);
-  assert.equal(/CA_BLOCKED/.test(r.stdout), false, 'an expected application assertion must not raise an env blocker');
-
-  // A builder's final reply can carry a raw commit/environment failure even when the failed tool event
-  // never reached the runner: the assistant text path must still raise the env blocker.
-  const wRepo = makeRepo('rawdiag', ['decide:fatal: Unable to create .git/index.lock: Permission denied+commit:1+wait:4000', 'ok']);
-  const wId = 'rawdiag--work';
-  r = run(wRepo, ['lane', wRepo, 'work', '--detach']);
-  assert.equal(r.status, 0, `raw-diagnostic lane starts detached: ${r.stderr.slice(0, 200)}`);
-  const wsig = await until(() => { const s = state(wRepo); return s && s.blocker ? s : null; }, 20000);
-  assert.equal(wsig?.blocker?.kind, 'env', `a raw commit failure in the builder reply still blocks: ${JSON.stringify(wsig && wsig.blocker)}`);
-  assert.equal(/index\.lock|Permission denied/.test(wsig.blocker.text || ''), true, 'the blocker names the raw refusal');
-  const wack = run(wRepo, ['ack', wId]);
-  assert.equal(wack.status, 0, `ca ack clears the raw-diagnostic blocker: ${wack.status} ${wack.stderr.slice(0, 200)}`);
-  await until(() => { const x = row(wRepo, wId); return x && !x.blocked ? x : null; }, 10000);
-  r = run(wRepo, ['wait', wId, '--timeout', '120', '--quiet']);
-  assert.equal(r.status, 0, `raw-diagnostic lane finishes after ack (exit ${r.status}): ${r.stdout.slice(0, 300)}`);
-
-  // A genuine environment failure in a failed tool still blocks: the wiring must not mute real incidents.
-  const gRepo = makeRepo('genuine', ['toolerr:fatal: Unable to create .git/index.lock: Permission denied+commit:1+wait:4000', 'ok']);
-  const gId = 'genuine--work';
-  r = run(gRepo, ['lane', gRepo, 'work', '--detach']);
-  assert.equal(r.status, 0, `genuine-env lane starts detached: ${r.stderr.slice(0, 200)}`);
-  const gsig = await until(() => { const s = state(gRepo); return s && s.blocker ? s : null; }, 20000);
-  assert.equal(gsig?.blocker?.kind, 'env', `a genuine git permission failure still blocks: ${JSON.stringify(gsig && gsig.blocker)}`);
-  assert.equal(/Permission denied|index\.lock/.test(gsig.blocker.text || ''), true, 'the blocker names the refused commit');
-  const gack = run(gRepo, ['ack', gId]);
-  assert.equal(gack.status, 0, `ca ack clears the env blocker: ${gack.status} ${gack.stderr.slice(0, 200)}`);
-  const gclear = await until(() => { const x = row(gRepo, gId); return x && !x.blocked ? x : null; }, 10000);
-  assert.equal(!!gclear, true, 'the acked env blocker is cleared while the lane keeps running');
-  r = run(gRepo, ['wait', gId, '--timeout', '120', '--quiet']);
-  assert.equal(r.status, 0, `genuine-env lane finishes after ack (exit ${r.status}): ${r.stdout.slice(0, 300)}`);
+  const pooled = await pool(4, [
+    // A builder reply that narrates a resolved error must not raise a blocker: the assistant text path
+    // in lane.mjs must classify it with source 'assistant'.
+    async () => {
+      const local = []; const chk = chkOf(local);
+      const aRepo = makeRepo('narration', ['decide:Fixed persistence: loading now distinguishes missing optional data (ENOENT) from read errors.+commit:1+wait:1000', 'ok']);
+      const aId = 'narration--work';
+      let r = await run(aRepo, ['lane', aRepo, 'work', '--detach']);
+      chk(`narration lane starts detached: ${r.stderr.slice(0, 200)}`, r.status === 0);
+      r = await run(aRepo, ['wait', aId, '--timeout', '120', '--quiet']);
+      chk(`narration lane finishes (exit ${r.status}): ${r.stdout.slice(0, 300)}`, r.status === 0);
+      chk('resolved-error narration must not raise a blocker', /CA_BLOCKED/.test(r.stdout) === false);
+      chk('no blocker is recorded for a resolved-error summary', (state(aRepo)?.blocker ?? null) === null);
+      return local;
+    },
+    // A failed tool whose output is an expected application assertion must not raise an env blocker: the
+    // failed tool path in lane.mjs must classify it with source 'tool'.
+    async () => {
+      const local = []; const chk = chkOf(local);
+      const nRepo = makeRepo('assertnoise', ['toolerr:FAIL generated data is saved: ENOENT: no such file or directory, open /tmp/generated.json+commit:1+wait:1000', 'ok']);
+      const nId = 'assertnoise--work';
+      let r = await run(nRepo, ['lane', nRepo, 'work', '--detach']);
+      chk(`assertion-noise lane starts detached: ${r.stderr.slice(0, 200)}`, r.status === 0);
+      r = await run(nRepo, ['wait', nId, '--timeout', '120', '--quiet']);
+      chk(`assertion-noise lane finishes (exit ${r.status}): ${r.stdout.slice(0, 300)}`, r.status === 0);
+      chk('an expected application assertion must not raise an env blocker', /CA_BLOCKED/.test(r.stdout) === false);
+      return local;
+    },
+    // A builder's final reply can carry a raw commit/environment failure even when the failed tool event
+    // never reached the runner: the assistant text path must still raise the env blocker.
+    async () => {
+      const local = []; const chk = chkOf(local);
+      const wRepo = makeRepo('rawdiag', ['decide:fatal: Unable to create .git/index.lock: Permission denied+commit:1+wait:4000', 'ok']);
+      const wId = 'rawdiag--work';
+      let r = await run(wRepo, ['lane', wRepo, 'work', '--detach']);
+      chk(`raw-diagnostic lane starts detached: ${r.stderr.slice(0, 200)}`, r.status === 0);
+      const wsig = await until(async () => { const s = state(wRepo); return s && s.blocker ? s : null; }, 20000);
+      chk(`a raw commit failure in the builder reply still blocks: ${JSON.stringify(wsig && wsig.blocker)}`, wsig?.blocker?.kind === 'env');
+      chk('the blocker names the raw refusal', /index\.lock|Permission denied/.test(wsig.blocker.text || '') === true);
+      const wack = await run(wRepo, ['ack', wId]);
+      chk(`ca ack clears the raw-diagnostic blocker: ${wack.status} ${wack.stderr.slice(0, 200)}`, wack.status === 0);
+      await until(async () => { const x = await row(wRepo, wId); return x && !x.blocked ? x : null; }, 10000);
+      r = await run(wRepo, ['wait', wId, '--timeout', '120', '--quiet']);
+      chk(`raw-diagnostic lane finishes after ack (exit ${r.status}): ${r.stdout.slice(0, 300)}`, r.status === 0);
+      return local;
+    },
+    // A genuine environment failure in a failed tool still blocks: the wiring must not mute real incidents.
+    async () => {
+      const local = []; const chk = chkOf(local);
+      const gRepo = makeRepo('genuine', ['toolerr:fatal: Unable to create .git/index.lock: Permission denied+commit:1+wait:4000', 'ok']);
+      const gId = 'genuine--work';
+      let r = await run(gRepo, ['lane', gRepo, 'work', '--detach']);
+      chk(`genuine-env lane starts detached: ${r.stderr.slice(0, 200)}`, r.status === 0);
+      const gsig = await until(async () => { const s = state(gRepo); return s && s.blocker ? s : null; }, 20000);
+      chk(`a genuine git permission failure still blocks: ${JSON.stringify(gsig && gsig.blocker)}`, gsig?.blocker?.kind === 'env');
+      chk('the blocker names the refused commit', /Permission denied|index\.lock/.test(gsig.blocker.text || '') === true);
+      const gack = await run(gRepo, ['ack', gId]);
+      chk(`ca ack clears the env blocker: ${gack.status} ${gack.stderr.slice(0, 200)}`, gack.status === 0);
+      const gclear = await until(async () => { const x = await row(gRepo, gId); return x && !x.blocked ? x : null; }, 10000);
+      chk('the acked env blocker is cleared while the lane keeps running', !!gclear === true);
+      r = await run(gRepo, ['wait', gId, '--timeout', '120', '--quiet']);
+      chk(`genuine-env lane finishes after ack (exit ${r.status}): ${r.stdout.slice(0, 300)}`, r.status === 0);
+      return local;
+    },
+  ]);
+  for (const local of pooled) results.push(...local);
 } finally {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 }
 
-console.log('PASS end-to-end source wiring: narration and expected failures stay quiet, genuine failures block');
+for (const l of results) if (l.startsWith('FAIL')) console.log(l);
+const fails = results.filter((l) => l.startsWith('FAIL')).length;
+console.log(fails ? `${fails} FAILED` : 'PASS end-to-end source wiring: narration and expected failures stay quiet, genuine failures block');
+process.exit(fails ? 1 : 0);
