@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.9.0 (2026-11-11)
+
+Updates
+- One lane state machine: a lane's phases, results and end causes are declared in `runner/lanestate.mjs`, and
+  one classifier decides its health, status, bucket and actions. The CLI, MCP, Lanes and Office views all read
+  that one answer, so a lane can no longer sit under Needs you with a Running badge. Contract:
+  `docs/contracts/lanestate.txt`.
+- A lane waiting on the lead says so on its own badge: "Asked lead" (a worker question), "No progress" and
+  "Not acting" (thinking without a tool call) now carry the needs-you mark, like the bucket they sit in.
+- Truthful end labels: a finished lane records why it ended (`end.cause`). "Missing credentials: run ca auth"
+  shows only for a real credentials failure (not for any reason that mentions "auth"), and a lane closed after
+  its supervisor died reads "Stopped (supervisor died)", not "Stopped by lead".
+- Plans follow their lanes: a plan reads Needs you exactly when one of its lanes does. A lane the lead stopped
+  no longer makes the plan read Needs you or Failed, and a lane waiting on review, stalled or asking a question
+  always does. The Office lead badge shows the same plan badge as every other plan pill.
+- The runner nudges a builder that reads without writing: after 25 read-only tool calls or 5 minutes without a
+  file change it is told to make the first change now (`READ_STREAK`, `FIRST_WRITE_S`; a brief line
+  `WRITE_FIRST: off` turns it off). Keep the default flash builder even for complex lanes: on this release's
+  lanes two GLM 5.3 builders went 15 and 40 minutes without writing a file.
+- `ca wait` no longer wakes the lead again with a blocker it just answered (a steer or ack the supervisor had
+  not applied yet), and a repeat-fail blocker now carries the tool's own error.
+- `ca brief-check` no longer warns about the files an "Only touch ..." rule allows, and a path that ends a
+  sentence is matched.
+- `ca stop` and `ca resume` on a dead lane write its final state atomically and never rewrite a lane that
+  already finished. The step list shows the current step during review too.
+- View fallbacks (older server, demo mode) follow the server rules: needs review is never counted as done,
+  continued and stopped lanes are ended, and bar and result colours come from the lane status.
+
+
 ## 0.8.0 (2026-11-11)
 
 Updates
