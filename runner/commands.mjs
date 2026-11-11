@@ -5,6 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { CA_ENTRY, EXE, HERE, PLANS, REG, ackNote, alive, caEnv, compact, controlTarget, dashUrl, die, dur, findLane, health, killTree, laneAlive, laneId, laneIndex, laneMemoFor, laneSeen, lanes, now, oneLine, planClosed, plans, plansSnapshot, readAcks, readJSON, readJSONCached, resultOf, setAck, sleep, stepProgress, writeAcks } from './common.mjs';
 import { laneActions, laneBucket, laneKind, laneOutcome } from './controls.mjs';
+import { finishLaneFile } from './lanestate.mjs';
 import { tokenTotal, withTotal } from './tokens.mjs';
 
 // ---------- control commands ----------
@@ -226,7 +227,7 @@ export function cmdAck(args) {
 export function cmdStop(args) {
   const l = controlTarget(args.find((a) => !a.startsWith('--')), 'stop');
   fs.writeFileSync(path.join(l.dir, 'STOP'), String(now()));
-  if (!alive(l.s.pid)) { killTree(l.s.server?.pid); const s = l.s; s.result = s.result || 'stopped'; s.phase = 'finished'; s.finishedAt = s.finishedAt || now(); s.activity = 'stopped (supervisor had died)'; fs.writeFileSync(path.join(l.dir, 'state.json'), JSON.stringify(s, null, 2)); console.log(`supervisor was gone; killed its server and marked ${l.id} stopped`); return; }
+  if (!alive(l.s.pid)) { killTree(l.s.server?.pid); finishLaneFile(l.dir, l.s, { result: 'stopped', cause: 'supervisor-died', detail: 'the supervisor had died', activity: 'stopped (supervisor had died)' }); console.log(`supervisor was gone; killed its server and marked ${l.id} stopped`); return; }
   console.log(`stop requested for ${l.id}; the supervisor aborts the session and writes the summary within a few seconds`);
 }
 // A resume logged on the plan that owns the lane, so the lead sees who continued what.
@@ -251,8 +252,7 @@ export function resumeLane(l, { note = '', by = 'ca resume' } = {}) {
   if (!s.result && !alive(s.pid)) {
     // DEAD supervisor: kill its server and close the old run before starting a new one.
     killTree(s.server?.pid);
-    s.result = s.result || 'stopped'; s.phase = 'finished'; s.finishedAt = s.finishedAt || now(); s.activity = 'stopped (supervisor had died)';
-    try { fs.writeFileSync(path.join(l.dir, 'state.json'), JSON.stringify(s, null, 2)); } catch {}
+    finishLaneFile(l.dir, s, { result: 'stopped', cause: 'supervisor-died', detail: 'the supervisor had died', activity: 'stopped (supervisor had died)' });
   }
   if (note) { try { fs.mkdirSync(l.dir, { recursive: true }); fs.appendFileSync(path.join(l.dir, 'resume-note.txt'), `[${new Date().toISOString()} ${by}] ${note}\n`); } catch {} }
   noteResume(l, by, note);

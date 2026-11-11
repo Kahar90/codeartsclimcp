@@ -55,7 +55,7 @@ if (C) {
   }
   check('acked lane reads "Handled by lead"', lo({ s: { result: 'done' }, handled: true, note: 'took it over' }).label === 'Handled by lead');
   check('acked lane with a merge note reads "Merged"', lo({ s: { result: 'done' }, handled: true, note: 'merged' }).label === 'Merged');
-  check('a lead-stopped lane reads "Stopped by lead"', lo({ s: { result: 'stopped', activity: 'stopped by the lead' } }).label === 'Stopped by lead');
+  check('a lead-stopped lane reads "Stopped by lead"', lo({ s: { result: 'stopped', reason: 'stopped', activity: 'stopped by the lead' } }).label === 'Stopped by lead');
 }
 
 // ---------- (b) fake lanes and plans through the real CLI ----------
@@ -81,7 +81,7 @@ const rowsOf = (out) => { try { return JSON.parse(out); } catch { return []; } }
 const rowOf = (rows, id) => rows.find((x) => x.lane === id) || {};
 
 // 1. ack of a stopped lane: before Stopped by lead, after Handled by lead with steps hide.
-lane('sbx', 'stop1', { result: 'stopped', activity: 'stopped by the lead' });
+lane('sbx', 'stop1', { result: 'stopped', reason: 'stopped', activity: 'stopped by the lead' });
 let rows = rowsOf(ca(['status', '--json', '--all']).out);
 const before = rowOf(rows, 'sbx--stop1').status || {};
 check('unacked stopped lane reads "Stopped by lead"', before.key === 'stopped' && before.label === 'Stopped by lead' && before.attention === false, JSON.stringify(before));

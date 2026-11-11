@@ -6,8 +6,9 @@ tell from each agent alone whether it is working, finished fine, or needs them.
 1. Lane status (server, runner/controls.mjs laneOutcome, carried as `lane.status` everywhere) keeps
    { key, label, tone, reason } and adds:
    - attention: boolean. True only when the human must act: failed, checks failing, unverified,
-     needs review, paused, supervisor died, stalled (the same lanes the Needs you bucket holds). False for running,
-     planned, done, verified, handled/merged, stopped, killed, dropped, continued, and for every ended lane of a
+     needs review, paused, supervisor died, and a live lane that needs the lead now (stalled, Asked lead,
+     No progress, Not acting), the same lanes the Needs you bucket holds. False for running, planned, done,
+     verified, handled/merged, stopped, killed, dropped, continued, and for every ended lane of a
      closed plan (the lead closed it, so nothing is left for the human).
    - steps: "live" | "complete" | "partial" | "hide". Completion comes only from real step evidence
      ("step N" subjects), never from the result alone.
