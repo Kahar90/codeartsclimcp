@@ -79,6 +79,15 @@ export function stepEvent(l, log, base) {
   const files = stepFiles(l.repo, fresh);
   return { lane: l.id, commits: log.length, new: fresh.map((c) => ({ hash: c.hash, subject: c.subject, step: stepOf(c.subject) })), files, ui: files.some((f) => UI_EXT.test(f)) };
 }
+// Has the lead answered this blocker by file, before the supervisor consumed it? A BLOCKER_ACK, or a
+// lead steer in the inbox queued after the blocker (step-review and runner notices do not count).
+export function blockerAnswered(dir, blocker) {
+  try {
+    if (fs.existsSync(path.join(dir, 'BLOCKER_ACK'))) return true;
+    const at = Number(blocker && blocker.at) || 0;
+    return fs.readdirSync(path.join(dir, 'inbox')).some((f) => f.endsWith('.txt') && !/stepreview|question|sleep|helper/i.test(f) && (Number((f.match(/^(\d+)/) || [])[1]) || 0) > at);
+  } catch { return false; }
+}
 export async function cmdWait(args) {
   const asJson = args.includes('--json'); const quiet = args.includes('--quiet');
   // --compact: with --json, return only the small per-lane decision rows a lead reads when many lanes
@@ -145,7 +154,10 @@ export async function cmdWait(args) {
     }
     // Blocked rule: a running lane with an open blocker reaches the lead at once (exit 11), so a worker's
     // question or a silent run is answered long before the lane ends. The finished-lane rule above wins.
-    const blockedStates = states.filter(({ l, s }) => !s.result && s.blocker);
+    // A blocker the lead already answered (a ca steer queued after it, or a ca ack) is cleared by the
+    // supervisor on its next tick; until then state.json still shows it. Skip it here, or a wait called
+    // right after the answer wakes the lead again with the very blocker it just handled.
+    const blockedStates = states.filter(({ l, s }) => !s.result && s.blocker && !blockerAnswered(l.dir, s.blocker));
     if (blockedStates.length) {
       const blocked = blockedStates.map(({ l, s }) => ({ lane: l.id, kind: s.blocker.kind, text: s.blocker.text, at: s.blocker.at }));
       for (const o of blocked) process.stdout.write(`CA_BLOCKED ${JSON.stringify(o)}\n`);
