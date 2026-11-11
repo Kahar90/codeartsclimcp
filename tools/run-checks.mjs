@@ -18,7 +18,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const full = args.includes('--full');
 const ji = args.indexOf('--jobs');
-const jobs = Math.max(1, Number(ji >= 0 ? args[ji + 1] : 0) || Math.min(8, Math.max(2, os.cpus().length - 2)));
+const jobs = Math.max(1, Number(ji >= 0 ? args[ji + 1] : 0) || Math.min(16, Math.max(2, os.cpus().length - 2)));
 const filter = args.filter((a, i) => !a.startsWith('--') && !(ji >= 0 && i === ji + 1))[0] || '';
 const onCI = process.env.GITHUB_ACTIONS === 'true';
 const dir = path.join(ROOT, 'checks');
