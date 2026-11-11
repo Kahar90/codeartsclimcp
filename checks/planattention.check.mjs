@@ -76,6 +76,11 @@ scenario('agree_run', { title: 't', status: 'running', waves: [{ name: 'W', lane
 p = list().agree_run || {};
 check('a running lane agrees between the wave and the plan', p.state === 'running' && !!p.waves && !!p.waves[0] && p.waves[0].status === 'running', JSON.stringify({ wave: p.waves && p.waves[0] && p.waves[0].status, state: p.state }));
 
+// ---------- step 2: both lead plan badges in the Office view show plan.badge ----------
+const html = fs.readFileSync(path.join(ROOT, 'runner', 'office.html'), 'utf8');
+check('the lead station clip shows plan.badge (tone)', /function renderStations[\s\S]*?planBadge && planBadge\.tone/.test(html));
+check('the lead window badge shows plan.badge (word)', /function renderWinContent[\s\S]*?planBadge && planBadge\.word/.test(html));
+
 console.log(results.join('\n'));
 const fails = results.filter((r) => r.startsWith('FAIL')).length;
 console.log(fails ? `${fails} failed` : `all ${results.length} passed`);
