@@ -468,8 +468,40 @@ function planTime(p, r, planned) {
 const statusKey = (x) => (x && x.status && x.status.key) || (x && x.result) || '';
 // Settled: nothing is left for a human (the new Verified, a plain Done, or an acked Handled lane).
 const settledKey = (k) => k === 'verified' || k === 'done' || k === 'handled';
-// Anything a human must look at, plus the ended-without-a-result states the old badge read the same way.
-const attnKey = (k) => ['checks failing', 'failed', 'unverified', 'stopped', 'killed'].includes(k);
+// The result words the old rule read as attention, kept only for a lane that never got a status object
+// (a legacy lane rebuilt from its log). stopped and killed are gone: the lead ending a lane is not work
+// for a human (status contract part 1).
+const LEGACY_ATTN = ['checks failing', 'failed', 'unverified'];
+// Does this lane need a human? The server already decided (lane.status.attention, status contract part
+// 1); the plan, the wave and the glance all read that one flag, so they can never disagree with the
+// lane badge itself.
+const laneNeedsHuman = (x) => (x && x.status && typeof x.status === 'object') ? x.status.attention === true : LEGACY_ATTN.includes((x && x.result) || '');
+// The one pure rule that turns a set of lanes into a state word, shared by the wave status and the
+// plan state so they cannot keep two copies. `closed`, `phase` and `status` are the plan context; a
+// wave passes none of them, so only a plan reads closed/verifying/waiting. A lane needs the human when
+// its own status says so (laneNeedsHuman). 'paused' only when every attention lane is paused.
+function laneSetState(lanes, { closed, phase, status } = {}) {
+  const all = Array.isArray(lanes) ? lanes : [];
+  const planCtx = closed !== undefined || typeof phase === 'string' || typeof status === 'string';
+  const live = all.filter((x) => x.result !== 'dropped');
+  const settled = (x) => settledKey(statusKey(x));
+  // Done for a closed plan counts the results the old summary counted: settled, a plain done, or a
+  // lane left for review (never re-read as an open lane).
+  const doneLane = (x) => settled(x) || x.result === 'done' || x.result === 'needs review';
+  const attn = live.filter(laneNeedsHuman);
+  if (live.some((x) => x.running)) return 'running';
+  if (closed) return live.length > 0 && live.every(doneLane) ? 'done' : 'closed';
+  if (attn.length) return attn.every((x) => statusKey(x) === 'paused') ? 'paused' : 'attention';
+  if (live.length > 0 && live.every(settled)) {
+    if (/^verifying$/i.test(status || '') || phase === 'verifying') return 'verifying';
+    return planCtx ? (LEAD_PHASES.includes(phase) && phase !== 'done' ? 'waiting' : 'done') : 'done';
+  }
+  if (planCtx) return 'waiting';
+  if (!all.length) return 'planned';
+  if (!live.length) return 'dropped';
+  if (live.some((x) => x.result)) return 'partial';
+  return 'planned';
+}
 // One glance state per plan, so a person across the room can tell at once whether the work is
 // running, done, failed or waiting on them. Pure: it reads only the plan view it is handed.
 const QUIET_MS = 15 * 60e3;
@@ -479,6 +511,9 @@ const GLANCE_WORD = { working: 'Working', 'needs-you': 'Needs you', failed: 'Fai
 const GLANCE_TONE = { working: 'run', 'needs-you': 'warn', failed: 'bad', done: 'done', quiet: 'warn', idle: 'idle' };
 const GLANCE_GLYPH = { working: GLYPHS.working, 'needs-you': GLYPHS['needs-you'], failed: GLYPHS.failed, done: GLYPHS.done, quiet: '?', idle: GLYPHS.idle };
 const glanceBad = (k) => k === 'failed' || k === 'checks failing' || k === 'killed';
+// An attention lane is failed when the lane badge itself says so (the X glyph, U+2715) or its key is a
+// failure; the other attention lanes (needs review, paused, stalled) are needs-you.
+const attnBad = (x) => (x && x.status && x.status.glyph === GLYPHS.failed) || statusKey(x) === 'failed' || statusKey(x) === 'checks failing';
 const glanceDur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
 function glanceOf(view) {
   const lanes = (view.waves || []).flatMap((w) => w.lanes || []).filter((x) => x.result !== 'dropped');
@@ -518,10 +553,11 @@ function glanceOf(view) {
   }
   // e. a fresh lead phase means the lead is still working.
   if (age !== null && age < QUIET_MS && ['planning', 'building', 'waiting', 'verifying'].includes(phase)) return out('working', `${who} is ${phase}`);
-  // f. a lane needs a human: a bad one is failed, any other attention lane is needs-you.
-  const attn = lanes.filter((x) => attnKey(statusKey(x)));
+  // f. a lane needs a human (the same attention flag every lane badge reads): a bad one is failed,
+  // any other attention lane is needs-you.
+  const attn = lanes.filter(laneNeedsHuman);
   if (attn.length) {
-    const bad = attn.find((x) => glanceBad(statusKey(x)));
+    const bad = attn.find(attnBad);
     if (bad) return out('failed', `${bad.task} failed: ${statusKey(bad)}`);
     const a = attn[0];
     return out('needs-you', `${a.task}: ${(a.status && a.status.label) || statusKey(a)}`);
@@ -568,9 +604,9 @@ export function planView(r) {
   }
   const waves = (p.waves && p.waves.length ? p.waves : [{ name: 'Lanes', lanes: planned.map((x) => x.task) }]).map((w) => {
     const all = (w.lanes || []).map((t) => byTask.get(t)).filter(Boolean);
-    const ls = all.filter((x) => !x.folded); const act = ls.filter((x) => x.result !== 'dropped');
-    const st = !ls.length ? 'planned' : !act.length ? 'dropped' : act.every((x) => settledKey(statusKey(x))) ? 'done' : act.some((x) => x.running) ? 'running'
-      : act.some((x) => attnKey(statusKey(x))) ? 'attention' : act.some((x) => statusKey(x) === 'paused') ? 'paused' : act.some((x) => x.result) ? 'partial' : 'planned';
+    const ls = all.filter((x) => !x.folded);
+    // The wave status and the plan state share laneSetState; a wave passes no plan context.
+    const st = laneSetState(ls, {});
     return { name: w.name, note: w.note || w.after || '', status: st, lanes: ls, folded: all.length && !ls.length };
   }).filter((w) => !w.folded).map(({ folded, ...w }) => w); // a wave whose lanes all continued elsewhere is history, not a stage
   // The plan badge comes from what the lanes really do, never only from the hand-written status: a plan whose
@@ -583,10 +619,8 @@ export function planView(r) {
   const ts = (t) => { const n = typeof t === 'number' ? t : new Date(t || 0).getTime(); return Number.isFinite(n) ? n : 0; };
   const lastActivity = Math.max(r.mtime || 0, ...allL.map((x) => Math.max(ts(x.finishedAt), ts(x.startedAt))));
   const closed = /^(done|closed|abandoned|cancell?ed)$/i.test(p.status || '');
-  const allSettled = live.length > 0 && live.every((x) => settledKey(statusKey(x)));
-  const state = counts.running ? 'running' : closed ? (counts.done === counts.total ? 'done' : 'closed')
-    : live.some((x) => attnKey(statusKey(x))) ? 'attention' : live.some((x) => statusKey(x) === 'paused') ? 'paused'
-    : allSettled ? (/^verifying$/i.test(p.status || '') || p.phase === 'verifying' ? 'verifying' : LEAD_PHASES.includes(p.phase) && p.phase !== 'done' ? 'waiting' : 'done') : 'waiting';
+  // The plan state reads the same rule as every wave status, with the plan's own context.
+  const state = laneSetState(allL, { closed, phase: p.phase, status: p.status || '' });
   const idle = Date.now() - lastActivity; const dur = (ms) => ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}m` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}h` : `${Math.round(ms / 86400e3)}d`;
   const bits = [`${counts.done}/${counts.total} lanes done`];
   if (counts.running) bits.push(`${counts.running} running`);
