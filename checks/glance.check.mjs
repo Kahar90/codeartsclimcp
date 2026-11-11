@@ -54,7 +54,8 @@ plan('running_plan', { title: 't', status: 'running', waves: [{ name: 'W', lanes
     done1: { pid: 999999, startedAt: t - 2 * 3600e3, finishedAt: t - 3600e3, lastEventAt: t - 3600e3, phase: 'finished', result: 'done', exitCode: 0, activity: 'done' } });
 // e. a fresh lead phase.
 plan('fresh_phase', { title: 't', status: 'running', phase: 'building', updatedAt: iso(t - 2 * 60e3), waves: [{ name: 'W', lanes: ['z'] }], lanes: [{ task: 'z' }] });
-// f. an attention lane: needs-you, then failed.
+// f. a lead-ended lane is not attention (status contract part 1): a stopped lane is not needs-you and
+// a killed lane is not failed, so both plans stay quiet (their lane badges say not attention).
 plan('attn_you', { title: 't', status: 'running', waves: [{ name: 'W', lanes: ['st', 'pl'] }], lanes: [{ task: 'st' }, { task: 'pl' }] },
   { st: { pid: 999999, startedAt: t - 2 * 3600e3, finishedAt: t - 3600e3, lastEventAt: t - 3600e3, phase: 'finished', result: 'stopped', exitCode: 0, activity: 'stopped by the lead' } });
 plan('attn_failed', { title: 't', status: 'running', waves: [{ name: 'W', lanes: ['k', 'pl2'] }], lanes: [{ task: 'k' }, { task: 'pl2' }] },
@@ -75,8 +76,8 @@ const want = {
   lead_done: { state: 'done', word: 'Done', detail: 'shipped' },
   running_plan: { state: 'working', word: 'Working', detail: '1 of 3 lanes running, step 4/7' },
   fresh_phase: { state: 'working', word: 'Working', detail: 'Claude is building' },
-  attn_you: { state: 'needs-you', word: 'Needs you', detail: 'st: Stopped by lead' },
-  attn_failed: { state: 'failed', word: 'Failed', detail: 'k failed: killed' },
+  attn_you: { state: 'quiet', word: 'Check Claude', detail: 'No lead update yet; Claude may be waiting on you' },
+  attn_failed: { state: 'quiet', word: 'Check Claude', detail: 'No lead update yet; Claude may be waiting on you' },
   quiet_null: { state: 'quiet', word: 'Check Claude', detail: 'No lead update yet; Claude may be waiting on you' },
   quiet_age: { state: 'quiet', word: 'Check Claude', detail: 'No lead update for 20m; Claude may be waiting on you' },
   idle_plan: { state: 'idle', word: 'Idle', detail: '' },

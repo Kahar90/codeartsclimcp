@@ -1816,8 +1816,11 @@ function setStation(key, opts) {
 function renderStations() {
   if (!model) return;
   const p = model.plan;
+  // The lead's clip reads the one plan badge (its tone) when the server sent it, so it can never show
+  // a page-computed state the plan itself does not; an older payload falls back to the derived state.
+  const planBadge = p && p.badge;
   const planKey = CAUI.status(planStatus(p, model.lanes)).key;
-  setStation("lead", { name: leadName(p), sub: "Orchestrator", laneId: "lead", clip: CLIP_BY_KEY[planKey] || "idle" });
+  setStation("lead", { name: leadName(p), sub: "Orchestrator", laneId: "lead", clip: CLIP_BY_KEY[(planBadge && planBadge.tone) || planKey] || "idle" });
   for (const stKey of WORKER_STATIONS) {
     const id = stationLane[stKey];
     const l = id && model.lanes.find((x) => x.id === id);
@@ -2229,7 +2232,11 @@ function renderWinContent(keepInput) {
   if (winFor === "lead") {
     const p = model.plan;
     $("winTitle").textContent = leadName(p);
-    const badgeHtml = CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
+    // The lead window badge shows the one plan badge (word, tone, glyph) when the server sent it.
+    const planBadge = p && p.badge;
+    const badgeHtml = planBadge && planBadge.word
+      ? CAUI.badge({ key: planBadge.tone || "idle", label: (planBadge.glyph ? planBadge.glyph + " " : "") + planBadge.word })
+      : CAUI.badge(CAUI.status(planStatus(p, model.lanes)));
     if ($("winBadge").innerHTML !== badgeHtml) { $("winBadge").innerHTML = badgeHtml; renders.winBadge++; }
     $("winMeta").textContent = "Orchestrator";
     renderTokensRow(p.tokens, p.tokensBy);
