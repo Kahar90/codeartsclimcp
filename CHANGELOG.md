@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.1 (2026-11-11)
+
+Updates
+- Faster checks: 16 slow check files now run their independent fake-lane scenarios at the same time through
+  `checks/lib/pool.mjs`, and the check runner uses up to 16 parallel jobs on large machines. `npm run check`
+  drops from about 4 minutes to under 1.5, `npm run check:full` to under 3. Every assertion is kept, except one
+  scenario in `checks/reviewfix.check.mjs` that `checks/reviewreuse.check.mjs` already covers.
+- Cleanup: an unused runner export removed, and the minified `checks/reviewnudge.check.mjs` made readable.
+
+
 ## 0.9.0 (2026-11-11)
 
 Updates
