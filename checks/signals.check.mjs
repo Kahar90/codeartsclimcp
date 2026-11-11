@@ -157,6 +157,8 @@ r = run(fRepo, ['lane', fRepo, 'work', '--detach']);
 check('repeat-fail lane starts detached', r.status === 0, `${r.status} ${r.stderr.slice(0, 200)}`);
 const fsig = await waitBlocker(fRepo, 'repeat-fail', 20000);
 check('the same tool failing repeatedly with no progress raises a repeat-fail blocker', !!fsig && /bash/.test(fsig.blocker.text || ''), JSON.stringify(fsig && fsig.blocker));
+// The lead answers from the blocker alone: it carries the tool's own error, not just the tool name.
+check('the repeat-fail blocker says what the tool error was', !!fsig && String(fsig.blocker.text || '').split(': ').length >= 3, JSON.stringify(fsig && fsig.blocker));
 r = run(fRepo, ['wait', fId, '--timeout', '24', '--quiet']);
 bl = lines(r.stdout, 'CA_BLOCKED');
 check('ca wait returns exit 11 with CA_BLOCKED kind repeat-fail', r.status === 11 && bl.length === 1 && bl[0].kind === 'repeat-fail', `exit ${r.status}: ${r.stdout.slice(0, 300)}`);

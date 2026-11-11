@@ -450,7 +450,7 @@ export async function runLane(repoArg, task, opts = {}) {
                 const key = toolKey(part.tool, st.input);
                 const { state: nf, repeat } = noteFailure(toolFails.get(key), { commits: S.commits });
                 toolFails.set(key, nf);
-                if (repeat) raiseSignal({ kind: REPEAT_FAIL, text: `the same tool keeps failing with no progress: ${part.tool} ${oneLine(st.input?.command ?? st.input?.filePath ?? '', 120)}`, why: 'the same tool keeps failing' });
+                if (repeat) raiseSignal({ kind: REPEAT_FAIL, text: `the same tool keeps failing with no progress: ${part.tool} ${oneLine(st.input?.command ?? st.input?.filePath ?? '', 120)}: ${oneLine(ft, 160)}`, why: 'the same tool keeps failing' });
               }
             }
           }
