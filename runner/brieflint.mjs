@@ -10,7 +10,7 @@ const CHECK_RE = /^\s*(?:[-*]\s*)?CHECK:\s*(.+?)\s*$/i;
 const SCRIPT_RE = /\b(?:node|python|python3|bash|sh)\b\s+(?:"([^"]+\.[A-Za-z0-9]+)"|'([^']+\.[A-Za-z0-9]+)'|((?:\.?\/)?[^\s'"]+\.[A-Za-z0-9]+))/i;
 
 const isPathLike = (t) => /[\\/]/.test(t) || /\.[A-Za-z0-9]{1,8}$/.test(t);
-const norm = (p) => String(p).trim().replace(/^[`"']+|[`"']+$/g, '').replace(/\\/g, '/').replace(/^\.\//, '');
+const norm = (p) => String(p).trim().replace(/^[`"']+|[`"']+$/g, '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/[.,:;]+$/, ''); // a path ending a sentence keeps no period
 
 // Backticked spans plus bare path-like tokens (one or more separators, or a dotted name).
 function tokens(text) {
@@ -21,6 +21,18 @@ function tokens(text) {
   return [...new Set(out)];
 }
 
+// Only the clauses a protecting phrase opens are protected: from "do not touch" (or "never edit"...) to
+// the end of its sentence. "Only touch a.mjs, b.mjs. Do not touch c.mjs" protects c.mjs, never the
+// allow-list before it. A path's own dots are not sentence ends: a sentence ends at ". " or the line end.
+const PROTECTED_G = new RegExp(PROTECTED_RE.source, 'gi');
+export function protectedClauses(text) {
+  const t = String(text); const out = [];
+  for (const m of t.matchAll(PROTECTED_G)) {
+    const rest = t.slice(m.index); const end = rest.search(/[.;!?](\s|$)/);
+    out.push(end >= 0 ? rest.slice(0, end + 1) : rest);
+  }
+  return out.join(' ');
+}
 export function lintBrief({ repo, briefText, listFiles, readFile } = {}) {
   const files = new Set((listFiles ? listFiles() : []).map((f) => norm(f)).filter(Boolean));
   const lines = String(briefText || '').split(/\r?\n/);
@@ -31,7 +43,7 @@ export function lintBrief({ repo, briefText, listFiles, readFile } = {}) {
   lines.forEach((text, i) => {
     if (!PROTECTED_RE.test(text)) return;
     const rule = text.trim();
-    for (const t of tokens(text)) for (const f of files) {
+    for (const t of tokens(protectedClauses(text))) for (const f of files) {
       if (f === t || f.startsWith(t.endsWith('/') ? t : t + '/')) if (!protectedFiles.has(f)) protectedFiles.set(f, { rule, line: i + 1 });
     }
   });
