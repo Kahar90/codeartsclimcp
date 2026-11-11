@@ -1059,9 +1059,11 @@ function ctlBar(l, suggestOnly) {
   return `<div class="ctlbar">${head}${rest}</div>${note}`;
 }
 
-function prog(p, res) {
+function prog(p, res, st) {
   const t = p?.total || 0, d = p?.done || 0; const pct = t ? Math.round((100 * d) / t) : 0;
-  const k = res === 'failed' ? 'bad' : res === 'done' ? 'ok' : '';
+  // The bar colour follows the server status tone (bad: bad, done: ok) when the payload carries a
+  // status; only an older payload without one falls back to the raw result rule.
+  const k = st ? (st.tone === 'bad' ? 'bad' : st.tone === 'done' ? 'ok' : '') : (res === 'failed' ? 'bad' : res === 'done' ? 'ok' : '');
   return `<div class="prog ${k}"><i style="width:${pct}%"></i></div>`;
 }
 // ---------- control room: the default route (#/) ----------
@@ -1088,9 +1090,10 @@ function laneBucket(l) {
   if (l && l.bucket) return l.bucket;
   const x = l || {}, r = String(x.result || '');
   const h = String(x.health || '').toLowerCase();
-  if (/stall|dead/.test(h) || ['failed', 'stopped', 'killed', 'paused', 'needs review'].includes(r)) return 'attention';
-  if (x.running) return 'running';
   if (r === 'done' || r === 'continued') return 'done';
+  if (r === 'stopped' || r === 'killed' || r === 'dropped') return 'ended';
+  if (['failed', 'paused', 'needs review', 'unverified', 'checks failing'].includes(r) || /stall|dead/.test(h)) return 'attention';
+  if (x.running) return 'running';
   return 'ended';
 }
 // ---------- lane truth (status-contract part 1) ----------
@@ -1128,14 +1131,14 @@ function laneBadge(l) {
 function laneStepsCard(l) {
   const mode = laneStepsMode(l), p = l.progress || {}, n = p.total || 0;
   if (mode === 'hide') return '';
-  if (mode === 'complete') return `<div class="lane-steps"><span>${esc(laneGlyphOf(l))} ${n ? `${n}/${n} steps` : 'finished'}</span>${prog({ done: 1, total: 1 }, l.result)}</div>`;
-  return `<div class="lane-steps"><span>${n ? `${p.done || 0}/${n} steps` : 'no numbered steps'}</span>${prog(p, l.result)}</div>`;
+  if (mode === 'complete') return `<div class="lane-steps"><span>${esc(laneGlyphOf(l))} ${n ? `${n}/${n} steps` : 'finished'}</span>${prog({ done: 1, total: 1 }, l.result, l.status)}</div>`;
+  return `<div class="lane-steps"><span>${n ? `${p.done || 0}/${n} steps` : 'no numbered steps'}</span>${prog(p, l.result, l.status)}</div>`;
 }
 function laneStepsFoot(l) {
   const mode = laneStepsMode(l), p = l.progress || {}, n = p.total || 0;
   if (mode === 'hide') return '';
-  if (mode === 'complete') return `${prog({ done: 1, total: 1 }, l.result)}<span class="cr-meta">${esc(laneGlyphOf(l))} ${n ? `${n}/${n} steps` : 'finished'}</span>`;
-  return `${prog(p, l.result)}<span class="cr-meta">${p.done || 0}/${n} steps</span>`;
+  if (mode === 'complete') return `${prog({ done: 1, total: 1 }, l.result, l.status)}<span class="cr-meta">${esc(laneGlyphOf(l))} ${n ? `${n}/${n} steps` : 'finished'}</span>`;
+  return `${prog(p, l.result, l.status)}<span class="cr-meta">${p.done || 0}/${n} steps</span>`;
 }
 // Small localStorage helpers: a remembered control room never throws on a locked-down browser.
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } }
@@ -1492,18 +1495,23 @@ function renderPlan(p) {
 function pipeline(d) {
   const seen = new Set(d.phases.map((x) => x.phase)); const ph = d.result ? 'finished' : d.phase;
   const gateFail = d.gates.some((g) => !g.ok), gateOk = d.gates.length && d.gates[d.gates.length - 1].ok;
-  const st = [
+  // The result cell takes its colour and text from the server status (tone done: Done, bad: Fail,
+  // anything else: neither); only an older payload without a status falls back to the result.
+  const s = d.status;
+  const rn = s && s.label ? s.label : (d.result || 'Result');
+  const rc = s ? (s.tone === 'done' ? 'done' : s.tone === 'bad' ? 'fail' : '') : (d.result ? (d.result === 'done' ? 'done' : 'fail') : '');
+  const cells = [
     ['Build', ph === 'build' || ph === 'starting' || ph === 'restart' || ph === 'backoff' ? 'live' : seen.has('build') ? 'done' : ''],
     ['Gates', ph === 'gate' ? 'live' : gateOk ? 'done' : gateFail ? 'fail' : ''],
     [`Fix${d.fixes ? ' ×' + d.fixes : ''}`, ph === 'fix' ? 'live' : seen.has('fix') ? 'done' : ''],
     ['Review', ph === 'review' ? 'live' : d.verdict ? (d.verdict === 'ready' ? 'done' : 'fail') : ''],
-    [d.result ? d.result : 'Result', d.result ? (d.result === 'done' ? 'done' : 'fail') : ''],
+    [rn, rc],
   ];
   const ic = (c) => c === 'done' ? '<span class="sg-ic" aria-hidden="true">&#10003;</span>'
     : c === 'live' ? '<span class="sg-dot" aria-hidden="true"></span>'
     : c === 'fail' ? '<span class="sg-ic" aria-hidden="true">&#10007;</span>'
     : '<span class="sg-ic sg-future" aria-hidden="true">&#9675;</span>';
-  return `<div class="pipe">${st.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="step"' : ''}>${ic(c)}${esc(n)}</span>`).join('')}</div>`;
+  return `<div class="pipe">${cells.map(([n, c]) => `<span class="seg ${c}"${c === 'live' ? ' aria-current="step"' : ''}>${ic(c)}${esc(n)}</span>`).join('')}</div>`;
 }
 function renderLane(d, keep) {
   // A step-done flash class is added on one render and must be dropped by the next poll render, so the

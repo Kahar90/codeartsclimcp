@@ -64,4 +64,44 @@ check('office: planStatus a running lane reads running', officePlanStatus({}, [{
 check('office: planStatus with no lanes reads planned', officePlanStatus({}, []) === 'planned');
 check('office: planStatus keeps the server state when present', officePlanStatus({ state: 'verifying' }, [{ result: 'failed' }]) === 'verifying');
 
+// ---------- dash.html: the same buckets, and the step bar and pipeline take the server tone ----------
+const dash = html('dash.html');
+const dashBucket = fn(dash, 'laneBucket');
+const dashProg = fn(dash, 'prog');
+const dashPipeline = fn(dash, 'pipeline', { esc: (s) => String(s ?? '') });
+
+// The server sends bucket on every lane; the fallback must mirror runner/controls.mjs laneBucket.
+check('dash: an explicit bucket wins', dashBucket({ bucket: 'ended', result: 'failed' }) === 'ended');
+for (const r of ['done', 'continued']) check(`dash: result ${r} buckets done`, dashBucket({ result: r }) === 'done');
+for (const r of ['stopped', 'killed', 'dropped']) check(`dash: result ${r} buckets ended`, dashBucket({ result: r }) === 'ended');
+for (const r of ['failed', 'paused', 'needs review', 'unverified', 'checks failing']) {
+  check(`dash: result ${r} buckets attention`, dashBucket({ result: r }) === 'attention');
+}
+check('dash: a stalled health buckets attention', dashBucket({ health: 'stalled (12m, no tool call)' }) === 'attention');
+check('dash: a dead health buckets attention', dashBucket({ health: 'DEAD' }) === 'attention');
+check('dash: a running lane buckets running', dashBucket({ running: true }) === 'running');
+check('dash: a lane with nothing buckets ended', dashBucket({}) === 'ended');
+
+// The step bar colour follows the server tone when a status is present, and only an older payload
+// without one falls back to the raw result rule.
+check('dash: prog takes a bad status tone', /prog bad/.test(dashProg({ done: 1, total: 3 }, 'done', { tone: 'bad' })));
+check('dash: prog takes a done status tone', /prog ok/.test(dashProg({ done: 3, total: 3 }, 'failed', { tone: 'done' })));
+check('dash: prog ignores the result when a status is present', /prog ">/.test(dashProg({ done: 1, total: 3 }, 'failed', { tone: 'idle' })));
+check('dash: prog falls back to a failed result without a status', /prog bad/.test(dashProg({ done: 1, total: 3 }, 'failed')));
+check('dash: prog falls back to a done result without a status', /prog ok/.test(dashProg({ done: 3, total: 3 }, 'done')));
+
+// The pipeline result cell shows the server status label and tone, and only falls back to the result.
+const lane = (over) => Object.assign({ phases: [{ phase: 'build' }], gates: [{ ok: true }], result: 'done' }, over);
+const lastSeg = (out) => out.slice(out.lastIndexOf('<span class="seg '));
+const doneCell = lastSeg(dashPipeline(lane({ status: { label: 'Merged', tone: 'done' } })));
+check('dash: pipeline paints a done status cell done', /^<span class="seg done">/.test(doneCell) && doneCell.includes('Merged'));
+const badCell = lastSeg(dashPipeline(lane({ status: { label: 'Failed after 2 fixes', tone: 'bad' } })));
+check('dash: pipeline paints a bad status cell fail', /^<span class="seg fail">/.test(badCell) && badCell.includes('Failed after 2 fixes'));
+const idleCell = lastSeg(dashPipeline(lane({ status: { label: 'Handled by lead', tone: 'idle' } })));
+check('dash: pipeline leaves a neutral status cell uncoloured', /^<span class="seg ">/.test(idleCell) && idleCell.includes('Handled by lead'));
+const oldDone = lastSeg(dashPipeline(lane({ result: 'done' })));
+check('dash: pipeline falls back to a done result without a status', /^<span class="seg done">/.test(oldDone));
+const oldFail = lastSeg(dashPipeline(lane({ result: 'failed' })));
+check('dash: pipeline falls back to a failed result without a status', /^<span class="seg fail">/.test(oldFail));
+
 console.log('viewstruth: all checks passed');
