@@ -220,3 +220,27 @@ export function uncommittedSteps(stepList = [], commitLog = []) {
   for (const c of commitLog) { const m = String((c && c.subject) || '').match(/^step\s*(\d+)\s*:/i); if (m) done.add(Number(m[1])); }
   return stepList.filter((s) => !done.has(s.n)).map((s) => s.n);
 }
+
+// ---------- write-first nudge ----------
+// A builder that keeps exploring (reading, grepping, thinking) without changing a file is the most
+// common way a lane stalls: deep-reasoning models can read for 15 to 40 minutes, hit a context
+// compaction and start reading again. Making a first small change early, then letting the checks and
+// the reviewers steer the rest, is faster. The supervisor counts the builder's read-only tool calls
+// and the time since its last file change (or commit), and steers it to write once either limit is
+// reached. At most `max` nudges per quiet stretch; the no-commit blocker still reaches the lead after.
+export const WRITE_TOOLS = new Set(['edit', 'write', 'patch', 'multiedit', 'apply_patch']);
+export const READ_TOOLS = new Set(['read', 'grep', 'glob', 'list', 'ls', 'codesearch', 'search']);
+export function writeFirstNudge({ now, since, reads, nudges, firstWriteS = 300, readStreak = 25, max = 3 } = {}) {
+  if (nudges >= max) return null;
+  const quietMs = Math.max(0, (now || 0) - (since || 0));
+  if (firstWriteS > 0 && quietMs > firstWriteS * 1000) return { why: 'time', quietMs, reads: reads || 0 };
+  if (readStreak > 0 && (reads || 0) >= readStreak) return { why: 'reads', quietMs, reads: reads || 0 };
+  return null;
+}
+export function writeFirstText({ quietMs, reads, nudges }) {
+  const ms = quietMs || 0; const span = ms < 60000 ? 'under a minute' : `about ${Math.round(ms / 60000)} min`;
+  return `Runner notice: ${reads || 0} read${reads === 1 ? '' : 's'} and ${span} without changing a file. Stop exploring and make the first change now: `
+    + 'the smallest piece of the current step, then run its check and let the result guide the next edit. '
+    + 'Grep for the function you need instead of reading whole files; the checks and the reviewers will catch what you missed.'
+    + (nudges >= 1 ? ' This is a repeated notice: write the change in your very next tool call.' : '');
+}

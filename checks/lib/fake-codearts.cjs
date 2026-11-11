@@ -86,6 +86,7 @@ function playReview(sid, text) {
 //   run:ARG    runs the runner's check helper (tasks/*.lane/check.mjs ARG) like a worker's bash tool
 //              would, and appends {arg, code, out} to fake-checks.log
 //   wait:MS    waits
+//   read:REL   a read tool call (running, then completed) on REL; edit:REL the same for an edit
 //   noise:K    commits noise<K>.txt as "wip: noise K" (a commit that is not a step)
 //   write:REL=TEXT  writes TEXT to REL (relative to the repo), no commit
 //   ask:TEXT   asks the lead a question (question.asked); rejections land in fake-questions.log
@@ -101,6 +102,8 @@ async function playChain(sid, kind) {
     else if (verb === 'decide') answer(sid, arg); // a finished reply text part (a request for the lead)
     else if (verb === 'toolerr') emit('message.part.updated', { part: { id: `p${++n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: `c${n}`, tool: 'bash', state: { status: 'error', input: { command: 'git commit' }, error: arg } } });
     else if (verb === 'bash') { const cid = `c${++n}`; emit('message.part.updated', { part: { id: `p${n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: cid, tool: 'bash', state: { status: 'running', input: { command: arg } } } }); emit('message.part.updated', { part: { id: `p${n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: cid, tool: 'bash', state: { status: 'completed', input: { command: arg }, output: 'ok' } } }); }
+    else if (verb === 'read') { const cid = `c${++n}`; for (const status of ['running', 'completed']) emit('message.part.updated', { part: { id: `p${n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: cid, tool: 'read', state: { status, input: { filePath: arg }, output: 'ok' } } }); }
+    else if (verb === 'edit') { const cid = `c${++n}`; for (const status of ['running', 'completed']) emit('message.part.updated', { part: { id: `p${n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: cid, tool: 'edit', state: { status, input: { filePath: arg }, output: 'ok' } } }); }
     else if (verb === 'shfail') emit('message.part.updated', { part: { id: `p${++n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: `c${n}`, tool: 'bash', state: { status: 'completed', input: { command: 'npm test' }, output: arg, metadata: { exit: 1, exitCode: 1 } } } });
     else if (verb === 'shok') emit('message.part.updated', { part: { id: `p${++n}`, sessionID: sid, messageID: `m${n}`, type: 'tool', callID: `c${n}`, tool: 'bash', state: { status: 'completed', input: { command: 'npm test' }, output: arg, metadata: { exit: 0, exitCode: 0 } } } });
     else if (verb === 'decideopen') emit('message.part.updated', { part: { id: `p${++n}`, sessionID: sid, messageID: `m${n}`, type: 'text', text: arg } }); // a text part with NO time.end
@@ -121,7 +124,7 @@ async function playChain(sid, kind) {
 function playBuild(sid) {
   const kind = String(script[Math.min(turn, script.length - 1)]); turn++;
   fs.appendFileSync('fake-turns.log', `${kind}\n`);
-  if (/^(commit|run|wait|decide|toolerr|bash|shfail|shok|decideopen):/.test(kind) || kind.includes('+')) { playChain(sid, kind); return; }
+  if (/^(commit|run|wait|decide|toolerr|bash|shfail|shok|decideopen|read|edit):/.test(kind) || kind.includes('+')) { playChain(sid, kind); return; }
   if (kind === 'ok') { later(sid, 300, () => answer(sid, 'done')); later(sid, 600, () => finish(sid)); return; }
   if (kind.startsWith('steps:')) {
     const ns = kind.slice(6).split(',').map((x) => x.trim()).filter(Boolean);

@@ -10,7 +10,7 @@ import { builderContext } from './context.mjs';
 import { classifyCheck, commitFallbackDecision, commitRefused, sleepPoll } from './controls.mjs';
 import { runOrdered } from './gate.mjs';
 import { canTransition, decideEnd, finishState } from './lanestate.mjs';
-import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, uncommittedSteps, REPEAT_FAIL, SANDBOX_CHECK } from './signals.mjs';
+import { classifySignal, directCheckInvocation, noteFailure, toolFailureText, toolKey, uncommittedSteps, writeFirstNudge, writeFirstText, READ_TOOLS, REPEAT_FAIL, SANDBOX_CHECK, WRITE_TOOLS } from './signals.mjs';
 import { detectSleep, isNetworkError, laneSlots, parseLimits, waitOnline } from './netwait.mjs';
 import { ensurePlan, laneAlreadyPlanned } from './plan.mjs';
 import { shouldDeferStepReview, stepReviewBlockers } from './reviewbudget.mjs';
@@ -331,6 +331,14 @@ export async function runLane(repoArg, task, opts = {}) {
   // The direct-check guidance is queued at most once per lane, and per tool-command failure counts feed
   // the repeated-failure signal. Both are supervisor-local; a resume starts them clean.
   let directCheckAlerted = false;
+  // Write-first nudge (signals.mjs writeFirstNudge): the builder's read-only tool calls and the time since
+  // its last file change; a quiet stretch past FIRST_WRITE_S seconds or READ_STREAK reads gets a runner
+  // steer to make the first change. FIRST_WRITE_S=0 and READ_STREAK=0 (or a brief line WRITE_FIRST: off)
+  // turn it off.
+  const writeFirstOff = /^\s*WRITE_FIRST:\s*off\b/im.test(brief);
+  const FIRST_WRITE_S = writeFirstOff ? 0 : Number(process.env.FIRST_WRITE_S ?? 300);
+  const READ_STREAK = writeFirstOff ? 0 : Number(process.env.READ_STREAK ?? 25);
+  const wf = { since: 0, reads: 0, nudges: 0 };
   const toolFails = new Map(); // toolKey -> { n, commits } (commits = lane commit count at first failure)
   const flagSleepPoll = (where) => {
     S.interruptions.push({ at: now(), phase: S.phase, kind: 'sleep-poll', what: where });
@@ -435,6 +443,10 @@ export async function runLane(repoArg, task, opts = {}) {
             const t = s.tools.get(key); s.tools.delete(key);
             const took = t ? ` (${dur(now() - t.since)})` : '';
             lastToolOutput = String(st.error || st.output || '').trim();
+            if (roleOf(sid) === 'build') {
+              if (st.status === 'completed' && WRITE_TOOLS.has(String(part.tool).toLowerCase())) { wf.since = now(); wf.reads = 0; wf.nudges = 0; }
+              else if (READ_TOOLS.has(String(part.tool).toLowerCase())) wf.reads++;
+            }
             if (st.status === 'error') L(`  ! ${part.tool} failed${took}: ${oneLine(st.error, 300)}`);
             else L(`  < ${part.tool} ok${took}${st.output ? ': ' + oneLine(st.output, 200) : ''}`);
             if (sid === S.activeSession) S.lastToolAt = now();
@@ -544,7 +556,7 @@ export async function runLane(repoArg, task, opts = {}) {
     for (const f of files) {
       const fp = path.join(dir, 'inbox', f); let text = ''; try { text = fs.readFileSync(fp, 'utf8').trim(); fs.rmSync(fp); } catch { continue; }
       if (!text) continue;
-      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep|helper/i.test(f) ? 'runner notice' : 'ca steer';
+      const by = /stepreview/i.test(f) ? 'step review' : /question|sleep|helper|nudge/i.test(f) ? 'runner notice' : 'ca steer';
       if (by === 'step review') lastPumpHadStepReview = true;
       // A lead steer queued after the blocker clears it: the person answered the worker's question.
       if (S.blocker && by === 'ca steer') {
@@ -766,6 +778,19 @@ export async function runLane(repoArg, task, opts = {}) {
       // is normal, so keep the tool watchdog from aborting that wait.
       if (checkJobRunning) for (const t of s.tools.values()) t.since = now();
       if (now() - lastCommitCheck > 5000) { lastCommitCheck = now(); syncCommits(); if (builderSessions.has(sid)) { maybeSpecReview().catch((err) => L(`! speculative review start failed: ${oneLine(String((err && err.message) || err), 200)}`)); maybeStepReview(); } }
+      // Write-first nudge: a builder exploring past the limits is steered to make its first change now,
+      // without waiting for the lead. A commit or a file change restarts the count.
+      if (builderSessions.has(sid) && (S.phase === 'build' || S.phase === 'fix')) {
+        const since = Math.max(wf.since, S.lastCommitAt || 0, S.runStartedAt || S.startedAt || T0, S.phases.at(-1)?.at || 0);
+        const nudge = writeFirstNudge({ now: now(), since, reads: wf.reads, nudges: wf.nudges, firstWriteS: FIRST_WRITE_S, readStreak: READ_STREAK });
+        if (nudge) {
+          const text = writeFirstText({ ...nudge, nudges: wf.nudges });
+          try { fs.mkdirSync(path.join(dir, 'inbox'), { recursive: true }); fs.writeFileSync(path.join(dir, 'inbox', `${now()}-nudge-writefirst.txt`), text); } catch {}
+          S.interruptions.push({ at: now(), phase: S.phase, kind: 'write-nudge', what: `${nudge.reads} reads, ${dur(nudge.quietMs)} without a file change (${nudge.why})` });
+          L(`  ! write-first nudge: ${nudge.reads} reads, ${dur(nudge.quietMs)} without a file change`);
+          wf.nudges++; wf.since = now(); wf.reads = 0; save(true);
+        }
+      }
       // No-progress alarm: a running builder that lands no commit for NO_COMMIT_S seconds is stuck. Raise
       // one blocker for the lead (ca wait / status / the bucket) instead of showing "running" forever. An
       // ack mutes it until a new commit lands, so the lead is not nagged about a gap it already saw.

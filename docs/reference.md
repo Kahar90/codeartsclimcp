@@ -88,6 +88,8 @@ Run `ca doctor`; every failing row has a fix line. Common ones:
 
 Env knobs: `BUILD_MODEL`, `REVIEW_MODEL`, `STALL_S`, `TOOL_STALL_S`, `THINK_S`, `MAX_RETRIES`,
 `MAX_FIXES`, `CHECK_TIMEOUT`, `LANE_TIMEOUT`, `NO_COMMIT_S` (900; `0` disables: a running builder
-with no new commit this long raises a blocker the lead sees at once), `NO_REVIEW=1`, `CA_DASH=0`, `CA_DASH_PORT`,
+with no new commit this long raises a blocker the lead sees at once), `FIRST_WRITE_S` (300) and `READ_STREAK` (25) (the runner steers a builder
+that stays this long or reads this many times without changing a file to make its first change; `0` disables each, a brief line
+`WRITE_FIRST: off` disables both), `NO_REVIEW=1`, `CA_DASH=0`, `CA_DASH_PORT`,
 `CA_REGISTRY`, `CA_CREDENTIALS`, `RATE_WAIT_S` (1800), `RATE_BACKOFF_S` (45), `NET_WAIT_S` (1800),
 `CA_MAX_LANES_PER_MODEL` (e.g. `maas/glm-5.3=2,default=4`, `off`), `CA_DASH_HOSTS` (extra dashboard hosts for a proxy).

@@ -67,8 +67,12 @@ summaries, not transcripts.
   - "only touch <files>", "do not ask questions", the safety rules from the template.
   - no separate self-review step: the runner's reviewer gate and your own verification cover it,
     and the worker commits only steps that work, so a "re-read and fix" step just burns time.
-  - no MODEL line by default: flash builds every lane, GLM 5.3 reviews. Add `MODEL: maas/glm-5.3`
-    only for very complex lanes (many files across modules, long context, hard design reasoning).
+  - no MODEL line: flash builds every lane, GLM 5.3 reviews. Keep it that way even for complex lanes:
+    a GLM 5.3 builder tends to read for 15 to 40 minutes before its first edit (measured on the 0.9.0
+    lanes: two flash lanes finished in 16 and 18 minutes, two GLM 5.3 builders went 15 and 40 minutes
+    without writing a file). Write first, let the checks and the reviewers drive the fixes. The runner
+    nudges a builder that reads 25 times or stays 5 minutes without changing a file (`FIRST_WRITE_S`,
+    `READ_STREAK`; a brief line `WRITE_FIRST: off` turns it off).
   - the worker runs only the check for the step before each commit; the runner runs every CHECK
     line once at the end. Do not ask for the whole suite per step: it multiplies the lane time.
 - Step reviews are on by default: each `step N:` commit gets a short read-only review (the review

@@ -85,7 +85,7 @@ export function blockerAnswered(dir, blocker) {
   try {
     if (fs.existsSync(path.join(dir, 'BLOCKER_ACK'))) return true;
     const at = Number(blocker && blocker.at) || 0;
-    return fs.readdirSync(path.join(dir, 'inbox')).some((f) => f.endsWith('.txt') && !/stepreview|question|sleep|helper/i.test(f) && (Number((f.match(/^(\d+)/) || [])[1]) || 0) > at);
+    return fs.readdirSync(path.join(dir, 'inbox')).some((f) => f.endsWith('.txt') && !/stepreview|question|sleep|helper|nudge/i.test(f) && (Number((f.match(/^(\d+)/) || [])[1]) || 0) > at);
   } catch { return false; }
 }
 export async function cmdWait(args) {
